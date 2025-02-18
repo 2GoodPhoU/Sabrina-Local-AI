@@ -1,0 +1,7 @@
+# Ignore AI models & cache files
+models/
+*.wav
+*.mp3
+*.log
+__pycache__/
+node_modules/
