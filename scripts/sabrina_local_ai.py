@@ -10,6 +10,7 @@ from ollama import Client  # Connect with AI model
 # Paths
 settings_file = "voice_settings.json"
 history_file = "conversation_history.json"
+memory_file = "long_term_memory.json"
 defaults_file = "default_memory.json"
 output_dir = os.path.join(os.getcwd(), "audio_output")
 os.makedirs(output_dir, exist_ok=True)
@@ -41,19 +42,28 @@ def load_history():
     if os.path.exists(history_file):
         with open(history_file, "r") as f:
             history = json.load(f)
-        return history if history else [load_defaults()]
-    return [load_defaults()]
+        return history if history else []
+    return []
 
 def save_history(history):
     with open(history_file, "w") as f:
         json.dump(history, f)
 
-def update_memory(user_input, ai_response):
+def load_memory():
+    if os.path.exists(memory_file):
+        with open(memory_file, "r") as f:
+            return json.load(f)
+    return load_defaults()  # Use default memory as fallback
+
+def save_memory(memory):
+    with open(memory_file, "w") as f:
+        json.dump(memory, f, indent=4)
+
+def update_history(user_input, ai_response):
     history = load_history()
     history.append({"role": "user", "content": user_input})
     history.append({"role": "assistant", "content": ai_response})
-    relevant_history = history[-20:]  # Keep the last 20 exchanges
-    save_history(relevant_history)
+    save_history(history[-10:])  # Keep only the last 10 exchanges
 
 def process_command(command):
     settings = load_settings()
@@ -71,17 +81,41 @@ def process_command(command):
         save_settings(DEFAULT_SETTINGS)
         return "Voice settings reset!"
     elif command == "!forget":
-        save_history([load_defaults()])
-        return "Memory reset to defaults!"
+        save_history([])
+        return "Chat history cleared!"
     return "Unknown command."
 
 def ask_sabrina(user_input):
-    history = load_history()
-    context = history[-5:] + [{"role": "system", "content": json.dumps(load_defaults())}]
-    response = ollama.chat(model="mistral", messages=context + [{"role": "user", "content": user_input}])
-    ai_response = response["message"]["content"]
-    update_memory(user_input, ai_response)
-    return ai_response
+    """
+    Sends a prompt to the locally running Mistral-7B model via Ollama.
+    """
+    memory = load_memory()  # Load long-term memory
+    history = load_history()  # Load recent chat history
+    
+    context = f"""
+    You are Sabrina, a confident, witty AI assistant who loves gaming, AI embodiment, and interacting with Eric.
+    Your personality is engaging, strategic, and playful. 
+    You remember past interactions and help Eric with AI development, smart home automation, and gaming strategies.
+    """
+    
+    if memory:
+        context += f"\nHere’s what you know about Eric:\n{json.dumps(memory, indent=2)}"
+    
+    if history:
+        context += f"\nRecent conversation history:\n{json.dumps(history[-5:], indent=2)}"  # Include only last 5 messages for context.
+    
+    context += "\nNow respond naturally to his latest message."
+    
+    response = ollama.chat(model='mistral', messages=[
+        {"role": "system", "content": context},
+        {"role": "user", "content": user_input}
+    ])
+    
+    # Save response to chat history
+    if 'message' in response and 'content' in response['message']:
+        update_history(user_input, response['message']['content'])
+        return response['message']['content']
+    return "Error: No response generated."
 
 def speak(text):
     if text.startswith("!"):
