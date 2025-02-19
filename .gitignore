@@ -1,7 +1,13 @@
-# Ignore AI models & cache files
-models/
-*.wav
-*.mp3
-*.log
+# Ignore Docker volumes & logs
+open-webui-data/
+ollama_data/
+
+# Ignore Python and IDE files
 __pycache__/
-node_modules/
+*.pyc
+*.pyo
+*.pyd
+*.swp
+.DS_Store
+.vscode/
+.env
