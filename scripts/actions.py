@@ -1,26 +1,53 @@
 """
-Handles mouse/keyboard automation & PC interaction.
-✅ actions.py (Handles Interactions)
-move_mouse_to(object): Moves cursor to detected objects
-click(): Clicks detected UI elements
-press_key(key): Simulates keyboard input
+4️⃣ actions.py – PC Automation & Input Simulation
+🔹 Purpose: Allows Sabrina to interact with your PC via keyboard & mouse automation.
+🔹 Key Functions:
+✔ move_mouse_to(object) – Moves the cursor to detected UI elements.
+✔ click() – Clicks on detected objects.
+✔ press_key(key) – Simulates keyboard input.
+🔹 Use Cases:
+✅ Enables automated UI interactions (e.g., clicking buttons, selecting text).
+✅ Supports keyboard automation for hands-free control.
+✅ Assists in navigating applications using AI-driven inputs.
 """
-from ultralytics import YOLO
-import numpy as np
-import platform
-import os
-import pygetwindow as gw
-import time
-import mss
-import pytesseract
 import pyautogui
-import cv2
-from TTS.api import TTS
-from pydub import AudioSegment
-import json
-from ollama import Client  # Connect with AI model
-import subprocess
-def click_on_object(x, y):
-    """Moves mouse and clicks a detected object"""
-    pyautogui.moveTo(x, y, duration=0.2)
-    pyautogui.click()
+import time
+
+class Actions:
+    def __init__(self):
+        """Initialize the Actions class for mouse and keyboard automation."""
+        pass
+    
+    def move_mouse_to(self, x, y, duration=0.2):
+        """Moves the cursor to a specified (x, y) coordinate."""
+        pyautogui.moveTo(x, y, duration=duration)
+    
+    def click(self):
+        """Clicks at the current cursor position."""
+        pyautogui.click()
+    
+    def click_on_object(self, x, y):
+        """Moves mouse to the detected object and clicks it."""
+        self.move_mouse_to(x, y)
+        self.click()
+    
+    def press_key(self, key):
+        """Simulates a keyboard key press."""
+        pyautogui.press(key)
+    
+    def type_text(self, text, interval=0.1):
+        """Types the given text with a small delay between keystrokes."""
+        pyautogui.write(text, interval=interval)
+    
+    def scroll(self, amount):
+        """Scrolls the mouse up or down by a specified amount."""
+        pyautogui.scroll(amount)
+
+if __name__ == "__main__":
+    actions = Actions()
+    print("Testing Actions Module...")
+    actions.move_mouse_to(500, 500)
+    actions.click()
+    actions.press_key("enter")
+    actions.type_text("Hello, Sabrina!")
+    actions.scroll(-5)

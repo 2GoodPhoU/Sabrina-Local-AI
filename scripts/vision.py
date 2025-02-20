@@ -1,115 +1,76 @@
 """
-✅ What This Does
-
-Detects the active application window dynamically
-Switches between full-screen vision and app-specific vision
-Extracts text in real-time
-Uses efficient screen capture to prevent lag
-🚀 This will allow Sabrina to seamlessly look at your entire screen OR specific apps.
-
-Handles real-time OCR & object detection.
-
-✅ vision.py (Handles AI Vision)
-Captures screen
-Runs OCR (Tesseract)
-Runs object detection (YOLO)
-Calls voice feedback (voice.speak()) when detecting objects or text
+1️⃣ vision.py – AI-Powered Screen Analysis & Object Detection
+🔹 Purpose: Enables real-time AI vision for OCR, object detection, and UI automation.
+🔹 Key Functions:
+✔ Detects active application windows dynamically.
+✔ Switches between full-screen vision & app-specific vision as needed.
+✔ Extracts text from screen using OCR (Tesseract or PaddleOCR).
+✔ Identifies UI elements & objects using YOLO (deep learning object detection).
+✔ Efficient screen capturing for low-latency performance.
+🔹 Use Cases:
+✅ Enables Sabrina to "see" your screen & assist dynamically.
+✅ Helps in navigating UI elements for automation tasks.
+✅ Supports text extraction for real-time reading & command execution.
 """
-from ultralytics import YOLO
 import numpy as np
-import platform
-import os
 import pygetwindow as gw
-import time
 import mss
-import pytesseract
-import pyautogui
 import cv2
-from TTS.api import TTS
-from pydub import AudioSegment
-import json
-from ollama import Client  # Connect with AI model
-import subprocess
+import pytesseract
+from ultralytics import YOLO
+from scipy.io.wavfile import write
 
-def capture_screen(region=None):
-    """
-    Captures a screenshot of the entire screen or a specific region.
+class Vision:
+    def __init__(self, model_path="yolov8n.pt"):
+        """Initialize the Vision module with object detection and OCR capabilities."""
+        self.model = YOLO(model_path)
     
-    :param region: Tuple (x, y, width, height) to capture a specific area.
-    :return: Screenshot image (PIL Image)
-    """
-    if region:
-        return pyautogui.screenshot(region=region)
-    return pyautogui.screenshot()
-
-def get_active_window_region():
-    """Get the bounding box (x, y, width, height) of the currently active window"""
-    window = gw.getActiveWindow()
-    if window is None:
-        return None  # No active window found
-    x, y, width, height = window.left, window.top, window.width, window.height
-    return (x, y, width, height)
-
-def detect_objects():
-    """Capture screen and detect objects using YOLOv8"""
-    model = YOLO("yolov8n.pt")  # Load model
-    with mss.mss() as sct:
-        while True:
-            screenshot = sct.grab(sct.monitors[1])  # Full-screen capture
-            img = np.array(screenshot)
-
-            if img is None or img.size == 0:
-                print("Warning: Empty image captured, skipping frame.")
-                continue  # Skip processing
-
-            # Convert to RGB
-            frame = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-            # Run object detection
-            results = model(frame)
-
-            # Draw bounding boxes
-            for result in results:
-                for box in result.boxes.xyxy:
-                    x1, y1, x2, y2 = map(int, box)
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-            # Display detection results
-            cv2.imshow("Object Detection", frame)
-
-            # Quit with 'q'
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-
-    cv2.destroyAllWindows()
-
-# Run AI Object Vision
-detect_objects()
-
-def live_screen_ocr():
-    """Real-time OCR with dynamic switching between full-screen and app capture"""
-    while True:
-        region = get_active_window_region()  # Get active app region
-        img = capture_screen(region)  # Capture either full screen or app
-
+    def capture_screen(self, region=None):
+        """Captures a screenshot of the entire screen or a specific region."""
+        with mss.mss() as sct:
+            screenshot = sct.grab(region if region else sct.monitors[1])
+            return np.array(screenshot)
+    
+    def get_active_window_region(self):
+        """Gets the active application window region."""
+        active_win = gw.getActiveWindow()
+        if active_win:
+            return (active_win.left, active_win.top, active_win.width, active_win.height)
+        return None
+    
+    def run_ocr(self):
+        """Runs OCR on the active screen or active application window."""
+        region = self.get_active_window_region()
+        img = self.capture_screen(region)
+        text = pytesseract.image_to_string(img)
+        if text.strip():
+            print("OCR Result:", text)
+            return text
+        print("No text detected.")
+        return ""
+    
+    def detect_objects(self):
+        """Runs real-time object detection on the screen."""
+        img = self.capture_screen()
         if img is None or img.size == 0:
-            print("Warning: Empty screenshot captured, skipping OCR.")
-            continue
+            print("Warning: Empty image captured, skipping object detection.")
+            return []
+        
+        results = self.model(img)
+        detected_objects = []
+        for result in results:
+            for box in result.boxes.xyxy:
+                x1, y1, x2, y2 = map(int, box)
+                detected_objects.append((x1, y1, x2, y2))
+                cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        
+        cv2.imshow("Object Detection", img)
+        cv2.waitKey(1)
+        return detected_objects
 
-        # Apply OCR
-        extracted_text = pytesseract.image_to_string(img)
-
-        # Print detected text
-        print("\n=== Detected Text ===\n", extracted_text.strip())
-
-        # Show vision window
-        cv2.imshow("Live Screen Capture", np.array(img))  # Convert PIL image to OpenCV format
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-        time.sleep(0.5)  # Adjust for performance
-
-    cv2.destroyAllWindows()
-
-
-# Run AI Vision
-live_screen_ocr()
+if __name__ == "__main__":
+    vision = Vision()
+    text = vision.run_ocr()
+    print("Extracted Text:", text)
+    detected_objects = vision.detect_objects()
+    print("Detected Objects:", detected_objects)
