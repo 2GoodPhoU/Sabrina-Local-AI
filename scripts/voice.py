@@ -42,7 +42,3 @@ class Voice:
                 print(f"Error playing audio: {e}")
         else:
             print("Error: Audio file not found!")
-
-if __name__ == "__main__":
-    v = Voice()
-    v.speak("Hello! This is a test of the Jenny TTS system.")

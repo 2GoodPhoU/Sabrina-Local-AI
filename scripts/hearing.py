@@ -32,7 +32,3 @@ class Hearing:
         """Transcribe recorded audio using Whisper."""
         result = self.model.transcribe(file_path)
         return result["text"]
-
-if __name__ == "__main__":
-    h = Hearing()
-    print("Transcription:", h.listen())

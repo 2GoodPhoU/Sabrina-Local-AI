@@ -19,12 +19,18 @@ import cv2
 import pytesseract
 from ultralytics import YOLO
 from scipy.io.wavfile import write
+import torch
+
+import os
 
 class Vision:
     def __init__(self, model_path="yolov8n.pt"):
         """Initialize the Vision module with object detection and OCR capabilities."""
-        self.model = YOLO(model_path)
-    
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"YOLO model file '{model_path}' not found. Download it first.")
+        
+        self.model = YOLO(model_path, task="detect")
+
     def capture_screen(self, region=None):
         """Captures a screenshot of the entire screen or a specific region."""
         with mss.mss() as sct:
@@ -67,10 +73,3 @@ class Vision:
         cv2.imshow("Object Detection", img)
         cv2.waitKey(1)
         return detected_objects
-
-if __name__ == "__main__":
-    vision = Vision()
-    text = vision.run_ocr()
-    print("Extracted Text:", text)
-    detected_objects = vision.detect_objects()
-    print("Detected Objects:", detected_objects)

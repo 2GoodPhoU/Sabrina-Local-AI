@@ -42,12 +42,3 @@ class Actions:
     def scroll(self, amount):
         """Scrolls the mouse up or down by a specified amount."""
         pyautogui.scroll(amount)
-
-if __name__ == "__main__":
-    actions = Actions()
-    print("Testing Actions Module...")
-    actions.move_mouse_to(500, 500)
-    actions.click()
-    actions.press_key("enter")
-    actions.type_text("Hello, Sabrina!")
-    actions.scroll(-5)

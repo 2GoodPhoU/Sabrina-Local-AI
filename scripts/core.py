@@ -27,7 +27,7 @@ class SabrinaCore:
         self.actions = Actions()
         self.memory_file = "memory.json"
         self.history = self.load_history()
-    
+        
     def load_history(self):
         """Load conversation history from a file."""
         if os.path.exists(self.memory_file):
