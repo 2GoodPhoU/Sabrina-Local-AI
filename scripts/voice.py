@@ -10,35 +10,21 @@
 ✅ Provides AI-generated responses via voice output.
 ✅ Enhances natural interaction with Sabrina.
 """
-import os
-import subprocess
 from TTS.api import TTS  # Jenny TTS
 
 class Voice:
     def __init__(self, tts_model="tts_models/en/jenny/jenny"):
         """Initialize the Voice class with the specified TTS model."""
         self.tts = TTS(tts_model)
-        self.output_audio_path = "output.wav"
+        self.output_audio_path = "/app/output.wav"  # Ensure file saves in the correct directory
     
     def speak(self, text):
-        """Convert text to speech and play the generated audio."""
+        """Convert text to speech and save the generated audio."""
         if not text.strip():
             print("Error: No text provided for speech synthesis.")
             return
         
+        # Generate the speech file
         self.tts.tts_to_file(text=text, file_path=self.output_audio_path)
-        self.play_audio(self.output_audio_path)
-    
-    def play_audio(self, file_path):
-        """Play the generated speech audio file."""
-        if os.path.exists(file_path):
-            try:
-                if os.name == "nt":  # Windows
-                    subprocess.run(["ffplay", "-nodisp", "-autoexit", file_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                else:  # macOS/Linux
-                    subprocess.run(["afplay", file_path])
-                os.remove(file_path)  # Clean up after playback
-            except Exception as e:
-                print(f"Error playing audio: {e}")
-        else:
-            print("Error: Audio file not found!")
+        print(f"✅ Audio file generated at {self.output_audio_path}")
+        return self.output_audio_path  # Return the file path instead of playing

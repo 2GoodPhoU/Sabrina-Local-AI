@@ -1,0 +1,10 @@
+version: "3.8"
+
+services:
+  vision:
+    build:
+      context: ../..
+      dockerfile: docker/vision/vision.Dockerfile
+    container_name: vision-container
+    ports:
+      - "8200:8200"  # Expose vision API

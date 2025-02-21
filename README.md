@@ -2,6 +2,9 @@
 
 AI Assistant
 
+install:
+https://www.freedesktop.org/wiki/Software/PulseAudio/Ports/Windows/Support/
+
 How to use:
 
 python -m venv .venv
@@ -39,23 +42,56 @@ We’ll go through each script and reorganize them into a structured package.
 
 New Project Structure (Planned)
 
-SABRINA-LOCAL-AI/
-│── scripts/ 
-│   │── __init__.py          # Make this a Python package
-│   │── core.py              # Core AI logic (merged sabrina_local_ai.py)
-│   │── vision.py            # Handles screen monitoring & OCR
-│   │── voice.py             # Manages TTS & ASR
-│   │── actions.py           # PC automation
-│   │── rtod.py              # (Need to define role)
-│   └── config.py            # Stores AI settings & system paths
-│── data/
-│   │── conversation_history.json
-│   │── default_memory.json
-│   │── voice_settings.json
-│── startup.sh               # Auto-start script
-│── requirements.txt         # All dependencies
-│── README.md                # Project Documentation
-└── main.py                  # Entry point for running Sabrina AI
+Sabrina AI
+│── configs/                 # 🛠️ Configuration files
+│   ├── system.yaml          # Global system settings
+│   ├── docker-compose.yml   # Docker container definitions
+│   ├── api_endpoints.json   # API route definitions
+│   ├── dependencies.txt     # Package dependencies (pip, apt, etc.)
+│
+│── scripts/                 # 🎭 Core scripts (high-speed execution)
+│   ├── pc_automation.py     # Controls keyboard/mouse inputs
+│   ├── shared_memory.py     # Manages ZeroMQ/Redis shared memory
+│   ├── vision_processing.py # OCR & object recognition (PaddleOCR/OpenCV)
+│   ├── hearing.py       # Whisper ASR for speech-to-text
+│   ├── voice.py      # Jenny TTS for speech synthesis
+│
+│── api/                     # 🌐 API services (FastAPI/Flask)
+│   ├── main.py              # API gateway (manages interactions)
+│   ├── vision_api.py        # Handles vision requests
+│   ├── voice_api.py         # Handles voice requests
+│   ├── automation_api.py    # Handles PC control & automation
+│
+│── docker/                  # 🐳 Docker files for modular services
+│   ├── vision.Dockerfile    # OCR & Object Detection (PaddleOCR)
+│   ├── voice.Dockerfile     # Jenny TTS
+│   ├── hearing.Dockerfile   # Whisper ASR
+│   ├── home_assistant.Dockerfile # Smart home control
+│   ├── base.Dockerfile      # Base image (common dependencies)
+│
+│── containers/              # 📦 Containerized runtime storage (volumes, logs)
+│   ├── vision/              # Vision model output/logs
+│   ├── voice/               # Voice processing logs
+│   ├── hearing/             # Hearing processing logs
+│   ├── automation/          # PC control logs
+│
+│── startup/                 # 🚀 Startup & orchestration
+│   ├── start.sh             # Main script to spin up everything
+│   ├── stop.sh              # Clean shutdown script
+│
+│── tests/                   # 🧪 Unit & integration tests
+│   ├── test_vision.py       # Tests for vision processing
+│   ├── test_voice.py        # Tests for AI voice processing
+│   ├── test_hearing.py      # Tests for user voice processing
+│   ├── test_automation.py   # Tests for PC automation
+│
+│── docs/                    # 📖 Documentation & research
+│   ├── architecture.md      # AI embodiment system architecture
+│   ├── api_reference.md     # API endpoints & usage
+│   ├── dependencies.md      # Details of all dependencies
+│
+└── README.md                # 📜 Overview of the project
+
 
 3️⃣ Integrate Screen & Application Awareness
 We need real-time screen visibility so Sabrina can recognize objects, text, and applications.

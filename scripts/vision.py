@@ -13,15 +13,17 @@
 ✅ Supports text extraction for real-time reading & command execution.
 """
 import numpy as np
-import pygetwindow as gw
 import mss
 import cv2
 import pytesseract
 from ultralytics import YOLO
 from scipy.io.wavfile import write
 import torch
-
+import pyautogui
 import os
+
+# Prevent pyautogui from trying to use a display
+os.environ['DISPLAY'] = ':0'
 
 class Vision:
     def __init__(self, model_path="yolov8n.pt"):
@@ -37,16 +39,17 @@ class Vision:
             screenshot = sct.grab(region if region else sct.monitors[1])
             return np.array(screenshot)
     
-    def get_active_window_region(self):
-        """Gets the active application window region."""
-        active_win = gw.getActiveWindow()
-        if active_win:
-            return (active_win.left, active_win.top, active_win.width, active_win.height)
-        return None
+    # Example: Get active window title (without GUI)
+    def get_active_window():
+        try:
+            return pyautogui.getActiveWindowTitle()  # Might fail in a headless environment
+        except Exception as e:
+            print(f"Error getting window title: {e}")
+            return None
     
     def run_ocr(self):
         """Runs OCR on the active screen or active application window."""
-        region = self.get_active_window_region()
+        region = self.get_active_window()
         img = self.capture_screen(region)
         text = pytesseract.image_to_string(img)
         if text.strip():

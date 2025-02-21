@@ -14,8 +14,8 @@ import os
 import json
 import time
 from actions import Actions
-from vision import Vision
-from voice import Voice
+from scripts.vision import Vision
+from scripts.voice import Voice
 from hearing import Hearing
 
 class SabrinaCore:
