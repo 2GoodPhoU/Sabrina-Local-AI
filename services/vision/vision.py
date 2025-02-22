@@ -96,15 +96,24 @@ class Vision:
         """Detect UI objects using YOLO and return structured JSON data."""
         results = self.model(image_path)
         detections = []
+        
         for result in results:
-            for box in result.boxes.xyxy:
-                label = result.names[int(box[4])]
-                detections.append({
-                    "type": label,
-                    "coordinates": [int(box[0]), int(box[1]), int(box[2]), int(box[3])],
-                    "confidence": float(box[4])
-                })
+            for i, box in enumerate(result.boxes.xyxy):
+                try:
+                    # Check if label index is valid
+                    label_index = int(result.boxes.cls[i])  # Proper way to get class index
+                    label = result.names[label_index] if label_index < len(result.names) else "Unknown"
+                    
+                    detections.append({
+                        "type": label,
+                        "coordinates": [int(box[0]), int(box[1]), int(box[2]), int(box[3])],
+                        "confidence": float(result.boxes.conf[i])  # Get confidence properly
+                    })
+                except IndexError as e:
+                    print(f"[Error] IndexError in YOLO detection: {e}")
+        
         return detections
+
 
     def get_active_window(self):
         """Retrieve the currently active window title."""
