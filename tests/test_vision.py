@@ -9,7 +9,7 @@ from unittest.mock import patch, MagicMock
 import pytesseract
 import mss
 import pyautogui
-from scripts.vision import capture_screen, get_active_window_region, detect_objects, live_screen_ocr
+from services.vision.vision import capture_screen, get_active_window_region, detect_objects, live_screen_ocr
 
 class TestVisionFunctions(unittest.TestCase):
 

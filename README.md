@@ -1,171 +1,146 @@
-# Sabrina-Local-AI
+# Sabrina AI - Local AI Assistant
 
-AI Assistant
+## **What is Sabrina AI?**
+Sabrina AI is a **local AI-powered personal assistant** that integrates **voice interaction, screen awareness, and PC automation** to assist in daily tasks. Unlike cloud-based AI, Sabrina runs **entirely on your machine**, ensuring **privacy and full control** over interactions.
 
-install:
-https://www.freedesktop.org/wiki/Software/PulseAudio/Ports/Windows/Support/
+### **Key Features:**
+- **Real-time Speech Recognition** (via Whisper ASR)
+- **Text-to-Speech Synthesis** (via Jenny TTS API)
+- **Screen OCR & Object Detection** (via OpenCV, YOLO, Tesseract)
+- **PC Automation** (via PyAutoGUI for keyboard & mouse control)
+- **Voice Command Execution** (hands-free interaction)
+- **Smart Home Integration** (Google Home & Home Assistant)
 
-How to use:
+---
 
-python -m venv .venv
-.venv\Scripts\Activate
-pip install -r requirements.txt
-cd into scripts
-python sabrina_local_ai.py
+## **How to Set Up & Use Sabrina AI**
 
+### **1️⃣ Install Python 3.10+**
+Ensure you have Python installed:
+```bash
+python --version  # Ensure version 3.10 or higher
+```
+If not installed, download it from [Python’s official site](https://www.python.org/downloads/).
 
-
-install Python 3.10
-1️⃣ Set Up a Python Virtual Environment
-Before working on the repo, let’s set up a clean Python environment to avoid dependency conflicts.
-
-Commands to Set Up a Virtual Environment
-
+### **2️⃣ Set Up a Python Virtual Environment**
+Create and activate a virtual environment to avoid dependency conflicts:
+```bash
 # Create virtual environment
 python -m venv sabrina_env
 
 # Activate the environment
 # Windows:
 sabrina_env\Scripts\activate
-
 # Linux/macOS:
 source sabrina_env/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
+```
 
-This ensures your Python scripts run in an isolated environment.
+### **3️⃣ Start the AI Components**
+To launch **Sabrina AI**, follow these steps:
 
+#### **Step 1: Spin Up Required Docker Containers**
+```bash
+# Ensure Docker is running
+docker --version  # Check if Docker is installed
 
-2️⃣ Review & Refactor Existing Code
-We’ll go through each script and reorganize them into a structured package.
+# Build and start voice & vision services
+cd docker
+docker-compose up -d
+```
 
-New Project Structure (Planned)
+#### **Step 2: Run Sabrina AI Core**
+```bash
+cd core
+python core.py
+```
 
-Sabrina AI
-│── configs/                 # 🛠️ Configuration files
-│   ├── system.yaml          # Global system settings
-│   ├── docker-compose.yml   # Docker container definitions
-│   ├── api_endpoints.json   # API route definitions
-│   ├── dependencies.txt     # Package dependencies (pip, apt, etc.)
-│
-│── scripts/                 # 🎭 Core scripts (high-speed execution)
-│   ├── pc_automation.py     # Controls keyboard/mouse inputs
-│   ├── shared_memory.py     # Manages ZeroMQ/Redis shared memory
-│   ├── vision_processing.py # OCR & object recognition (PaddleOCR/OpenCV)
-│   ├── hearing.py       # Whisper ASR for speech-to-text
-│   ├── voice.py      # Jenny TTS for speech synthesis
-│
-│── api/                     # 🌐 API services (FastAPI/Flask)
-│   ├── main.py              # API gateway (manages interactions)
-│   ├── vision_api.py        # Handles vision requests
-│   ├── voice_api.py         # Handles voice requests
-│   ├── automation_api.py    # Handles PC control & automation
-│
-│── docker/                  # 🐳 Docker files for modular services
-│   ├── vision.Dockerfile    # OCR & Object Detection (PaddleOCR)
-│   ├── voice.Dockerfile     # Jenny TTS
-│   ├── hearing.Dockerfile   # Whisper ASR
-│   ├── home_assistant.Dockerfile # Smart home control
-│   ├── base.Dockerfile      # Base image (common dependencies)
-│
-│── containers/              # 📦 Containerized runtime storage (volumes, logs)
-│   ├── vision/              # Vision model output/logs
-│   ├── voice/               # Voice processing logs
-│   ├── hearing/             # Hearing processing logs
-│   ├── automation/          # PC control logs
-│
-│── startup/                 # 🚀 Startup & orchestration
-│   ├── start.sh             # Main script to spin up everything
-│   ├── stop.sh              # Clean shutdown script
-│
-│── tests/                   # 🧪 Unit & integration tests
-│   ├── test_vision.py       # Tests for vision processing
-│   ├── test_voice.py        # Tests for AI voice processing
-│   ├── test_hearing.py      # Tests for user voice processing
-│   ├── test_automation.py   # Tests for PC automation
-│
-│── docs/                    # 📖 Documentation & research
-│   ├── architecture.md      # AI embodiment system architecture
-│   ├── api_reference.md     # API endpoints & usage
-│   ├── dependencies.md      # Details of all dependencies
-│
-└── README.md                # 📜 Overview of the project
+### **4️⃣ Interacting with Sabrina AI**
+Once running, Sabrina listens for voice commands, analyzes your screen, and performs automation tasks.
 
+#### **Basic Commands:**
+| Command        | Functionality |
+|---------------|--------------|
+| `!say Hello`  | Speak aloud using TTS |
+| `!click`      | Click at the cursor position |
+| `!move X Y`   | Move cursor to (X, Y) |
+| `!type Hello` | Type ‘Hello’ |
+| `!exit`       | Shut down AI assistant |
 
-3️⃣ Integrate Screen & Application Awareness
-We need real-time screen visibility so Sabrina can recognize objects, text, and applications.
-This will be handled via OCR & screen monitoring.
+---
 
-Planned Libraries & Features
-Tesseract OCR → Extract on-screen text.
-PyGetWindow → Detect currently focused window.
-MSS (Screen Capture) → Capture the screen in real time.
+## **Project Structure**
+```
+/ai-embodiment
+│-- /api
+│   │-- voice_api.py
+│-- /core
+│   │-- core.py
+│   │-- memory.py
+│   │-- config.py
+│-- /services
+│   │-- /hearing
+│   │   │-- hearing.py
+│   │-- /vision
+│   │   │-- vision.py
+│   │-- /automation
+│   │   │-- automation.py
+│   │-- /smart_home
+│   │   │-- smart_home.py
+│   │-- /voice
+│   │   │-- voice.py
+│-- /models
+│   │-- nlp_model.py
+│   │-- vision_model.py
+│   │-- automation_model.py
+│   │-- memory_model.py
+│-- /scripts
+│   │-- start_services.py
+│   │-- setup_env.py
+│   │-- deploy_containers.py
+│-- /config
+│   │-- settings.yaml
+│   │-- api_keys.env
+│-- /data
+│   │-- logs/
+│   │-- db/
+│   │-- cache/
+│-- /tests
+│   │-- test_hearing.py
+│   │-- test_vision.py
+│   │-- test_automation.py
+│   │-- test_memory.py
+│-- /docs
+│   │-- architecture.md
+│   │-- system_overview.md
+│-- /docker
+│   │-- /voice
+│   │   │-- Dockerfile
+│   │   │-- docker-compose.yml
+│   │-- /smart_home
+│   │   │-- Dockerfile
+│   │   │-- docker-compose.yml
+│-- README.md
+│-- requirements.txt
+```
 
-4️⃣ Enable Seamless Window Switching
-Sabrina needs to focus on different applications dynamically.
+### **5️⃣ Stopping Sabrina AI**
+To shut down Sabrina AI and its services:
+```bash
+# Stop AI Core
+Ctrl + C  # In terminal running core.py
 
-Solution
-PyGetWindow → Get & switch active windows.
-PyAutoGUI → Automate window switching.
+# Stop and remove all running containers
+cd docker
+docker-compose down
+```
 
-5️⃣ Implement PC Automation & Command Execution
-Sabrina should control the PC & execute commands dynamically.
+### **6️⃣ Additional Notes & Future Enhancements**
+Planned improvements include:
+- **Advanced Conversational Memory**
+- **Real-time Event-Driven Automations**
+- **3D Virtual AI Avatar Integration**
 
-Planned Libraries
-PyAutoGUI → Mouse & keyboard automation.
-Subprocess → Execute system commands.
-
-6️⃣ Voice-Guided Execution
-Sabrina should provide real-time verbal feedback.
-
-Planned Features
-Jenny TTS → Speak responses.
-Whisper ASR → Process voice commands.
-
-
-
-
-
-
-
-
-
-
-
-Manually Start Node-RED First (Without PM2)
-
-1️⃣ Start Node-RED normally:
-powershell
-"node-red"
-
-
-2️⃣ Try accessing it in your browser:
-http://localhost:1880
-
-
-🔥 Proposed Design for AI Vision & Automation
-🟢 Core Technologies
-Function	Tool/Library
-Screen Capture (Full or App-Specific)	mss, pygetwindow, pywinctl
-OCR (Text Recognition)	pytesseract
-Object Recognition (Non-Text Elements)	YOLOv8, OpenCV
-PC Automation (Mouse, Keyboard)	pyautogui, keyboard
-Voice Interaction	Jenny TTS, pyttsx3
-Voice Commands (Listening to You)	Whisper ASR
-✅ Phase 1: Set Up Full-Screen & App-Specific Vision
-We need Sabrina to see both the entire screen and specific applications. Instead of scanning everything, we will:
-
-Detect active applications & windows
-Capture only the relevant region
-
-✅ Phase 2: Object Detection Instead of Just Text
-Since you want Sabrina to see objects, we’ll integrate YOLOv8 (for object recognition) to detect UI elements, buttons, and on-screen objects.
-
-✅ Phase 3: Automating PC Actions
-Now that Sabrina can see the screen, let’s allow her to perform actions like: 1️⃣ Clicking buttons on screen
-2️⃣ Pressing keys when events are detected
-3️⃣ Executing scripts or programs based on vision
-
-✅ Phase 4: Voice Responses While Acting
-Sabrina should talk while performing actions using Jenny TTS.
+For any issues, refer to the [architecture documentation](docs/architecture.md) or open an issue in the repository.

@@ -1,0 +1,11 @@
+services:
+  voice:
+    build:
+      dockerfile: voice.Dockerfile
+    container_name: voice-container
+    ports:
+      - "8100:8100"
+    environment:
+      - PULSE_SERVER=tcp:host.docker.internal:4713
+    volumes:
+      - ~/.config/pulse:/root/.config/pulse  # Share PulseAudio config

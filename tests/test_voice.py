@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 import time
 import subprocess
-from scripts.voice import speak
+from docker.voice.voice import speak
 
 class TestVoiceFunctions(unittest.TestCase):
 

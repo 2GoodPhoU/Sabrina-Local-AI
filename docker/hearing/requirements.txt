@@ -1,7 +1,0 @@
-fastapi
-uvicorn
-scipy
-sounddevice
-numpy
-openai-whisper
-torch

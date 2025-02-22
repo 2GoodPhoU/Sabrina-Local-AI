@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import unittest
 from unittest.mock import patch
 import pyautogui
-from scripts.actions import click_on_object
+from services.automation.automation import click_on_object
 
 class TestActions(unittest.TestCase):
 

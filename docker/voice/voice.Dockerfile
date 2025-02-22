@@ -11,12 +11,12 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirement file and install dependencies
-COPY docker/voice/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY voice_docker_requirements.txt .
+RUN pip install --no-cache-dir -r voice_docker_requirements.txt
 
 # Copy API and scripts
-COPY api/voice_api.py /app/api/voice_api.py
-COPY scripts/voice.py /app/scripts/voice.py
+COPY voice_api.py /app/voice_api.py
+COPY voice.py /app/voice.py
 
 # Command to start the API
-CMD ["python", "/app/api/voice_api.py"]
+CMD ["python", "/app/voice_api.py"]
