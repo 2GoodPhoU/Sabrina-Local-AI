@@ -18,10 +18,11 @@ import cv2
 import numpy as np
 import pytesseract
 import json
-import time
+import torch
 import os
 from datetime import datetime
 from enum import Enum
+from ultralytics import YOLO
 
 class CaptureMode(Enum):
     FULL_SCREEN = "full_screen"
@@ -46,7 +47,64 @@ class Vision:
         self.previous_ui_elements = []
         self.capture_directory = "captures"
         self.max_images = 5  # Limit stored images to 5
-        os.makedirs(self.capture_directory, exist_ok=True)
+        self.model = None
+        self.model_name = "custom_yolo.pt"
+        self.data_set = "custom_dataset.yaml"
+        self.load_model()
+
+    def load_model(self):
+        # Load the YOLO model safely
+        
+        if not os.path.exists(self.model_name):
+            print("Model not found. Training a new model...")
+            self.create_model()
+            #train_model(model_name, "custom_dataset.yaml")
+        else:
+            print("Model found. Loading the existing model...")
+            self.model = YOLO(self.model_name)
+
+    def train_model(self):
+        # Train the YOLO model
+        print("Training the YOLO model")
+
+        if os.path.exists(self.data_set):
+            print("Custom dataset found. Training the model on the custom dataset.")
+            # Train the model
+            self.model.train(data=self.data_set, epochs=50, device='cuda')
+        else:
+            print("Custom dataset not found. Training the model on the COCO8 example dataset.")
+            # Train the model on the COCO8 example dataset for 100 epochs
+            self.model.train(data="coco8.yaml", epochs=100, device='cuda', imgsz=640, weights="yolov8n.pt", project='runs/train', name=self.model_name, exist_ok=True)
+
+    def create_model(self):
+        # Create a new YOLO model
+        self.model = YOLO("yolov8n.pt")
+
+        if torch.cuda.is_available():
+            print("Cuda is available, setting the model to use the GPU")
+            # Set the model to use the GPU
+            self.model.to('cuda')
+        else:
+            print("Cuda is not available, setting the model to use the CPU")
+            # Set the model to use the CPU
+            self.model.to('cpu')
+
+        # Save the trained model
+        self.model.save(self.model_name)  # Save the trained model correctly
+
+    def detect_ui_objects(self, image_path):
+        """Detect UI objects using YOLO and return structured JSON data."""
+        results = self.model(image_path)
+        detections = []
+        for result in results:
+            for box in result.boxes.xyxy:
+                label = result.names[int(box[4])]
+                detections.append({
+                    "type": label,
+                    "coordinates": [int(box[0]), int(box[1]), int(box[2]), int(box[3])],
+                    "confidence": float(box[4])
+                })
+        return detections
 
     def get_active_window(self):
         """Retrieve the currently active window title."""
@@ -141,6 +199,7 @@ class Vision:
             "active_window": self.get_active_window(),
             "active_windows": self.get_all_active_windows(),
             "ocr_text": self.run_ocr().split("\n"),
+            "ui_elements": self.detect_objects(self.get_last_captured_image()),
             "last_capture": self.get_last_captured_image(),
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
@@ -155,6 +214,7 @@ class Vision:
         print("5 - Get Active Windows")
         print("6 - Calculate Specific Screen Region")
         print("7 - Structure Data Output")
+        print("8 - Run YOLO detection on last image")
 
         while True:
             choice = input("Enter choice: ")
@@ -176,6 +236,8 @@ class Vision:
                 print("Screen Region (Left Half):", self.calculate_screen_region(ScreenRegion.LEFT_HALF))
             elif choice == "7":
                 print("Structured Data:", json.dumps(self.structure_data(), indent=4))
+            elif choice == "8":
+                print("YOLO Detection on last image:", self.detect_ui_objects(self.get_last_captured_image()))
             else:
                 print("Invalid choice.")
 
