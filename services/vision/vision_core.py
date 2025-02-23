@@ -59,7 +59,7 @@ class VisionCore:
         """Capture the screen based on the selected mode and save the image."""
         with mss.mss() as sct:
             if mode == CaptureMode.FULL_SCREEN:
-                screenshot = sct.grab(sct.monitors[1])
+                screenshot = sct.grab(sct.monitors[0]) # change to grab input on which montior to capture
             elif mode == CaptureMode.SPECIFIC_REGION and region:
                 screenshot = sct.grab(region)
             elif mode == CaptureMode.ACTIVE_WINDOW:
