@@ -49,7 +49,7 @@ class Vision:
         self.max_images = 5  # Limit stored images to 5
         self.model = None
         self.model_name = "custom_yolo.pt"
-        self.data_set = "custom_dataset.yaml"
+        self.data_sets = ["datasets/dataset1/data.yaml"]
         self.load_model()
 
     def load_model(self):
@@ -58,7 +58,7 @@ class Vision:
         if not os.path.exists(self.model_name):
             print("Model not found. Training a new model...")
             self.create_model()
-            #train_model(model_name, "custom_dataset.yaml")
+            self.train_model()
         else:
             print("Model found. Loading the existing model...")
             self.model = YOLO(self.model_name)
@@ -67,17 +67,14 @@ class Vision:
         # Train the YOLO model
         print("Training the YOLO model")
 
-        if os.path.exists(self.data_set):
+        for data_set in self.data_sets:
             print("Custom dataset found. Training the model on the custom dataset.")
             # Train the model
-            self.model.train(data=self.data_set, epochs=50, device='cuda')
-        else:
-            print("Custom dataset not found. Training the model on the COCO8 example dataset.")
-            # Train the model on the COCO8 example dataset for 100 epochs
-            self.model.train(data="coco8.yaml", epochs=100, device='cuda', imgsz=640, weights="yolov8n.pt", project='runs/train', name=self.model_name, exist_ok=True)
+            self.model.train(data=data_set, epochs=50, device='cuda')
+            self.model.save(self.model_name)  # Save the trained model correctly
 
     def create_model(self):
-        # Create a new YOLO model
+        # Load a pre-trained YOLO-NAS model trained on COCO
         self.model = YOLO("yolov8n.pt")
 
         if torch.cuda.is_available():
@@ -224,6 +221,8 @@ class Vision:
         print("6 - Calculate Specific Screen Region")
         print("7 - Structure Data Output")
         print("8 - Run YOLO detection on last image")
+        print("9 - Run train YOLO model")
+        print("10 - Evaluate YOLO model")
 
         while True:
             choice = input("Enter choice: ")
@@ -247,6 +246,15 @@ class Vision:
                 print("Structured Data:", json.dumps(self.structure_data(), indent=4))
             elif choice == "8":
                 print("YOLO Detection on last image:", self.detect_ui_objects(self.get_last_captured_image()))
+            elif choice == "9":
+                self.train_model()
+            elif choice == "10":
+                if self.model:
+                    print("Evaluating YOLO model...")
+                    #results = self.model.val()
+                    #print("Evaluation Results:", results)
+                else:
+                    print("Model not loaded. Please load or create a model first.")
             else:
                 print("Invalid choice.")
 
