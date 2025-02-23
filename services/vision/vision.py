@@ -55,7 +55,7 @@ class Vision:
     def load_model(self):
         # Load the YOLO model safely
         
-        if not os.path.exists(self.model_name):
+        if not os.path.exists(self.model_folder_path+self.model_name):
             print("Model not found. Training a new model...")
             self.create_model()
             self.train_model()

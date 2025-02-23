@@ -11,7 +11,6 @@
 ✅ Assists in navigating applications using AI-driven inputs.
 """
 import pyautogui
-import time
 
 class Actions:
     def __init__(self):

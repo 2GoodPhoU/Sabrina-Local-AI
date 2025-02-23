@@ -18,7 +18,7 @@ import time
 import os
 import wget
 
-def find_vosk_model(directory="models/"):
+def find_vosk_model(directory="../../models/"):
     """Find the correct Vosk model folder dynamically."""
     if not os.path.exists(directory):
         os.makedirs(directory)
