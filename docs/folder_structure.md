@@ -11,7 +11,7 @@
 │   │-- /hearing  # Voice recognition & processing
 │   │   │-- hearing.py  # Whisper ASR-based voice recognition
 │   │-- /vision  # AI-powered screen analysis & object detection
-│   │-- /vision  # AI-powered screen analysis & object detection
+│   │   │-- constants.py
 │   │   │-- vision_core.py  # Handles screen capture & active window tracking
 │   │   │-- vision_ocr.py  # Extracts text using OCR (Tesseract/PaddleOCR)
 │   │   │-- vision_detection.py  # YOLO-based UI element detection
@@ -43,7 +43,9 @@
 │   │-- cache/  # Temporary cache storage
 │-- /tests  # Unit tests for various modules
 │   │-- test_hearing.py  # Tests for hearing module
-│   │-- test_vision.py  # Tests for vision module
+│   │-- test_vision_core.py  # Tests for vision_core module
+│   │-- test_vision_ocr.py  # Tests for vision_ocr module
+│   │-- test_vision_detection.py  # Tests for vision_detection module
 │   │-- test_automation.py  # Tests for automation module
 │   │-- test_memory.py  # Tests for memory system
 │-- /docs  # Documentation for architecture & system overview

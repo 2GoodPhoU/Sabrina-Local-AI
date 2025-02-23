@@ -12,14 +12,13 @@
 ✅ Processes voice and screen inputs to execute automated actions.
 ✅ Handles context-aware decision-making for AI-human interaction.
 """
-
 import os
 import json
 import time
 import logging
 import requests
 from services.automation.automation import Actions
-from services.vision.vision import Vision
+from services.vision.vision_core import VisionCore
 from services.hearing.hearing import Hearing
 
 # Configure logging
@@ -30,7 +29,7 @@ VOICE_API_URL = "http://localhost:8100/get_file_audio"  # URL of the voice API s
 class SabrinaCore:
     def __init__(self):
         """Initialize the AI Orchestration Engine."""
-        self.vision = Vision()
+        self.vision_core = VisionCore()
         self.hearing = Hearing()
         self.actions = Actions()
         self.memory_file = "memory.json"
@@ -101,7 +100,7 @@ class SabrinaCore:
             logging.info(f"User Input: {user_input}")
             print(f"You: {user_input}")
             
-            screen_text = self.vision.run_ocr()  # Screen analysis
+            screen_text = self.vision_ocr.run_ocr()  # Screen analysis
             logging.info(f"Screen OCR Detected: {screen_text}")
             print(f"Sabrina: {screen_text}")
             
