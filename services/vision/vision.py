@@ -251,8 +251,8 @@ class Vision:
             elif choice == "10":
                 if self.model:
                     print("Evaluating YOLO model...")
-                    #results = self.model.val()
-                    #print("Evaluation Results:", results)
+                    results = self.model.val()
+                    print("Evaluation Results:", results)
                 else:
                     print("Model not loaded. Please load or create a model first.")
             else:
