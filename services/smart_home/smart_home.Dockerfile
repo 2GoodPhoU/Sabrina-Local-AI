@@ -1,22 +1,18 @@
-# Base Image (Python + FFmpeg)
+# Base image
 FROM python:3.10-slim
 
-# Set working directory inside the container
+# Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    pulseaudio \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+# Copy required files
+COPY smarthome_docker_requirements.txt requirements.txt
+COPY smart_home.py smart_home.py
 
-# Copy requirement file and install dependencies
-COPY voice_docker_requirements.txt .
-RUN pip install --no-cache-dir -r voice_docker_requirements.txt
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy API and scripts
-COPY voice_api.py /app/voice_api.py
-COPY voice.py /app/voice.py
+# Expose API port
+EXPOSE 8500
 
-# Command to start the API
-CMD ["python", "/app/voice_api.py"]
+# Start Smart Home API
+CMD ["uvicorn", "smart_home:app", "--host", "0.0.0.0", "--port", "8500"]

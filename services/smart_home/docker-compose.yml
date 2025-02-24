@@ -1,11 +1,11 @@
+version: '3.8'
 services:
-  voice:
+  smarthome:
     build:
-      dockerfile: voice.Dockerfile
-    container_name: voice-container
+      context: .
+      dockerfile: smart_home.Dockerfile
+    container_name: smarthome-container
     ports:
-      - "8100:8100"
-    environment:
-      - PULSE_SERVER=tcp:host.docker.internal:4713
-    volumes:
-      - ~/.config/pulse:/root/.config/pulse  # Share PulseAudio config
+      - "8500:8500"
+    env_file:
+      - .env
