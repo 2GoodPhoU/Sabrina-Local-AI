@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  smarthome:
+    build:
+      context: .
+      dockerfile: smart_home.Dockerfile
+    container_name: smarthome-container
+    ports:
+      - "8500:8500"
+    env_file:
+      - .env

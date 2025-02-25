@@ -3,5 +3,28 @@ models/
 *.wav
 *.mp3
 *.log
-__pycache__/
 node_modules/
+services/vision/captures/*.png
+
+# Ignore compiled Python files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore logs, caches, and temp files
+/logs/
+/cache/
+/data/temp/
+
+# Ignore animation assets (optional)
+assets/*
+!assets/idle.gif
+!assets/listening.gif
+!assets/talking.gif
+!assets/working.gif
+!assets/static.png
+
+# Ignore virtual environment
+venv/
+.env
