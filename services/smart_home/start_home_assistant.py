@@ -1,3 +1,4 @@
+# Here if you need to install home assistant
 import os
 import subprocess
 from dotenv import load_dotenv

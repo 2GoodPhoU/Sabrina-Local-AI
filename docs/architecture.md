@@ -65,13 +65,13 @@ The system consists of multiple interdependent components structured into four k
 #### **PC Automation & Control**
 - **Module:** `automation.py`
 - **API:** `automation_api.py`
-- **Function:** Controls PC tasks, applications, and settings.
-- **Tech Stack:** Home Assistant, Node-RED, Python scripts.
+- **Function:** Controls PC tasks, applications, and settings. Monitors and records keyboard/mouse inputs for AI interaction.
+- **Tech Stack:** Python scripts. PyHook, Pynput.
 
 #### **Smart Home Integration**
 - **Module:** `smart_home.py`
 - **Function:** Interfaces with Google Home and Home Assistant for proactive automation.
-- **Tech Stack:** Google Home API, Home Assistant, MQTT.
+- **Tech Stack:** Google Home API, Home Assistant, MQTT, Home Assistant, Node-RED.
 
 ---
 
