@@ -724,3 +724,265 @@ class EnhancedPresenceGUI(QMainWindow):
         # Start animations
         self.fade_out.start()
         self.fade_in.start()
+
+    def toggle_settings(self):
+        """Show or hide the settings menu"""
+        if hasattr(self, 'settings_menu'):
+            if self.settings_menu.isVisible():
+                self.settings_menu.hide()
+                logger.info("Settings menu hidden")
+            else:
+                self.settings_menu.show()
+                logger.info("Settings menu shown")
+
+    def complete_transition(self):
+        """Complete the transition between animations by swapping labels"""
+        # Swap the current and next label references
+        temp_movie = None
+        temp_pixmap = None
+        temp_resource_id = None
+        
+        # Save current movie or pixmap
+        if hasattr(self.current_label, 'movie') and self.current_label.movie():
+            temp_movie = self.current_label.movie()
+        elif hasattr(self.current_label, 'pixmap') and not self.current_label.pixmap().isNull():
+            temp_pixmap = self.current_label.pixmap()
+        
+        # Save resource ID
+        if hasattr(self.current_label, 'movie_resource_id'):
+            temp_resource_id = self.current_label.movie_resource_id
+        
+        # Update current label with next label's content
+        if hasattr(self.next_label, 'movie') and self.next_label.movie():
+            self.current_label.setMovie(self.next_label.movie())
+            self.current_label.movie_resource_id = self.next_label.movie_resource_id
+            self.next_label.setMovie(None)
+        elif hasattr(self.next_label, 'pixmap') and not self.next_label.pixmap().isNull():
+            self.current_label.setPixmap(self.next_label.pixmap())
+            self.current_label.movie_resource_id = None
+            self.next_label.setPixmap(QPixmap())
+        
+        # Reset opacity
+        self.current_label.setOpacity(1.0)
+        self.next_label.setOpacity(0.0)
+        
+        # Unregister old resource if it exists
+        if temp_resource_id:
+            self.resource_manager.unregister_resource(temp_resource_id)
+        
+        # Mark transition as complete
+        self.transition_in_progress = False
+        
+        logger.debug(f"Animation transition completed to {self.current_animation}")
+
+    def toggle_lock(self):
+        """Toggle window position lock"""
+        self.locked = not self.locked
+        self.drag_enabled = not self.locked
+        
+        # Update button text
+        lock_text = "Position Locked 🔒" if self.locked else "Position Unlocked 🔓"
+        self.lock_button.setText(lock_text)
+        
+        # Update configuration
+        self.config_manager.set_config("window", "lock_position", self.locked)
+        self.config_manager.save_config()
+        
+        logger.info(f"Window position lock toggled: {self.locked}")
+        
+        # Post event about lock change
+        self.event_bus.post_event(
+            Event(
+                EventType.SETTINGS_CHANGE,
+                {"section": "window", "setting": "lock_position", "value": self.locked},
+                EventPriority.LOW,
+                "presence_gui"
+            )
+        )
+
+    def toggle_click_through(self):
+        """Toggle click-through mode (allows clicking through the AI window)"""
+        # Toggle state
+        self.click_through_enabled = not self.click_through_enabled
+        
+        # Update flags based on new state
+        if self.click_through_enabled:
+            # Enable click-through
+            self.setWindowFlags(self.windowFlags() | Qt.WindowTransparentForInput)
+        else:
+            # Disable click-through
+            self.setWindowFlags(self.windowFlags() & ~Qt.WindowTransparentForInput)
+        
+        # Update button text
+        self.update_click_through_button()
+        
+        # Show window again since changing flags hides it
+        self.show()
+        
+        # Update configuration
+        self.config_manager.set_config("interaction", "click_through_mode", self.click_through_enabled)
+        self.config_manager.save_config()
+        
+        logger.info(f"Click-through mode toggled: {self.click_through_enabled}")
+        
+        # Post event about click-through change
+        self.event_bus.post_event(
+            Event(
+                EventType.SETTINGS_CHANGE,
+                {"section": "interaction", "setting": "click_through_mode", "value": self.click_through_enabled},
+                EventPriority.LOW,
+                "presence_gui"
+            )
+        )
+
+    def update_click_through_button(self):
+        """Update the click-through button text based on current state"""
+        if hasattr(self, 'click_through_button'):
+            button_text = "🖱️ Click-Through: ON" if self.click_through_enabled else "🖱️ Click-Through: OFF"
+            self.click_through_button.setText(button_text)
+
+    def adjust_transparency(self, value):
+        """Adjust the window transparency level"""
+        opacity = value / 100.0  # Convert from 0-100 slider to 0.0-1.0 opacity
+        self.setWindowOpacity(opacity)
+        
+        # Update configuration
+        self.config_manager.set_config("window", "transparency_level", opacity)
+        self.config_manager.save_config()
+        
+        logger.info(f"Transparency adjusted to {value}% ({opacity:.2f})")
+        
+        # Post event about transparency change
+        self.event_bus.post_event(
+            Event(
+                EventType.SETTINGS_CHANGE,
+                {"section": "window", "setting": "transparency_level", "value": opacity},
+                EventPriority.LOW,
+                "presence_gui"
+            )
+        )
+
+    def adjust_volume(self, value):
+        """Adjust the voice output volume"""
+        volume = value / 100.0  # Convert from 0-100 slider to 0.0-1.0 volume
+        
+        # Update configuration
+        self.config_manager.set_config("voice", "volume", volume)
+        self.config_manager.save_config()
+        
+        logger.info(f"Volume adjusted to {value}% ({volume:.2f})")
+        
+        # Post event about volume change
+        self.event_bus.post_event(
+            Event(
+                EventType.SETTINGS_CHANGE,
+                {"section": "voice", "setting": "volume", "value": volume},
+                EventPriority.LOW,
+                "presence_gui"
+            )
+        )
+
+    def test_animation(self, animation_state):
+        """Test a specific animation state"""
+        if animation_state in ANIMATION_STATES:
+            logger.info(f"Testing animation: {animation_state}")
+            self.set_animation(animation_state)
+            
+            # Post event about animation test
+            self.event_bus.post_event(
+                Event(
+                    EventType.ANIMATION_CHANGE,
+                    {"animation": animation_state, "test": True},
+                    EventPriority.NORMAL,
+                    "presence_gui"
+                )
+            )
+
+    def update_interactive_areas(self):
+        """Update the list of interactive areas where click-through should be disabled"""
+        self.interactive_areas = []
+        
+        # Add settings button area
+        if hasattr(self, 'settings_button'):
+            self.interactive_areas.append(self.settings_button.geometry())
+        
+        # Add settings menu area
+        if hasattr(self, 'settings_menu'):
+            self.interactive_areas.append(self.settings_menu.geometry())
+        
+        # Add any other interactive UI elements here
+        logger.debug(f"Updated interactive areas: {len(self.interactive_areas)} regions")
+
+    def show_settings(self):
+        """Show the settings menu"""
+        if hasattr(self, 'settings_menu') and not self.settings_menu.isVisible():
+            self.settings_menu.show()
+            logger.info("Settings menu shown")
+
+    def safe_exit(self):
+        """Safely exit the application with confirmation"""
+        from PyQt5.QtWidgets import QMessageBox
+        
+        reply = QMessageBox.question(
+            self, 'Exit Confirmation',
+            'Are you sure you want to exit Sabrina AI?',
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            logger.info("User requested application exit")
+            
+            # Post shutdown event
+            self.event_bus.post_event(
+                Event(
+                    EventType.SYSTEM_STATE,
+                    {"state": "shutdown"},
+                    EventPriority.HIGH,
+                    "presence_gui"
+                )
+            )
+            
+            # Cleanup resources
+            self.resource_manager.force_cleanup()
+            
+            # Exit application
+            from PyQt5.QtWidgets import QApplication
+            QApplication.instance().quit()
+
+    def mousePressEvent(self, event):
+        """Handle mouse press events for dragging the window"""
+        if event.button() == Qt.LeftButton and self.drag_enabled:
+            # Store the position if clicking on a non-interactive area
+            if not self.is_in_interactive_area(event.pos()):
+                self.old_pos = event.pos()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """Handle mouse move events for dragging the window"""
+        if self.old_pos and self.drag_enabled:
+            delta = event.pos() - self.old_pos
+            self.move(self.pos() + delta)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release events for dragging the window"""
+        if event.button() == Qt.LeftButton:
+            self.old_pos = None
+        super().mouseReleaseEvent(event)
+
+    def start_event_listener(self):
+        """Start event listener for external events"""
+        logger.info("Started event listener")
+        # This method is called during initialization to set up event listeners
+        # It's already implemented in the __init__ method but needs to be defined
+        pass
+
+    def toggle_settings(self):
+        """Show or hide the settings menu"""
+        if hasattr(self, 'settings_menu'):
+            if self.settings_menu.isVisible():
+                self.settings_menu.hide()
+                logger.info("Settings menu hidden")
+            else:
+                self.settings_menu.show()
+                logger.info("Settings menu shown")
