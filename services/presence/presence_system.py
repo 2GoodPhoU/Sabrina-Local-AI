@@ -5,6 +5,7 @@ import sys
 import os
 import argparse
 from PyQt5.QtWidgets import QApplication
+from PyQt5.QtCore import Qt
 from presence_enhancements import EnhancedPresenceGUI
 
 def parse_arguments():

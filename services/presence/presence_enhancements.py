@@ -3,7 +3,7 @@
 from PyQt5.QtWidgets import (QMainWindow, QLabel, QPushButton, QSlider, QVBoxLayout, 
                             QWidget, QHBoxLayout, QSystemTrayIcon, QMenu, QAction, 
                             QColorDialog, QComboBox, QFileDialog, QMessageBox)
-from PyQt5.QtCore import QTimer, Qt, QPoint, QPropertyAnimation, QEasingCurve, QByteArray, pyqtProperty
+from PyQt5.QtCore import QTimer, Qt, QPoint, QPropertyAnimation, QEasingCurve, QByteArray, pyqtProperty, QRect
 from PyQt5.QtGui import QMovie, QPixmap, QIcon, QColor, QPainter, QImage
 import sys
 import os
@@ -79,6 +79,9 @@ class EnhancedPresenceGUI(QMainWindow):
         # Animation and themes
         self.current_theme = "default"
         self.themes = self.load_themes()
+        
+        # Interactive areas tracking
+        self.interactive_areas = []
 
         # Setup UI Components
         self.setup_ui()
@@ -99,6 +102,23 @@ class EnhancedPresenceGUI(QMainWindow):
 
         # Start event listener
         self.start_event_listener()
+        
+    def is_in_interactive_area(self, pos):
+        """Check if a point is in an interactive area (settings menu, buttons)"""
+        # Check settings menu
+        if self.settings_menu.isVisible() and self.settings_menu.geometry().contains(pos):
+            return True
+            
+        # Check settings button
+        if self.settings_button.geometry().contains(pos):
+            return True
+            
+        # Check other interactive areas
+        for area in self.interactive_areas:
+            if area.contains(pos):
+                return True
+                
+        return False
 
     def setup_ui(self):
         """Initialize the UI components"""
@@ -228,6 +248,9 @@ class EnhancedPresenceGUI(QMainWindow):
 
         # Finish layout setup
         self.main_layout.addWidget(self.animation_container)
+        
+        # Register interactive areas (this will be updated when widgets become visible)
+        self.update_interactive_areas()
 
     def setup_system_tray(self):
         """Create system tray icon with menu"""
@@ -414,20 +437,30 @@ class EnhancedPresenceGUI(QMainWindow):
             if hasattr(self, 'fade_in') and self.fade_in.state() == QPropertyAnimation.Running:
                 self.fade_in.stop()
         
+        # Stop any existing movie on the next label
+        if hasattr(self.next_label, 'movie') and self.next_label.movie():
+            self.next_label.movie().stop()
+            self.next_label.setMovie(None)
+            
         # Prepare next animation
         if animation_path.endswith('.png'):
             # Static image
             self.next_label.setPixmap(QPixmap(animation_path))
-            if hasattr(self.next_label, 'movie') and self.next_label.movie():
-                self.next_label.movie().stop()
-                self.next_label.movie().deleteLater()
         else:
             # Animated GIF
-            movie = QMovie(animation_path)
-            movie.setCacheMode(QMovie.CacheAll)
-            movie.loopCount = -1  # Infinite loop
-            self.next_label.setMovie(movie)
-            movie.start()
+            try:
+                movie = QMovie(animation_path)
+                movie.setCacheMode(QMovie.CacheAll)
+                movie.loopCount = -1  # Infinite loop
+                self.next_label.setMovie(movie)
+                movie.start()
+            except Exception as e:
+                print(f"Error loading animation {animation_path}: {e}")
+                # Fallback to static image if available
+                if "static.png" in self.animations.values():
+                    static_path = [p for p in self.animations.values() if "static.png" in p][0]
+                    self.next_label.setPixmap(QPixmap(static_path))
+                    print(f"Using fallback static image: {static_path}")
         
         # Perform cross-fade transition
         self.cross_fade()
@@ -465,6 +498,11 @@ class EnhancedPresenceGUI(QMainWindow):
         self.current_label = self.next_label
         self.next_label = temp_label
         
+        # Stop any movie on the next label to prevent multiple animations
+        if hasattr(self.next_label, 'movie') and self.next_label.movie():
+            self.next_label.movie().stop()
+            self.next_label.setMovie(None)
+        
         # Reset opacity for next transition
         self.next_label.setOpacity(0.0)
         
@@ -483,9 +521,33 @@ class EnhancedPresenceGUI(QMainWindow):
                 self.set_animation(next_animation)
         QTimer.singleShot(100, self.process_queue)
 
+    def update_interactive_areas(self):
+        """Update the list of interactive areas"""
+        self.interactive_areas = []
+        
+        # Add settings button
+        self.interactive_areas.append(self.settings_button.geometry())
+        
+        # Add settings menu and all its children if visible
+        if self.settings_menu.isVisible():
+            self.interactive_areas.append(self.settings_menu.geometry())
+            
+            # Add all buttons and controls in the settings menu
+            for child in self.settings_menu.findChildren(QWidget):
+                if child.isVisible():
+                    # Convert child's local coordinates to parent coordinates
+                    child_geo = child.geometry()
+                    global_geo = QRect(
+                        self.settings_menu.mapToParent(child_geo.topLeft()),
+                        child_geo.size()
+                    )
+                    self.interactive_areas.append(global_geo)
+    
     def toggle_settings(self):
         """Toggle the visibility of the settings menu"""
         self.settings_menu.setVisible(not self.settings_menu.isVisible())
+        # Update interactive areas when settings visibility changes
+        self.update_interactive_areas()
 
     def toggle_lock(self):
         """Toggle Lock Position setting"""
@@ -507,11 +569,9 @@ class EnhancedPresenceGUI(QMainWindow):
         global CLICK_THROUGH_MODE
         CLICK_THROUGH_MODE = not CLICK_THROUGH_MODE
 
-        if CLICK_THROUGH_MODE:
-            self.setWindowFlags(self.windowFlags() | Qt.WindowTransparentForInput)
-        else:
-            self.setWindowFlags(self.windowFlags() & ~Qt.WindowTransparentForInput)
-
+        # We don't set WindowTransparentForInput here anymore
+        # Instead, we'll handle click events manually in mousePressEvent
+        
         self.show()  # Refresh window to apply change
         self.update_click_through_button()
 
@@ -527,14 +587,39 @@ class EnhancedPresenceGUI(QMainWindow):
     def safe_exit(self):
         """Safely close the program"""
         print("[INFO] Safe termination initiated.")
+        
+        # Stop all animations
+        if hasattr(self.current_label, 'movie') and self.current_label.movie():
+            self.current_label.movie().stop()
+        
+        if hasattr(self.next_label, 'movie') and self.next_label.movie():
+            self.next_label.movie().stop()
+            
+        # Hide tray icon before exiting
+        if hasattr(self, 'tray_icon'):
+            self.tray_icon.hide()
+            
+        # Save themes if modified
+        self.save_themes()
+        
+        # Close window and exit application
         self.close()
         sys.exit()
 
     def mousePressEvent(self, event):
         """Handle mouse press events with interactive areas"""
-        if self.settings_menu.isVisible() or self.settings_button.underMouse():
-            return  # Prevent click-through when interacting with settings
+        # Always allow interaction with interactive areas
+        if self.is_in_interactive_area(event.pos()):
+            super().mousePressEvent(event)
+            return
+                
+        # If in click-through mode, don't handle other mouse events
+        # except right-click for context menu
+        if CLICK_THROUGH_MODE and event.button() != Qt.RightButton:
+            event.ignore()  # Let the event pass through
+            return
             
+        # Handle normal mouse events when not in click-through mode
         if event.button() == Qt.RightButton:
             # Show context menu on right-click
             self.show_context_menu(event.globalPos())
@@ -583,6 +668,17 @@ class EnhancedPresenceGUI(QMainWindow):
 
     def mouseMoveEvent(self, event):
         """Allow dragging if enabled and unlocked"""
+        # Always allow interaction with interactive areas
+        if self.is_in_interactive_area(event.pos()):
+            super().mouseMoveEvent(event)
+            return
+            
+        # Don't handle mouse events in click-through mode
+        if CLICK_THROUGH_MODE:
+            event.ignore()
+            return
+            
+        # Handle normal dragging
         if not self.locked and self.old_pos:
             delta = event.globalPos() - self.old_pos
             self.move(self.x() + delta.x(), self.y() + delta.y())
@@ -590,6 +686,17 @@ class EnhancedPresenceGUI(QMainWindow):
 
     def mouseReleaseEvent(self, event):
         """Reset position tracking on release"""
+        # Always allow interaction with interactive areas
+        if self.is_in_interactive_area(event.pos()):
+            super().mouseReleaseEvent(event)
+            return
+            
+        # Don't handle mouse events in click-through mode
+        if CLICK_THROUGH_MODE:
+            event.ignore()
+            return
+            
+        # Handle normal mouse release
         if not self.locked and event.button() == Qt.LeftButton:
             self.old_pos = None
 
