@@ -173,7 +173,7 @@ class VisionCore:
 
 if __name__ == "__main__":
     """Interactive test flow for VisionCore module. Comment out if not needed."""
-    """
+    
     vision = VisionCore()
     vision.interactive_test_flow()
-    """
+    
