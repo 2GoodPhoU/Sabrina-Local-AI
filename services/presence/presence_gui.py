@@ -1,4 +1,4 @@
-# Reapplying the updates to presence_gui.py after execution state reset
+# Updating presence_gui.py to fix locking and transparency issues
 
 from PyQt5.QtWidgets import QMainWindow, QLabel, QPushButton, QSlider, QVBoxLayout, QWidget, QHBoxLayout
 from PyQt5.QtCore import QTimer, Qt, QPoint
@@ -26,13 +26,15 @@ class PresenceGUI(QMainWindow):
             self.setWindowOpacity(TRANSPARENCY_LEVEL)  
 
         self.drag_enabled = ENABLE_DRAGGING and not LOCK_POSITION
+        self.locked = LOCK_POSITION  # Ensure locking state persists
         self.old_pos = None
 
         self.label = QLabel(self)
         self.label.setGeometry(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT)
         self.label.setAlignment(Qt.AlignCenter)
+        self.label.setStyleSheet("background: transparent;")  # Ensure no background artifacts
 
-        # Ensure settings button remains interactive even in click-through mode
+        # Settings button
         self.settings_button = QPushButton("⚙", self)
         self.settings_button.setGeometry(WINDOW_WIDTH - 30, 5, 25, 25)
         self.settings_button.clicked.connect(self.toggle_settings)
@@ -47,7 +49,7 @@ class PresenceGUI(QMainWindow):
         layout = QVBoxLayout()
 
         # Lock position toggle
-        self.lock_button = QPushButton("🔒 Lock Position", self.settings_menu)
+        self.lock_button = QPushButton("Position Unlocked 🔓", self.settings_menu)
         self.lock_button.clicked.connect(self.toggle_lock)
         self.lock_button.setStyleSheet("background-color: white; color: black;")
         layout.addWidget(self.lock_button)
@@ -64,20 +66,6 @@ class PresenceGUI(QMainWindow):
         transparency_layout.addWidget(self.transparency_slider)
         layout.addLayout(transparency_layout)
 
-        # Click-Through Mode Toggle
-        self.click_through_button = QPushButton("🖱️ Click-Through: OFF", self.settings_menu)
-        self.click_through_button.clicked.connect(self.toggle_click_through)
-        self.click_through_button.setStyleSheet("background-color: white; color: black;")
-        layout.addWidget(self.click_through_button)
-        self.update_click_through_button()
-
-        # Transparency Mode Toggle
-        self.transparency_button = QPushButton("🔲 Transparency: OFF", self.settings_menu)
-        self.transparency_button.clicked.connect(self.toggle_transparency_mode)
-        self.transparency_button.setStyleSheet("background-color: white; color: black;")
-        layout.addWidget(self.transparency_button)
-        self.update_transparency_button()
-
         # Volume Slider with Label
         volume_layout = QHBoxLayout()
         self.volume_label = QLabel("Volume:", self.settings_menu)
@@ -90,17 +78,24 @@ class PresenceGUI(QMainWindow):
         volume_layout.addWidget(self.volume_slider)
         layout.addLayout(volume_layout)
 
-        # Safe Termination Button
-        self.exit_button = QPushButton("❌ Exit Program", self.settings_menu)
-        self.exit_button.clicked.connect(self.safe_exit)
-        self.exit_button.setStyleSheet("background-color: red; color: white;")
-        layout.addWidget(self.exit_button)
+        # Click-Through Mode Toggle
+        self.click_through_button = QPushButton("🖱️ Click-Through: OFF", self.settings_menu)
+        self.click_through_button.clicked.connect(self.toggle_click_through)
+        self.click_through_button.setStyleSheet("background-color: white; color: black;")
+        layout.addWidget(self.click_through_button)
+        self.update_click_through_button()
 
         # Hide settings button
-        self.hide_settings_button = QPushButton("❌ Hide Settings", self.settings_menu)
+        self.hide_settings_button = QPushButton("Hide Settings", self.settings_menu)
         self.hide_settings_button.clicked.connect(self.toggle_settings)
         self.hide_settings_button.setStyleSheet("background-color: white; color: black;")
         layout.addWidget(self.hide_settings_button)
+
+        # Safe Termination Button
+        self.exit_button = QPushButton("Exit Program", self.settings_menu)
+        self.exit_button.clicked.connect(self.safe_exit)
+        self.exit_button.setStyleSheet("background-color: red; color: white;")
+        layout.addWidget(self.exit_button)
 
         self.settings_menu.setLayout(layout)
 
@@ -127,14 +122,14 @@ class PresenceGUI(QMainWindow):
 
     def toggle_lock(self):
         """Toggle Lock Position setting."""
-        global LOCK_POSITION
-        LOCK_POSITION = not LOCK_POSITION
-        self.drag_enabled = not LOCK_POSITION
-        self.lock_button.setText("🔓 Unlock Position" if LOCK_POSITION else "🔒 Lock Position")
+        self.locked = not self.locked
+        self.drag_enabled = not self.locked
+        self.lock_button.setText("Position Unlocked 🔓" if self.locked else "Position Locked 🔒")
 
     def adjust_transparency(self, value):
         """Adjust window transparency using the slider."""
         self.setWindowOpacity(value / 100)
+        self.repaint()  # Ensure transparency updates correctly
 
     def adjust_volume(self, value):
         """Adjust volume level (to be connected to voice API)."""
@@ -155,21 +150,29 @@ class PresenceGUI(QMainWindow):
 
     def update_click_through_button(self):
         """Update button text based on Click-Through mode."""
-        self.click_through_button.setText(f"🖱️ Click-Through: {'ON' if CLICK_THROUGH_MODE else 'OFF'}")
-
-    def toggle_transparency_mode(self):
-        """Toggle full transparency mode."""
-        global ENABLE_TRANSPARENCY
-        ENABLE_TRANSPARENCY = not ENABLE_TRANSPARENCY
-        self.setAttribute(Qt.WA_TranslucentBackground, ENABLE_TRANSPARENCY)
-        self.update_transparency_button()
-
-    def update_transparency_button(self):
-        """Update button text based on Transparency mode."""
-        self.transparency_button.setText(f"🔲 Transparency: {'ON' if ENABLE_TRANSPARENCY else 'OFF'}")
+        self.click_through_button.setText(f"Clickable 🖱️: {'ON' if CLICK_THROUGH_MODE else 'OFF'}")
 
     def safe_exit(self):
         """Safely close the program."""
         print("[INFO] Safe termination initiated.")
         self.close()
         sys.exit()
+
+    def mousePressEvent(self, event):
+        """Ensure settings menu and button remain interactive when click-through is enabled."""
+        if self.settings_menu.isVisible() or self.settings_button.underMouse():
+            return  # Prevent click-through when interacting with settings
+        if not self.locked and event.button() == Qt.LeftButton:
+            self.old_pos = event.globalPos()
+
+    def mouseMoveEvent(self, event):
+        """Allow dragging if enabled and unlocked."""
+        if not self.locked and self.old_pos:
+            delta = event.globalPos() - self.old_pos
+            self.move(self.x() + delta.x(), self.y() + delta.y())
+            self.old_pos = event.globalPos()
+
+    def mouseReleaseEvent(self, event):
+        """Reset position tracking on release."""
+        if not self.locked and event.button() == Qt.LeftButton:
+            self.old_pos = None
