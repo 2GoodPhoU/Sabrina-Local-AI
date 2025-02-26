@@ -1,0 +1,13 @@
+{
+    "default": {
+        "idle": "idle.gif",
+        "listening": "listening.gif",
+        "talking": "talking.gif",
+        "working": "working.gif",
+        "static": "static.png",
+        "thinking": "idle.gif",
+        "error": "static.png",
+        "success": "talking.gif",
+        "waiting": "idle.gif"
+    }
+}
