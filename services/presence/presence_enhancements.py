@@ -10,21 +10,9 @@ import screeninfo
 from presence_constants import (
     WINDOW_WIDTH, WINDOW_HEIGHT, PADDING_RIGHT, ENABLE_TRANSPARENCY, TRANSPARENCY_LEVEL,
     CLICK_THROUGH_MODE, ENABLE_DRAGGING, LOCK_POSITION, ASSETS_FOLDER, DEFAULT_ANIMATION,
-    ANIMATION_PRIORITY
+    ANIMATION_PRIORITY, ANIMATION_STATES
 )
 from animation_manager import AnimationManager
-
-# Define additional animation states
-ANIMATION_STATES = {
-    "idle": "Default state when not active",
-    "listening": "Actively listening to user input",
-    "talking": "Speaking or responding",
-    "working": "Processing a task",
-    "thinking": "Analyzing information",
-    "error": "Encountered an issue",
-    "success": "Completed a task successfully",
-    "waiting": "Waiting for external input",
-}
 
 class AnimatedLabel(QLabel):
     """Enhanced QLabel with animation properties"""
@@ -103,40 +91,20 @@ class EnhancedPresenceGUI(QMainWindow):
         
     def is_in_interactive_area(self, pos):
         """Check if a point is in an interactive area (settings menu, buttons)"""
+        # Check settings menu
+        if self.settings_menu.isVisible() and self.settings_menu.geometry().contains(pos):
+            return True
+            
         # Check settings button
         if self.settings_button.geometry().contains(pos):
             return True
             
-        # Check settings menu and all its children
-        if self.settings_menu.isVisible():
-            if self.settings_menu.geometry().contains(pos):
-                return True
-            
-            # Check all widgets inside settings menu
-            for child in self.settings_menu.findChildren(QWidget):
-                if child.isVisible():
-                    # Convert to global coordinates
-                    child_rect = QRect(
-                        self.settings_menu.mapToGlobal(child.pos()),
-                        child.size()
-                    )
-                    if child_rect.contains(self.mapFromGlobal(pos)):
-                        return True
-        
-        # When in click-through mode, the animation area itself is not interactive
-        if CLICK_THROUGH_MODE:
-            # Check if click is on animation areas (not interactive in click-through mode)
-            animation_area = QRect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT)
-            if animation_area.contains(pos) and not self.settings_menu.geometry().contains(pos) and not self.settings_button.geometry().contains(pos):
-                return False
-        
-        # For all other registered interactive areas
+        # Check other interactive areas
         for area in self.interactive_areas:
             if area.contains(pos):
                 return True
                 
-        # If we're not in click-through mode, everything is interactive by default
-        return not CLICK_THROUGH_MODE
+        return False
 
     def setup_ui(self):
         """Initialize the UI components with improved layout"""
@@ -207,7 +175,6 @@ class EnhancedPresenceGUI(QMainWindow):
         theme_layout.addWidget(self.theme_selector)
         settings_layout.addLayout(theme_layout)
 
-        # Rest of the settings UI components remain the same...
         # Transparency Slider with Label
         transparency_layout = QHBoxLayout()
         self.transparency_label = QLabel("Transparency:", self.settings_menu)
@@ -245,7 +212,7 @@ class EnhancedPresenceGUI(QMainWindow):
         self.animation_test_dropdown = QComboBox(self.settings_menu)
         
         # Add animation states to dropdown
-        for state in ANIMATION_STATES.keys():
+        for state in ANIMATION_STATES:
             self.animation_test_dropdown.addItem(state)
         
         self.animation_test_dropdown.currentTextChanged.connect(self.test_animation)
@@ -290,8 +257,8 @@ class EnhancedPresenceGUI(QMainWindow):
         
         # Add animation state submenu
         animation_menu = tray_menu.addMenu("Set Animation")
-        for state, desc in ANIMATION_STATES.items():
-            action = QAction(f"{state} - {desc}", self)
+        for state in ANIMATION_STATES:
+            action = QAction(f"{state}", self)
             action.triggered.connect(lambda checked=False, s=state: self.set_animation(s))
             animation_menu.addAction(action)
         
@@ -325,12 +292,6 @@ class EnhancedPresenceGUI(QMainWindow):
         else:
             self.show()
             self.activateWindow()
-
-    def show_settings(self):
-        """Show the settings menu"""
-        self.show()  # Make sure window is visible
-        self.settings_menu.show()
-        self.activateWindow()
 
     def load_themes(self):
         """Load animation themes"""
@@ -402,7 +363,7 @@ class EnhancedPresenceGUI(QMainWindow):
         
         # Create theme structure
         new_theme = {}
-        for state in ANIMATION_STATES.keys():
+        for state in ANIMATION_STATES:
             # Look for file with same name as state
             for ext in ['.gif', '.png']:
                 file_path = os.path.join(theme_dir, f"{state}{ext}")
@@ -461,34 +422,31 @@ class EnhancedPresenceGUI(QMainWindow):
             if hasattr(self, 'fade_in') and self.fade_in.state() == QPropertyAnimation.Running:
                 self.fade_in.stop()
         
-        # Explicitly stop and clear any existing movie on the next_label
+        # Stop any existing movie on the next label
         if hasattr(self.next_label, 'movie') and self.next_label.movie():
             self.next_label.movie().stop()
             self.next_label.setMovie(None)
-        
-        # Prepare the next animation
-        try:
-            if animation_path.endswith('.png'):
-                # Static image
-                self.next_label.setPixmap(QPixmap(animation_path))
-            else:
-                # Animated GIF
+            
+        # Prepare next animation
+        if animation_path.endswith('.png'):
+            # Static image
+            self.next_label.setPixmap(QPixmap(animation_path))
+        else:
+            # Animated GIF
+            try:
                 movie = QMovie(animation_path)
                 movie.setCacheMode(QMovie.CacheAll)
                 movie.setScaledSize(self.next_label.size())  # Scale to fit label
                 movie.loopCount = -1  # Infinite loop
                 self.next_label.setMovie(movie)
                 movie.start()
-        except Exception as e:
-            print(f"Error loading animation {animation_path}: {e}")
-            # Fallback to static image if available
-            try:
+            except Exception as e:
+                print(f"Error loading animation {animation_path}: {e}")
+                # Fallback to static image if available
                 static_path = os.path.join(ASSETS_FOLDER, "static.png")
                 if os.path.exists(static_path):
                     self.next_label.setPixmap(QPixmap(static_path))
-                    print(f"Using fallback static image")
-            except Exception as e2:
-                print(f"Error loading fallback image: {e2}")
+                    print(f"Using fallback static image: {static_path}")
         
         # Perform cross-fade transition
         self.cross_fade()
@@ -559,6 +517,27 @@ class EnhancedPresenceGUI(QMainWindow):
                     )
                     self.interactive_areas.append(global_geo)
 
+    def toggle_settings(self):
+        """Toggle the visibility of the settings menu"""
+        self.settings_menu.setVisible(not self.settings_menu.isVisible())
+        # Update interactive areas when settings visibility changes
+        self.update_interactive_areas()
+
+    def toggle_lock(self):
+        """Toggle Lock Position setting"""
+        self.locked = not self.locked
+        self.drag_enabled = not self.locked
+        self.lock_button.setText("Position Locked 🔒" if self.locked else "Position Unlocked 🔓")
+
+    def adjust_transparency(self, value):
+        """Adjust window transparency using the slider"""
+        self.setWindowOpacity(value / 100)
+        self.repaint()
+
+    def adjust_volume(self, value):
+        """Adjust volume level (to be connected to voice API)"""
+        print(f"Volume set to {value}%")  # Placeholder for voice API connection
+
     def toggle_click_through(self):
         """Toggle Click-Through mode while keeping settings interactive"""
         global CLICK_THROUGH_MODE
@@ -572,6 +551,18 @@ class EnhancedPresenceGUI(QMainWindow):
     def update_click_through_button(self):
         """Update button text based on Click-Through mode"""
         self.click_through_button.setText(f"🖱️ Click-Through: {'ON' if CLICK_THROUGH_MODE else 'OFF'}")
+    
+    def test_animation(self, state):
+        """Test a specific animation state"""
+        if state in ANIMATION_STATES:
+            self.set_animation(state)
+
+    def show_settings(self):
+        """Show the settings menu"""
+        self.show()  # Make sure window is visible
+        self.settings_menu.show()
+        self.activateWindow()
+        self.update_interactive_areas()
     
     def mousePressEvent(self, event):
         """Handle mouse press events with interactive areas"""
@@ -632,3 +623,74 @@ class EnhancedPresenceGUI(QMainWindow):
         # Handle normal mouse release
         if not self.locked and event.button() == Qt.LeftButton:
             self.old_pos = None
+    
+    def show_context_menu(self, position):
+        """Show a context menu at the given position"""
+        context_menu = QMenu()
+        
+        # Animation states submenu
+        animation_menu = context_menu.addMenu("Set Animation")
+        for state in ANIMATION_STATES:
+            action = QAction(f"{state}", self)
+            action.triggered.connect(lambda checked=False, s=state: self.set_animation(s))
+            animation_menu.addAction(action)
+            
+        # Other quick actions
+        context_menu.addSeparator()
+        settings_action = context_menu.addAction("Open Settings")
+        toggle_visibility = context_menu.addAction("Hide Window")
+        context_menu.addSeparator()
+        exit_action = context_menu.addAction("Exit")
+        
+        # Connect actions
+        settings_action.triggered.connect(self.show_settings)
+        toggle_visibility.triggered.connect(self.toggle_visibility)
+        exit_action.triggered.connect(self.safe_exit)
+        
+        # Show the menu
+        context_menu.exec_(position)
+
+    def handle_interaction(self):
+        """Handle direct interaction with the AI presence"""
+        # Example: Trigger the "listening" state when clicked
+        self.set_animation("listening")
+        
+        # Here you could also:
+        # 1. Trigger voice activation
+        # 2. Show a quick command panel
+        # 3. Trigger a specific AI function
+        print("[INTERACTION] User clicked on AI presence")
+    
+    def start_event_listener(self):
+        """Start queue processing for animations"""
+        QTimer.singleShot(100, self.process_queue)
+    
+    def process_queue(self):
+        """Process animations from queue"""
+        if hasattr(self, 'animation_manager'):
+            if self.animation_manager.queue:
+                next_animation = self.animation_manager.queue.pop(0)
+                self.set_animation(next_animation)
+        QTimer.singleShot(100, self.process_queue)
+    
+    def safe_exit(self):
+        """Safely close the program"""
+        print("[INFO] Safe termination initiated.")
+        
+        # Stop all animations
+        if hasattr(self.current_label, 'movie') and self.current_label.movie():
+            self.current_label.movie().stop()
+        
+        if hasattr(self.next_label, 'movie') and self.next_label.movie():
+            self.next_label.movie().stop()
+            
+        # Hide tray icon before exiting
+        if hasattr(self, 'tray_icon'):
+            self.tray_icon.hide()
+            
+        # Save themes if modified
+        self.save_themes()
+        
+        # Close window and exit application
+        self.close()
+        sys.exit()
