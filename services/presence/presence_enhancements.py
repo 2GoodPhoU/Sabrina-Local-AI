@@ -48,7 +48,7 @@ class EnhancedPresenceGUI(QMainWindow):
         self.x_position = screen_width - WINDOW_WIDTH - PADDING_RIGHT
         self.y_position = (screen_height // 2) - (WINDOW_HEIGHT // 2)
 
-        # Configure window properties
+        # Configure window properties - important to set flags here
         self.setGeometry(self.x_position, self.y_position, WINDOW_WIDTH, WINDOW_HEIGHT)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)  
         
@@ -72,6 +72,10 @@ class EnhancedPresenceGUI(QMainWindow):
         # Setup UI Components
         self.setup_ui()
         
+        # Initial click-through status - make sure flags are set correctly based on initial state
+        if CLICK_THROUGH_MODE:
+            self.setWindowFlags(self.windowFlags() | Qt.WindowTransparentForInput)
+            
         # Setup System Tray
         self.setup_system_tray()
         
@@ -517,12 +521,6 @@ class EnhancedPresenceGUI(QMainWindow):
                     )
                     self.interactive_areas.append(global_geo)
 
-    def toggle_settings(self):
-        """Toggle the visibility of the settings menu"""
-        self.settings_menu.setVisible(not self.settings_menu.isVisible())
-        # Update interactive areas when settings visibility changes
-        self.update_interactive_areas()
-
     def toggle_lock(self):
         """Toggle Lock Position setting"""
         self.locked = not self.locked
@@ -543,10 +541,49 @@ class EnhancedPresenceGUI(QMainWindow):
         global CLICK_THROUGH_MODE
         CLICK_THROUGH_MODE = not CLICK_THROUGH_MODE
         
-        # Important: Don't change the WindowTransparentForInput flag
-        # We'll handle click-through manually in mousePressEvent, etc.
+        # Update window flag to enable click-through
+        if CLICK_THROUGH_MODE:
+            # Set window to be transparent for input
+            self.setWindowFlags(self.windowFlags() | Qt.WindowTransparentForInput)
+            self.show()  # Need to call show() to apply flag changes
+            
+            # Make settings button interactive again by setting it as a subwindow
+            # This is a trick to override the parent window's transparent input flag
+            self.settings_button.setWindowFlags(Qt.SubWindow)
+            self.settings_button.show()
+            
+            # If settings menu is visible, keep it interactive
+            if self.settings_menu.isVisible():
+                self.settings_menu.setWindowFlags(Qt.SubWindow)
+                self.settings_menu.show()
+        else:
+            # Remove transparent input flag
+            self.setWindowFlags(self.windowFlags() & ~Qt.WindowTransparentForInput)
+            self.show()  # Need to call show() to apply flag changes
+            
+            # Reset settings button flags
+            self.settings_button.setWindowFlags(Qt.Widget)
+            self.settings_button.show()
+            
+            # Reset settings menu flags if visible
+            if self.settings_menu.isVisible():
+                self.settings_menu.setWindowFlags(Qt.Widget)
+                self.settings_menu.show()
         
         self.update_click_through_button()
+        
+    def toggle_settings(self):
+        """Toggle the visibility of the settings menu"""
+        visible = not self.settings_menu.isVisible()
+        self.settings_menu.setVisible(visible)
+        
+        # If in click-through mode, we need to handle settings menu visibility specially
+        if CLICK_THROUGH_MODE and visible:
+            self.settings_menu.setWindowFlags(Qt.SubWindow)
+            self.settings_menu.show()
+        
+        # Update interactive areas when settings visibility changes
+        self.update_interactive_areas()
     
     def update_click_through_button(self):
         """Update button text based on Click-Through mode"""
@@ -565,44 +602,32 @@ class EnhancedPresenceGUI(QMainWindow):
         self.update_interactive_areas()
     
     def mousePressEvent(self, event):
-        """Handle mouse press events with interactive areas"""
-        # Always allow interaction with interactive areas
-        if self.is_in_interactive_area(event.pos()):
-            super().mousePressEvent(event)
-            return
-            
-        # If in click-through mode, ignore the event to let it pass through
-        # except for right-click which shows context menu
-        if CLICK_THROUGH_MODE:
-            if event.button() == Qt.RightButton:
-                self.show_context_menu(event.globalPos())
-            else:
-                event.ignore()  # Let clicks pass through to underlying windows
-            return
-            
-        # Normal mode handling
+        """Handle mouse press events"""
+        # With the new approach using WindowTransparentForInput,
+        # this will only be called when click-through is OFF or
+        # when clicking on the settings button or menu
+        
         if event.button() == Qt.RightButton:
             # Show context menu on right-click
             self.show_context_menu(event.globalPos())
         elif event.button() == Qt.LeftButton:
-            if not self.locked:
+            # Check if we're on a draggable area (not settings)
+            if not self.locked and not self.is_in_interactive_area(event.pos()):
                 self.old_pos = event.globalPos()
-            # Also handle left click for interaction
-            self.handle_interaction()
+                # Also handle interaction
+                self.handle_interaction()
+            else:
+                # Let the event propagate to interactive elements
+                super().mousePressEvent(event)
     
     def mouseMoveEvent(self, event):
         """Allow dragging if enabled and unlocked"""
-        # Always allow interaction with interactive areas
+        # Let interactive elements handle their own mouse moves
         if self.is_in_interactive_area(event.pos()):
             super().mouseMoveEvent(event)
             return
             
-        # Don't handle mouse events in click-through mode except for interactive areas
-        if CLICK_THROUGH_MODE:
-            event.ignore()
-            return
-            
-        # Handle normal dragging
+        # Handle dragging
         if not self.locked and self.old_pos:
             delta = event.globalPos() - self.old_pos
             self.move(self.x() + delta.x(), self.y() + delta.y())
@@ -610,17 +635,12 @@ class EnhancedPresenceGUI(QMainWindow):
             
     def mouseReleaseEvent(self, event):
         """Reset position tracking on release"""
-        # Always allow interaction with interactive areas
+        # Let interactive elements handle their own mouse releases
         if self.is_in_interactive_area(event.pos()):
             super().mouseReleaseEvent(event)
             return
             
-        # Don't handle mouse events in click-through mode
-        if CLICK_THROUGH_MODE:
-            event.ignore()
-            return
-            
-        # Handle normal mouse release
+        # Reset dragging position
         if not self.locked and event.button() == Qt.LeftButton:
             self.old_pos = None
     
