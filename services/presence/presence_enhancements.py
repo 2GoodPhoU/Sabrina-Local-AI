@@ -7,64 +7,111 @@ import sys
 import os
 import json
 import screeninfo
+import time
+
+# Import the improved modules
+from error_handling import ErrorHandler, logger
+from resource_management import ResourceManager
+from config_manager import ConfigManager
+from event_system import EventBus, EventType, EventPriority, Event, register_animation_handler, trigger_animation_change
+
+# Import constants - now using config_manager for dynamic settings
 from presence_constants import (
-    WINDOW_WIDTH, WINDOW_HEIGHT, PADDING_RIGHT, ENABLE_TRANSPARENCY, TRANSPARENCY_LEVEL,
-    CLICK_THROUGH_MODE, ENABLE_DRAGGING, LOCK_POSITION, ASSETS_FOLDER, DEFAULT_ANIMATION,
-    ANIMATION_PRIORITY, ANIMATION_STATES
+    ANIMATION_STATES, ANIMATION_PRIORITY, ASSETS_FOLDER, DEFAULT_ANIMATION
 )
-from animation_manager import AnimationManager
 
 class AnimatedLabel(QLabel):
-    """Enhanced QLabel with animation properties"""
+    """Enhanced QLabel with animation properties and opacity control"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self._opacity = 1.0
         self.setStyleSheet("background: transparent;")
+        
+        # Add resource tracking
+        self.movie_resource_id = None
 
     def setOpacity(self, opacity):
+        """Set the opacity level of the label"""
         self._opacity = opacity
         self.update()
 
     def getOpacity(self):
+        """Get the current opacity level"""
         return self._opacity
 
     # Define property for QPropertyAnimation
     opacity = pyqtProperty(float, getOpacity, setOpacity)
 
     def paintEvent(self, event):
+        """Override paintEvent for custom opacity rendering"""
         painter = QPainter(self)
         painter.setOpacity(self._opacity)
         super().paintEvent(event)
 
 
 class EnhancedPresenceGUI(QMainWindow):
-    def __init__(self):
+    def __init__(self, resource_manager=None, config_manager=None, event_bus=None):
+        """Initialize the Presence GUI with improved components
+        
+        Args:
+            resource_manager: Optional ResourceManager instance
+            config_manager: Optional ConfigManager instance
+            event_bus: Optional EventBus instance
+        """
         super().__init__()
+        
+        # Initialize improved components
+        self.resource_manager = resource_manager or ResourceManager()
+        self.config_manager = config_manager or ConfigManager()
+        self.event_bus = event_bus or EventBus()
+        
+        logger.info("Initializing Enhanced Presence GUI")
+        
+        # Load configuration
+        window_config = self.config_manager.get_config("window", None, {})
+        interaction_config = self.config_manager.get_config("interaction", None, {})
+        
         # Get screen dimensions
-        screen = screeninfo.get_monitors()[0]  
-        screen_width, screen_height = screen.width, screen.height
+        try:
+            screen = screeninfo.get_monitors()[0]  
+            screen_width, screen_height = screen.width, screen.height
+        except Exception as e:
+            ErrorHandler.log_error(e, "Failed to get screen dimensions")
+            # Fallback dimensions
+            screen_width, screen_height = 1920, 1080
+        
+        # Window dimensions from config
+        window_width = window_config.get("width", 500)
+        window_height = window_config.get("height", 500)
+        padding_right = window_config.get("padding_right", 20)
 
         # Set window position
-        self.x_position = screen_width - WINDOW_WIDTH - PADDING_RIGHT
-        self.y_position = (screen_height // 2) - (WINDOW_HEIGHT // 2)
+        self.x_position = screen_width - window_width - padding_right
+        self.y_position = (screen_height // 2) - (window_height // 2)
 
         # Configure window properties - important to set flags here
-        self.setGeometry(self.x_position, self.y_position, WINDOW_WIDTH, WINDOW_HEIGHT)
+        self.setGeometry(self.x_position, self.y_position, window_width, window_height)
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)  
         
         # Set transparency
-        if ENABLE_TRANSPARENCY:
+        enable_transparency = window_config.get("enable_transparency", True)
+        transparency_level = window_config.get("transparency_level", 0.85)
+        if enable_transparency:
             self.setAttribute(Qt.WA_TranslucentBackground)  
-            self.setWindowOpacity(TRANSPARENCY_LEVEL)  
+            self.setWindowOpacity(transparency_level)  
 
         # Dragging and position locking
-        self.drag_enabled = ENABLE_DRAGGING and not LOCK_POSITION
-        self.locked = LOCK_POSITION
+        self.drag_enabled = window_config.get("enable_dragging", True) and not window_config.get("lock_position", False)
+        self.locked = window_config.get("lock_position", False)
         self.old_pos = None
 
         # Animation and themes
-        self.current_theme = "default"
+        themes_config = self.config_manager.get_config("themes", None, {})
+        self.current_theme = themes_config.get("default_theme", "default")
         self.themes = self.load_themes()
+        
+        # Click-through mode
+        self.click_through_enabled = interaction_config.get("click_through_mode", False)
         
         # Interactive areas tracking
         self.interactive_areas = []
@@ -73,34 +120,73 @@ class EnhancedPresenceGUI(QMainWindow):
         self.setup_ui()
         
         # Initial click-through status - make sure flags are set correctly based on initial state
-        if CLICK_THROUGH_MODE:
+        if self.click_through_enabled:
             self.setWindowFlags(self.windowFlags() | Qt.WindowTransparentForInput)
             
         # Setup System Tray
         self.setup_system_tray()
         
-        # Setup Animation Manager
-        self.animation_manager = AnimationManager(ASSETS_FOLDER)
+        # Setup Animation Manager with ResourceManager integration
+        self.animation_manager = None
+        self.load_animation_manager()
+        
         self.current_animation = None
         self.animation_opacity = 1.0
         self.transition_in_progress = False
         
         # Set default animation
-        default_animation = self.animation_manager.animations.get(DEFAULT_ANIMATION, None)
-        if default_animation:
-            self.set_animation(DEFAULT_ANIMATION)
+        animation_config = self.config_manager.get_config("animations", None, {})
+        default_animation = animation_config.get("default_animation", DEFAULT_ANIMATION)
+        self.set_animation(default_animation)
 
         # Start event listener
         self.start_event_listener()
         
+        # Log successful initialization
+        logger.info("Enhanced Presence GUI initialized successfully")
+
+    def load_animation_manager(self):
+        """Initialize and load the animation manager"""
+        try:
+            from animation_manager import AnimationManager
+            self.animation_manager = AnimationManager(ASSETS_FOLDER)
+            logger.info("Animation manager loaded successfully")
+        except ImportError as e:
+            ErrorHandler.log_error(e, "Failed to import AnimationManager")
+            logger.warning("Using built-in animation handling instead")
+            # Create a simple dictionary for animations
+            self.animations = self.load_animations_fallback()
+    
+    def load_animations_fallback(self):
+        """Fallback method to load animations without AnimationManager"""
+        animations = {}
+        if not os.path.exists(ASSETS_FOLDER):
+            logger.warning(f"Assets folder not found: {ASSETS_FOLDER}")
+            return animations
+        
+        try:
+            for file in os.listdir(ASSETS_FOLDER):
+                if file.endswith((".gif", ".png")):
+                    key = os.path.splitext(file)[0]  
+                    animations[key] = os.path.join(ASSETS_FOLDER, file)
+                    # Register with resource manager
+                    self.resource_manager.register_resource(
+                        f"animation_{key}",
+                        os.path.join(ASSETS_FOLDER, file)
+                    )
+        except Exception as e:
+            ErrorHandler.log_error(e, "Failed to load animations")
+        
+        return animations
+
     def is_in_interactive_area(self, pos):
         """Check if a point is in an interactive area (settings menu, buttons)"""
         # Check settings menu
-        if self.settings_menu.isVisible() and self.settings_menu.geometry().contains(pos):
+        if hasattr(self, 'settings_menu') and self.settings_menu.isVisible() and self.settings_menu.geometry().contains(pos):
             return True
             
         # Check settings button
-        if self.settings_button.geometry().contains(pos):
+        if hasattr(self, 'settings_button') and self.settings_button.geometry().contains(pos):
             return True
             
         # Check other interactive areas
@@ -136,12 +222,16 @@ class EnhancedPresenceGUI(QMainWindow):
         # Position labels with absolute layout
         # Top-right corner, below settings button
         animation_top_margin = 30  # Below settings button
-        self.current_label.setGeometry(0, animation_top_margin, WINDOW_WIDTH, WINDOW_HEIGHT - animation_top_margin)
-        self.next_label.setGeometry(0, animation_top_margin, WINDOW_WIDTH, WINDOW_HEIGHT - animation_top_margin)
+        window_config = self.config_manager.get_config("window", None, {})
+        window_width = window_config.get("width", 500)
+        window_height = window_config.get("height", 500)
+        
+        self.current_label.setGeometry(0, animation_top_margin, window_width, window_height - animation_top_margin)
+        self.next_label.setGeometry(0, animation_top_margin, window_width, window_height - animation_top_margin)
         
         # Settings button in top right corner
         self.settings_button = QPushButton("⚙", self)
-        self.settings_button.setGeometry(WINDOW_WIDTH - 30, 5, 25, 25)
+        self.settings_button.setGeometry(window_width - 30, 5, 25, 25)
         self.settings_button.clicked.connect(self.toggle_settings)
         self.settings_button.setStyleSheet("background-color: white; color: black; border-radius: 5px;")
 
@@ -185,7 +275,12 @@ class EnhancedPresenceGUI(QMainWindow):
         self.transparency_slider = QSlider(Qt.Horizontal, self.settings_menu)
         self.transparency_slider.setMinimum(10)
         self.transparency_slider.setMaximum(100)
-        self.transparency_slider.setValue(int(TRANSPARENCY_LEVEL * 100))
+        
+        # Get transparency level from config
+        window_config = self.config_manager.get_config("window", None, {})
+        transparency_level = window_config.get("transparency_level", 0.85)
+        self.transparency_slider.setValue(int(transparency_level * 100))
+        
         self.transparency_slider.valueChanged.connect(self.adjust_transparency)
         transparency_layout.addWidget(self.transparency_label)
         transparency_layout.addWidget(self.transparency_slider)
@@ -250,39 +345,59 @@ class EnhancedPresenceGUI(QMainWindow):
 
     def setup_system_tray(self):
         """Create system tray icon with menu"""
-        self.tray_icon = QSystemTrayIcon(self)
-        self.tray_icon.setIcon(QIcon(os.path.join(ASSETS_FOLDER, "static.png")))
-        
-        # Create tray menu
-        tray_menu = QMenu()
-        show_action = QAction("Show/Hide", self)
-        settings_action = QAction("Settings", self)
-        exit_action = QAction("Exit", self)
-        
-        # Add animation state submenu
-        animation_menu = tray_menu.addMenu("Set Animation")
-        for state in ANIMATION_STATES:
-            action = QAction(f"{state}", self)
-            action.triggered.connect(lambda checked=False, s=state: self.set_animation(s))
-            animation_menu.addAction(action)
-        
-        # Add actions to menu
-        tray_menu.addAction(show_action)
-        tray_menu.addAction(settings_action)
-        tray_menu.addSeparator()
-        tray_menu.addAction(exit_action)
-        
-        # Connect actions
-        show_action.triggered.connect(self.toggle_visibility)
-        settings_action.triggered.connect(self.show_settings)
-        exit_action.triggered.connect(self.safe_exit)
-        
-        # Set context menu and show tray icon
-        self.tray_icon.setContextMenu(tray_menu)
-        self.tray_icon.show()
-        
-        # Setup double-click behavior
-        self.tray_icon.activated.connect(self.tray_icon_activated)
+        try:
+            self.tray_icon = QSystemTrayIcon(self)
+            
+            # Get tray icon path from config or use default
+            tray_config = self.config_manager.get_config("system_tray", None, {})
+            tray_icon_path = tray_config.get("tray_icon_path", os.path.join(ASSETS_FOLDER, "static.png"))
+            
+            if os.path.exists(tray_icon_path):
+                self.tray_icon.setIcon(QIcon(tray_icon_path))
+            else:
+                logger.warning(f"Tray icon not found: {tray_icon_path}")
+                # Try to find any PNG in assets folder as fallback
+                for file in os.listdir(ASSETS_FOLDER):
+                    if file.endswith(".png"):
+                        fallback_path = os.path.join(ASSETS_FOLDER, file)
+                        logger.info(f"Using fallback tray icon: {fallback_path}")
+                        self.tray_icon.setIcon(QIcon(fallback_path))
+                        break
+            
+            # Create tray menu
+            tray_menu = QMenu()
+            show_action = QAction("Show/Hide", self)
+            settings_action = QAction("Settings", self)
+            exit_action = QAction("Exit", self)
+            
+            # Add animation state submenu
+            animation_menu = tray_menu.addMenu("Set Animation")
+            for state in ANIMATION_STATES:
+                action = QAction(f"{state}", self)
+                action.triggered.connect(lambda checked=False, s=state: self.set_animation(s))
+                animation_menu.addAction(action)
+            
+            # Add actions to menu
+            tray_menu.addAction(show_action)
+            tray_menu.addAction(settings_action)
+            tray_menu.addSeparator()
+            tray_menu.addAction(exit_action)
+            
+            # Connect actions
+            show_action.triggered.connect(self.toggle_visibility)
+            settings_action.triggered.connect(self.show_settings)
+            exit_action.triggered.connect(self.safe_exit)
+            
+            # Set context menu and show tray icon
+            self.tray_icon.setContextMenu(tray_menu)
+            self.tray_icon.show()
+            
+            # Setup double-click behavior
+            self.tray_icon.activated.connect(self.tray_icon_activated)
+            
+            logger.info("System tray icon initialized successfully")
+        except Exception as e:
+            ErrorHandler.log_error(e, "Failed to initialize system tray")
 
     def tray_icon_activated(self, reason):
         """Handle tray icon activation events"""
@@ -293,14 +408,58 @@ class EnhancedPresenceGUI(QMainWindow):
         """Toggle the visibility of the main window"""
         if self.isVisible():
             self.hide()
+            logger.info("Presence window hidden")
+            
+            # Post event about visibility change
+            self.event_bus.post_event(
+                Event(
+                    EventType.WINDOW_STATE,
+                    {"visible": False},
+                    EventPriority.LOW,
+                    "presence_gui"
+                )
+            )
         else:
             self.show()
             self.activateWindow()
+            logger.info("Presence window shown")
+            
+            # Post event about visibility change
+            self.event_bus.post_event(
+                Event(
+                    EventType.WINDOW_STATE,
+                    {"visible": True},
+                    EventPriority.LOW,
+                    "presence_gui"
+                )
+            )
 
     def load_themes(self):
-        """Load animation themes"""
+        """Load animation themes with improved error handling"""
+        return ErrorHandler.handle_file_operation(
+            operation=self._load_themes_internal,
+            file_path=os.path.join(ASSETS_FOLDER, "themes.json"),
+            fallback=self._get_default_themes(),
+            context="Loading themes"
+        )
+    
+    def _load_themes_internal(self):
+        """Internal method to load themes from file"""
         themes_file = os.path.join(ASSETS_FOLDER, "themes.json")
-        default_themes = {
+        
+        if os.path.exists(themes_file):
+            with open(themes_file, 'r') as f:
+                themes = json.load(f)
+            return themes
+        
+        # If file doesn't exist, create it with default themes
+        default_themes = self._get_default_themes()
+        self._save_themes_internal(default_themes)
+        return default_themes
+    
+    def _get_default_themes(self):
+        """Get default themes dictionary"""
+        return {
             "default": {
                 "idle": "idle.gif",
                 "listening": "listening.gif",
@@ -313,148 +472,233 @@ class EnhancedPresenceGUI(QMainWindow):
                 "waiting": "idle.gif"
             }
         }
-        
-        if os.path.exists(themes_file):
-            try:
-                with open(themes_file, 'r') as f:
-                    themes = json.load(f)
-                return themes
-            except Exception as e:
-                print(f"Error loading themes file: {e}")
-        
-        # Create default themes file if it doesn't exist
-        try:
-            with open(themes_file, 'w') as f:
-                json.dump(default_themes, f, indent=4)
-        except Exception as e:
-            print(f"Error creating themes file: {e}")
-        
-        return default_themes
 
     def save_themes(self):
-        """Save themes to JSON file"""
+        """Save themes to JSON file with error handling"""
+        return ErrorHandler.handle_file_operation(
+            operation=lambda: self._save_themes_internal(self.themes),
+            file_path=os.path.join(ASSETS_FOLDER, "themes.json"),
+            fallback=False,
+            context="Saving themes"
+        )
+    
+    def _save_themes_internal(self, themes_data):
+        """Internal method to save themes to file"""
         themes_file = os.path.join(ASSETS_FOLDER, "themes.json")
-        try:
-            with open(themes_file, 'w') as f:
-                json.dump(self.themes, f, indent=4)
-            return True
-        except Exception as e:
-            print(f"Error saving themes file: {e}")
-            return False
+        with open(themes_file, 'w') as f:
+            json.dump(themes_data, f, indent=4)
+        return True
 
     def change_theme(self, theme_name):
         """Change the current animation theme"""
         if theme_name in self.themes:
             self.current_theme = theme_name
+            logger.info(f"Changed theme to: {theme_name}")
+            
+            # Update config
+            self.config_manager.set_config("themes", "default_theme", theme_name)
+            
+            # Post event about theme change
+            self.event_bus.post_event(
+                Event(
+                    EventType.THEME_CHANGE,
+                    {"theme": theme_name},
+                    EventPriority.NORMAL,
+                    "presence_gui"
+                )
+            )
+            
             # Refresh current animation
             if self.current_animation:
                 self.set_animation(self.current_animation)
 
     def import_custom_theme(self):
-        """Import a custom theme from a directory"""
-        theme_dir = QFileDialog.getExistingDirectory(self, "Select Theme Directory")
-        if not theme_dir:
-            return
-        
-        # Get theme name
-        theme_name = os.path.basename(theme_dir)
-        if theme_name in self.themes:
-            confirm = QMessageBox.question(self, "Theme Already Exists", 
-                                          f"Theme '{theme_name}' already exists. Overwrite?", 
-                                          QMessageBox.Yes | QMessageBox.No)
-            if confirm == QMessageBox.No:
+        """Import a custom theme from a directory with robust error handling"""
+        try:
+            theme_dir = QFileDialog.getExistingDirectory(self, "Select Theme Directory")
+            if not theme_dir:
                 return
-        
-        # Create theme structure
-        new_theme = {}
-        for state in ANIMATION_STATES:
-            # Look for file with same name as state
-            for ext in ['.gif', '.png']:
-                file_path = os.path.join(theme_dir, f"{state}{ext}")
-                if os.path.exists(file_path):
-                    # Copy file to assets folder
-                    target_file = f"{theme_name}_{state}{ext}"
-                    target_path = os.path.join(ASSETS_FOLDER, target_file)
-                    try:
-                        with open(file_path, 'rb') as src, open(target_path, 'wb') as dst:
-                            dst.write(src.read())
-                        new_theme[state] = target_file
-                        break
-                    except Exception as e:
-                        print(f"Error copying theme file: {e}")
             
-            # If no file found for this state, use default
-            if state not in new_theme:
-                new_theme[state] = self.themes["default"].get(state, "static.png")
-        
-        # Add new theme
-        self.themes[theme_name] = new_theme
-        self.save_themes()
-        
-        # Update theme selector
-        self.theme_selector.addItem(theme_name)
-        self.theme_selector.setCurrentText(theme_name)
+            # Get theme name
+            theme_name = os.path.basename(theme_dir)
+            if theme_name in self.themes:
+                confirm = QMessageBox.question(self, "Theme Already Exists", 
+                                            f"Theme '{theme_name}' already exists. Overwrite?", 
+                                            QMessageBox.Yes | QMessageBox.No)
+                if confirm == QMessageBox.No:
+                    return
+            
+            # Create theme structure
+            new_theme = {}
+            
+            # Track import success
+            success_count = 0
+            error_count = 0
+            
+            for state in ANIMATION_STATES:
+                # Look for file with same name as state
+                imported = False
+                for ext in ['.gif', '.png']:
+                    file_path = os.path.join(theme_dir, f"{state}{ext}")
+                    if os.path.exists(file_path):
+                        # Copy file to assets folder
+                        target_file = f"{theme_name}_{state}{ext}"
+                        target_path = os.path.join(ASSETS_FOLDER, target_file)
+                        try:
+                            with open(file_path, 'rb') as src, open(target_path, 'wb') as dst:
+                                dst.write(src.read())
+                            
+                            # Register with resource manager
+                            self.resource_manager.register_resource(
+                                f"theme_{theme_name}_{state}",
+                                target_path
+                            )
+                            
+                            new_theme[state] = target_file
+                            success_count += 1
+                            imported = True
+                            break
+                        except Exception as e:
+                            ErrorHandler.log_error(e, f"Error copying theme file: {file_path}")
+                            error_count += 1
+                
+                # If no file found for this state, use default
+                if not imported:
+                    new_theme[state] = self.themes["default"].get(state, "static.png")
+            
+            # Add new theme
+            self.themes[theme_name] = new_theme
+            self.save_themes()
+            
+            # Update theme selector
+            self.theme_selector.addItem(theme_name)
+            self.theme_selector.setCurrentText(theme_name)
+            
+            # Show status message
+            if error_count > 0:
+                QMessageBox.warning(self, "Theme Import", 
+                                    f"Theme imported with {success_count} files.\n{error_count} files failed to import.")
+            else:
+                QMessageBox.information(self, "Theme Import", 
+                                        f"Theme '{theme_name}' imported successfully with {success_count} animations.")
+            
+            logger.info(f"Imported theme: {theme_name} with {success_count} animations")
+        except Exception as e:
+            ErrorHandler.log_error(e, "Failed to import theme")
+            QMessageBox.critical(self, "Theme Import Error", 
+                                 f"Failed to import theme: {str(e)}")
 
     def set_animation(self, state):
-        """Set the animation with smooth transition"""
+        """Set the animation with smooth transition and resource management"""
+        # Skip if state is not valid
         if state not in ANIMATION_STATES:
-            print(f"Unknown animation state: {state}")
+            logger.warning(f"Unknown animation state: {state}")
             return False
+            
+        # Track animation start time for performance monitoring
+        start_time = time.time()
             
         # Get theme-specific animation file
-        animation_file = self.themes[self.current_theme].get(state)
-        if not animation_file:
-            print(f"No animation file for state: {state} in theme: {self.current_theme}")
-            return False
+        try:
+            animation_file = self.themes[self.current_theme].get(state)
+            if not animation_file:
+                logger.warning(f"No animation file for state: {state} in theme: {self.current_theme}")
+                return False
+                
+            animation_path = os.path.join(ASSETS_FOLDER, animation_file)
+            if not os.path.exists(animation_path):
+                logger.warning(f"Animation file not found: {animation_path}")
+                # Try to find a fallback
+                fallback_path = os.path.join(ASSETS_FOLDER, "static.png")
+                if os.path.exists(fallback_path):
+                    logger.info(f"Using fallback animation: {fallback_path}")
+                    animation_path = fallback_path
+                else:
+                    return False
             
-        animation_path = os.path.join(ASSETS_FOLDER, animation_file)
-        if not os.path.exists(animation_path):
-            print(f"Animation file not found: {animation_path}")
-            return False
-        
-        # If same animation is already playing, don't transition
-        if self.current_animation == state:
+            # If same animation is already playing, don't transition
+            if self.current_animation == state:
+                # But still register usage with resource manager
+                self.resource_manager.use_resource(f"animation_{state}")
+                return True
+                
+            # Store the animation state
+            self.current_animation = state
+            
+            # Post event about animation change
+            self.event_bus.post_event(
+                Event(
+                    EventType.ANIMATION_CHANGE,
+                    {"animation": state},
+                    EventPriority.LOW,
+                    "presence_gui"
+                )
+            )
+            
+            # Register with resource manager
+            resource_id = f"animation_{state}"
+            self.resource_manager.register_resource(resource_id, animation_path)
+            
+            # Check if transition is already in progress and cancel it if needed
+            if self.transition_in_progress:
+                if hasattr(self, 'fade_out') and self.fade_out.state() == QPropertyAnimation.Running:
+                    self.fade_out.stop()
+                if hasattr(self, 'fade_in') and self.fade_in.state() == QPropertyAnimation.Running:
+                    self.fade_in.stop()
+            
+            # Stop any existing movie on the next label and unregister old resource
+            if hasattr(self.next_label, 'movie') and self.next_label.movie():
+                self.next_label.movie().stop()
+                self.next_label.setMovie(None)
+                
+                # Unregister old resource if it exists
+                if hasattr(self.next_label, 'movie_resource_id') and self.next_label.movie_resource_id:
+                    self.resource_manager.unregister_resource(self.next_label.movie_resource_id)
+                
+            # Prepare next animation
+            if animation_path.endswith('.png'):
+                # Static image
+                self.next_label.setPixmap(QPixmap(animation_path))
+                self.next_label.movie_resource_id = None  # No movie resource to track
+            else:
+                # Animated GIF
+                try:
+                    movie = QMovie(animation_path)
+                    movie.setCacheMode(QMovie.CacheAll)
+                    movie.setScaledSize(self.next_label.size())  # Scale to fit label
+                    movie.loopCount = -1  # Infinite loop
+                    self.next_label.setMovie(movie)
+                    self.next_label.movie_resource_id = resource_id  # Track resource ID
+                    movie.start()
+                except Exception as e:
+                    ErrorHandler.log_error(e, f"Error loading animation {animation_path}")
+                    # Fallback to static image if available
+                    static_path = os.path.join(ASSETS_FOLDER, "static.png")
+                    if os.path.exists(static_path):
+                        self.next_label.setPixmap(QPixmap(static_path))
+                        logger.info(f"Using fallback static image: {static_path}")
+                        self.next_label.movie_resource_id = None  # No movie resource to track
+            
+            # Get animation settings
+            animation_config = self.config_manager.get_config("animations", None, {})
+            enable_transitions = animation_config.get("enable_transitions", True)
+            
+            # Perform cross-fade transition if enabled
+            if enable_transitions:
+                self.cross_fade(animation_config.get("transition_duration", 300))
+            else:
+                # Instant switch
+                self.complete_transition()
+            
+            # Log animation change with timing
+            elapsed_time = (time.time() - start_time) * 1000  # Convert to ms
+            logger.debug(f"Set animation to {state} in {elapsed_time:.2f}ms")
+            
             return True
             
-        # Store the animation state
-        self.current_animation = state
-        
-        # Check if transition is already in progress and cancel it if needed
-        if self.transition_in_progress:
-            if hasattr(self, 'fade_out') and self.fade_out.state() == QPropertyAnimation.Running:
-                self.fade_out.stop()
-            if hasattr(self, 'fade_in') and self.fade_in.state() == QPropertyAnimation.Running:
-                self.fade_in.stop()
-        
-        # Stop any existing movie on the next label
-        if hasattr(self.next_label, 'movie') and self.next_label.movie():
-            self.next_label.movie().stop()
-            self.next_label.setMovie(None)
-            
-        # Prepare next animation
-        if animation_path.endswith('.png'):
-            # Static image
-            self.next_label.setPixmap(QPixmap(animation_path))
-        else:
-            # Animated GIF
-            try:
-                movie = QMovie(animation_path)
-                movie.setCacheMode(QMovie.CacheAll)
-                movie.setScaledSize(self.next_label.size())  # Scale to fit label
-                movie.loopCount = -1  # Infinite loop
-                self.next_label.setMovie(movie)
-                movie.start()
-            except Exception as e:
-                print(f"Error loading animation {animation_path}: {e}")
-                # Fallback to static image if available
-                static_path = os.path.join(ASSETS_FOLDER, "static.png")
-                if os.path.exists(static_path):
-                    self.next_label.setPixmap(QPixmap(static_path))
-                    print(f"Using fallback static image: {static_path}")
-        
-        # Perform cross-fade transition
-        self.cross_fade()
-        return True
+        except Exception as e:
+            ErrorHandler.log_error(e, f"Failed to set animation: {state}")
+            return False
 
     def cross_fade(self, duration=300):
         """Perform cross-fade transition between animations"""
@@ -480,237 +724,3 @@ class EnhancedPresenceGUI(QMainWindow):
         # Start animations
         self.fade_out.start()
         self.fade_in.start()
-
-    def complete_transition(self):
-        """Complete the transition by swapping labels"""
-        # Stop the old animation completely before swapping
-        if hasattr(self.current_label, 'movie') and self.current_label.movie():
-            self.current_label.movie().stop()
-            self.current_label.setMovie(None)  # Remove the movie entirely
-        
-        # Swap the current and next labels
-        temp_label = self.current_label
-        self.current_label = self.next_label
-        self.next_label = temp_label
-        
-        # Make sure the next label is completely transparent
-        self.next_label.setOpacity(0.0)
-        
-        # Mark transition as completed
-        self.transition_in_progress = False
-
-    def update_interactive_areas(self):
-        """Update the list of interactive areas"""
-        self.interactive_areas = []
-        
-        # Add settings button
-        self.interactive_areas.append(self.settings_button.geometry())
-        
-        # Add settings menu and all its children if visible
-        if self.settings_menu.isVisible():
-            self.interactive_areas.append(self.settings_menu.geometry())
-            
-            # Add all buttons and controls in the settings menu
-            for child in self.settings_menu.findChildren(QWidget):
-                if child.isVisible():
-                    # Convert child's local coordinates to parent coordinates
-                    child_geo = child.geometry()
-                    global_geo = QRect(
-                        self.settings_menu.mapToParent(child_geo.topLeft()),
-                        child_geo.size()
-                    )
-                    self.interactive_areas.append(global_geo)
-
-    def toggle_lock(self):
-        """Toggle Lock Position setting"""
-        self.locked = not self.locked
-        self.drag_enabled = not self.locked
-        self.lock_button.setText("Position Locked 🔒" if self.locked else "Position Unlocked 🔓")
-
-    def adjust_transparency(self, value):
-        """Adjust window transparency using the slider"""
-        self.setWindowOpacity(value / 100)
-        self.repaint()
-
-    def adjust_volume(self, value):
-        """Adjust volume level (to be connected to voice API)"""
-        print(f"Volume set to {value}%")  # Placeholder for voice API connection
-
-    def toggle_click_through(self):
-        """Toggle Click-Through mode while keeping settings interactive"""
-        global CLICK_THROUGH_MODE
-        CLICK_THROUGH_MODE = not CLICK_THROUGH_MODE
-        
-        # Update window flag to enable click-through
-        if CLICK_THROUGH_MODE:
-            # Set window to be transparent for input
-            self.setWindowFlags(self.windowFlags() | Qt.WindowTransparentForInput)
-            self.show()  # Need to call show() to apply flag changes
-            
-            # Make settings button interactive again by setting it as a subwindow
-            # This is a trick to override the parent window's transparent input flag
-            self.settings_button.setWindowFlags(Qt.SubWindow)
-            self.settings_button.show()
-            
-            # If settings menu is visible, keep it interactive
-            if self.settings_menu.isVisible():
-                self.settings_menu.setWindowFlags(Qt.SubWindow)
-                self.settings_menu.show()
-        else:
-            # Remove transparent input flag
-            self.setWindowFlags(self.windowFlags() & ~Qt.WindowTransparentForInput)
-            self.show()  # Need to call show() to apply flag changes
-            
-            # Reset settings button flags
-            self.settings_button.setWindowFlags(Qt.Widget)
-            self.settings_button.show()
-            
-            # Reset settings menu flags if visible
-            if self.settings_menu.isVisible():
-                self.settings_menu.setWindowFlags(Qt.Widget)
-                self.settings_menu.show()
-        
-        self.update_click_through_button()
-        
-    def toggle_settings(self):
-        """Toggle the visibility of the settings menu"""
-        visible = not self.settings_menu.isVisible()
-        self.settings_menu.setVisible(visible)
-        
-        # If in click-through mode, we need to handle settings menu visibility specially
-        if CLICK_THROUGH_MODE and visible:
-            self.settings_menu.setWindowFlags(Qt.SubWindow)
-            self.settings_menu.show()
-        
-        # Update interactive areas when settings visibility changes
-        self.update_interactive_areas()
-    
-    def update_click_through_button(self):
-        """Update button text based on Click-Through mode"""
-        self.click_through_button.setText(f"🖱️ Click-Through: {'ON' if CLICK_THROUGH_MODE else 'OFF'}")
-    
-    def test_animation(self, state):
-        """Test a specific animation state"""
-        if state in ANIMATION_STATES:
-            self.set_animation(state)
-
-    def show_settings(self):
-        """Show the settings menu"""
-        self.show()  # Make sure window is visible
-        self.settings_menu.show()
-        self.activateWindow()
-        self.update_interactive_areas()
-    
-    def mousePressEvent(self, event):
-        """Handle mouse press events"""
-        # With the new approach using WindowTransparentForInput,
-        # this will only be called when click-through is OFF or
-        # when clicking on the settings button or menu
-        
-        if event.button() == Qt.RightButton:
-            # Show context menu on right-click
-            self.show_context_menu(event.globalPos())
-        elif event.button() == Qt.LeftButton:
-            # Check if we're on a draggable area (not settings)
-            if not self.locked and not self.is_in_interactive_area(event.pos()):
-                self.old_pos = event.globalPos()
-                # Also handle interaction
-                self.handle_interaction()
-            else:
-                # Let the event propagate to interactive elements
-                super().mousePressEvent(event)
-    
-    def mouseMoveEvent(self, event):
-        """Allow dragging if enabled and unlocked"""
-        # Let interactive elements handle their own mouse moves
-        if self.is_in_interactive_area(event.pos()):
-            super().mouseMoveEvent(event)
-            return
-            
-        # Handle dragging
-        if not self.locked and self.old_pos:
-            delta = event.globalPos() - self.old_pos
-            self.move(self.x() + delta.x(), self.y() + delta.y())
-            self.old_pos = event.globalPos()
-            
-    def mouseReleaseEvent(self, event):
-        """Reset position tracking on release"""
-        # Let interactive elements handle their own mouse releases
-        if self.is_in_interactive_area(event.pos()):
-            super().mouseReleaseEvent(event)
-            return
-            
-        # Reset dragging position
-        if not self.locked and event.button() == Qt.LeftButton:
-            self.old_pos = None
-    
-    def show_context_menu(self, position):
-        """Show a context menu at the given position"""
-        context_menu = QMenu()
-        
-        # Animation states submenu
-        animation_menu = context_menu.addMenu("Set Animation")
-        for state in ANIMATION_STATES:
-            action = QAction(f"{state}", self)
-            action.triggered.connect(lambda checked=False, s=state: self.set_animation(s))
-            animation_menu.addAction(action)
-            
-        # Other quick actions
-        context_menu.addSeparator()
-        settings_action = context_menu.addAction("Open Settings")
-        toggle_visibility = context_menu.addAction("Hide Window")
-        context_menu.addSeparator()
-        exit_action = context_menu.addAction("Exit")
-        
-        # Connect actions
-        settings_action.triggered.connect(self.show_settings)
-        toggle_visibility.triggered.connect(self.toggle_visibility)
-        exit_action.triggered.connect(self.safe_exit)
-        
-        # Show the menu
-        context_menu.exec_(position)
-
-    def handle_interaction(self):
-        """Handle direct interaction with the AI presence"""
-        # Example: Trigger the "listening" state when clicked
-        self.set_animation("listening")
-        
-        # Here you could also:
-        # 1. Trigger voice activation
-        # 2. Show a quick command panel
-        # 3. Trigger a specific AI function
-        print("[INTERACTION] User clicked on AI presence")
-    
-    def start_event_listener(self):
-        """Start queue processing for animations"""
-        QTimer.singleShot(100, self.process_queue)
-    
-    def process_queue(self):
-        """Process animations from queue"""
-        if hasattr(self, 'animation_manager'):
-            if self.animation_manager.queue:
-                next_animation = self.animation_manager.queue.pop(0)
-                self.set_animation(next_animation)
-        QTimer.singleShot(100, self.process_queue)
-    
-    def safe_exit(self):
-        """Safely close the program"""
-        print("[INFO] Safe termination initiated.")
-        
-        # Stop all animations
-        if hasattr(self.current_label, 'movie') and self.current_label.movie():
-            self.current_label.movie().stop()
-        
-        if hasattr(self.next_label, 'movie') and self.next_label.movie():
-            self.next_label.movie().stop()
-            
-        # Hide tray icon before exiting
-        if hasattr(self, 'tray_icon'):
-            self.tray_icon.hide()
-            
-        # Save themes if modified
-        self.save_themes()
-        
-        # Close window and exit application
-        self.close()
-        sys.exit()
