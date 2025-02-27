@@ -12,13 +12,13 @@ import logging
 import requests
 import tempfile
 import subprocess
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, List
 
 # Setup logger
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("voice_api_client")
 
-class EnhancedVoiceClient:
+class VoiceAPIClient:
     """
     Enhanced client for the Voice API service with robust error handling, retries,
     and event system integration.
