@@ -1,168 +1,213 @@
-# AI Embodiment Project - Architecture Overview
+# Sabrina AI Architecture Overview
 
-## **1. Overview**
-This document outlines the architecture for the AI Embodiment project, detailing the integration of real-time AI-driven PC automation, smart home control, and future AI embodiment phases.
+## Introduction
 
-## **2. High-Level System Architecture**
-The system consists of multiple interdependent components structured into four key layers:
+Sabrina AI is designed as a locally-running AI assistant with comprehensive capabilities spanning voice interaction, screen awareness, automation, and smart home control. This document provides an overview of Sabrina's architectural design and how its components work together.
 
-### **2.1 Core AI System**
-- **Natural Language Processing (NLP)**: ChatGPT API for reasoning and conversation.
-- **Local AI Execution**: Python-based agent for automation (AutoGPT, OpenDevin, or custom scripts).
-- **Memory & Recall**: Vector database or RAG system for adaptive responses.
+## Core Architecture
 
-### **2.2 Input & Sensory Layer**
-- **Voice Processing**: Whisper ASR for always-on listening.
-- **Vision System**: OCR & object detection (Tesseract, OpenCV, PaddleOCR).
-- **Screen Awareness**: Dynamic screen capture and context analysis.
-- **Keyboard & Mouse Interactions**: Low-level OS hooks for real-time input tracking.
+At the heart of Sabrina is a modular, event-driven architecture that focuses on:
 
-### **2.3 Automation & Execution Layer**
-- **PC Control**: Home Assistant + Node-RED for command execution.
-- **Smart Home Integration**: Google Home, Home Assistant for proactive automation.
-- **Remote Execution API**: Webhook/API gateway for dynamic interactions.
+1. **Stability**: Comprehensive error handling and recovery mechanisms
+2. **Modularity**: Cleanly separated components that can be developed and improved independently
+3. **Integration**: Consistent interfaces and communication patterns
+4. **Extensibility**: Easy addition of new features and capabilities
 
-### **2.4 AI Presence & Interaction Layer**
-- **Voice Output**: Jenny TTS for realistic voice synthesis.
-- **Visual Representation**: AI-generated images for dynamic UI.
-- **Virtual Companion Mode**: Persistent AI avatar overlay on PC screen.
+The system is built around these core principles to ensure it remains maintainable and can evolve over time.
 
----
+## Key Components
 
-## **3. System Components & Modules**
+### 1. Core System (`core/sabrina_core.py`)
 
-### **3.1 Input & Sensory Modules**
-#### **Voice Processing**
-- **Module:** `hearing.py`
-- **API:** `hearing_api.py`
-- **Function:** Converts spoken commands into structured inputs.
-- **Tech Stack:** Whisper ASR, PyAudio, WebSockets.
+The central orchestration engine that:
+- Initializes and manages all components
+- Processes user commands
+- Coordinates activities between modules
+- Maintains system state
+- Handles startup and shutdown
 
-#### **Vision & Screen Awareness**
-- **Module:** `vision.py`
-- **API:** `vision_api.py`
-- **Function:** Extracts text and UI elements from the screen.
-- **Tech Stack:** OpenCV, Tesseract, PaddleOCR, PyGetWindow.
+The Core System implements the main interaction loop and acts as the central integration point.
 
-#### **Keyboard & Mouse Hooks**
-- **Module:** `input_tracker.py`
-- **Function:** Monitors and records keyboard/mouse inputs for AI interaction.
-- **Tech Stack:** PyHook, Pynput.
+### 2. Utilities
 
----
+#### Configuration Manager (`utilities/config_manager.py`)
+- Provides centralized configuration handling
+- Supports multiple file formats (YAML, JSON)
+- Enables environment variable overrides
+- Offers configuration validation and defaults
+- Supports hot-reloading of settings
 
-### **3.2 Processing & AI Execution Modules**
-#### **Core AI Engine**
-- **Module:** `core.py`
-- **Function:** Main reasoning engine for AI interaction.
-- **Tech Stack:** Python, OpenAI API, LangChain, Local RAG.
+#### Error Handler (`utilities/error_handler.py`)
+- Provides structured error logging and tracking
+- Categorizes errors by severity and type
+- Enables recovery mechanisms
+- Generates error reports and statistics
+- Offers contextual error information
 
-#### **Memory & Recall System**
-- **Module:** `memory.py`
-- **Function:** Stores long-term interactions and contextual knowledge.
-- **Tech Stack:** ChromaDB, SQLite, Postgres (future upgrade).
+#### Event System (`utilities/event_system.py`)
+- Implements asynchronous event-based communication
+- Supports priority-based event processing
+- Provides event filtering by type and source
+- Enables loose coupling between components
+- Maintains event history for debugging
 
-#### **PC Automation & Control**
-- **Module:** `automation.py`
-- **API:** `automation_api.py`
-- **Function:** Controls PC tasks, applications, and settings. Monitors and records keyboard/mouse inputs for AI interaction.
-- **Tech Stack:** Python scripts. PyHook, Pynput.
+### 3. Service Modules
 
-#### **Smart Home Integration**
-- **Module:** `smart_home.py`
-- **Function:** Interfaces with Google Home and Home Assistant for proactive automation.
-- **Tech Stack:** Google Home API, Home Assistant, MQTT, Home Assistant, Node-RED.
+#### Voice Processing (`services/voice/`)
+- `voice_api.py`: FastAPI-based TTS service
+- `voice_api_client.py`: Client for accessing voice services
+- Handles text-to-speech synthesis
+- Manages voice settings (speed, pitch, emotion)
+- Provides audio playback
 
----
+#### Vision System (`services/vision/`)
+- `vision_core.py`: Main vision system controller
+- `vision_ocr.py`: Optical character recognition
+- Performs screen capture and analysis
+- Extracts text from images using OCR
+- Identifies UI elements (in advanced versions)
+- Tracks active window content
 
-### **3.3 Output & AI Presence Modules**
-#### **Voice Output (TTS)**
-- **Module:** `voice.py`
-- **API:** `voice_api.py`
-- **Function:** Generates spoken responses for user interaction.
-- **Tech Stack:** Jenny TTS, Coqui TTS.
+#### Hearing Module (`services/hearing/`)
+- `hearing.py`: Voice recognition and command detection
+- Listens for wake word activation
+- Converts speech to text
+- Handles noise filtering
+- Supports hotkey activation
 
-#### **Virtual AI Representation**
-- **Module:** `visual_ai.py`
-- **Function:** Displays dynamic AI-generated images based on mood and interactions.
-- **Tech Stack:** Stable Diffusion, Electron.js, PyQt.
+#### Automation System (`services/automation/`)
+- `automation.py`: PC control and automation
+- Controls mouse and keyboard
+- Performs UI interaction
+- Executes automation sequences
+- Provides safety mechanisms
 
----
+#### Smart Home Integration (`services/smart_home/`)
+- `smart_home.py`: Home automation control
+- Connects to Home Assistant
+- Controls smart home devices
+- Manages automation routines
+- Provides sensor data access
 
-## **4. System APIs & Communication**
-### **4.1 API Gateway**
-- Acts as the main communication hub for AI services.
-- Routes requests between voice, vision, automation, and memory systems.
+#### Presence System (`services/presence/`) (Planned)
+- Visual representation of Sabrina
+- Animated character with expressions
+- Status and activity indicators
+- User interaction controls
 
-#### **Key API Endpoints**
-| Endpoint            | Functionality                          | Technology |
-|--------------------|----------------------------------|------------|
-| `/hearing`         | Processes voice input            | Flask, Whisper |
-| `/vision`          | Extracts screen content         | OpenCV, Tesseract |
-| `/memory`          | Stores & retrieves context      | ChromaDB, SQLite |
-| `/automation`      | Executes PC control commands   | Home Assistant, Python |
-| `/smart_home`      | Manages home automation        | Google Home API |
-| `/voice`           | Generates AI speech            | Jenny TTS |
-| `/visual_ai`       | Updates AI representation      | Stable Diffusion, Electron.js |
+### 4. Support Scripts
 
----
+- `scripts/start_sabrina.py`: Main entry point
+- `scripts/setup_env.py`: Environment setup
+- `scripts/test_integration.py`: Integration testing
+- Various utility and maintenance scripts
 
-## **5. Infrastructure & Deployment**
-### **5.1 Dockerized Services**
-To maintain modularity and avoid dependency conflicts, services are containerized:
-- **Hearing & TTS API** → Docker container (`hearing_api.py`, `voice_api.py`)
-- **Vision Processing** → Runs natively for real-time screen access
-- **Automation & PC Control** → Dockerized (`automation_api.py`)
-- **Memory System** → Dockerized (ChromaDB, SQLite, PostgreSQL in future upgrade)
+## Communication Flow
 
-#### **Docker Compose Setup**
-```yaml
-version: '3.8'
-services:
-  hearing:
-    build: ./hearing
-    ports:
-      - "5001:5001"
-  vision:
-    build: ./vision
-    ports:
-      - "5002:5002"
-  automation:
-    build: ./automation
-    ports:
-      - "5003:5003"
-  memory:
-    build: ./memory
-    ports:
-      - "5004:5004"
-```
+Sabrina uses an event-driven architecture for component communication:
 
-### **5.2 Startup Sequence**
-1. **Spin up all Docker containers** (`hearing_api.py`, `voice_api.py`, `memory.py`)
-2. **Initialize API Gateway** for communication between modules
-3. **Launch vision module** to start screen monitoring
-4. **Enable voice listening** for real-time interactions
-5. **Start smart home automation services**
+1. **Events** are the primary means of inter-component communication
+2. Components publish events and subscribe to event types they're interested in
+3. The Event Bus routes events to appropriate handlers based on type and priority
+4. Components respond to events they're registered to handle
 
----
+![Event Flow Diagram](docs/event_flow.png)
 
-## **6. Future Enhancements & Phases**
-### **Phase 2: Enhanced AI Presence & Virtual Representation**
-- AI-generated overlay on PC screen for real-time interaction
-- Real-time lip sync and facial animation using Live2D
+### Example Event Flow
 
-### **Phase 3: AI-Augmented Interactions & Proactive Automation**
-- Predictive automation: task handling before user requests
-- VR/AR integration for full AI presence
-- AI-guided automation workflows
+1. User speaks a command ("Capture the screen")
+2. Hearing module converts speech to text
+3. Hearing module publishes a `USER_INPUT` event
+4. Core system receives the event and processes the command
+5. Core system publishes a `VISION` event with "capture" command
+6. Vision module receives the event and captures the screen
+7. Vision module publishes a `SCREEN_UPDATE` event with OCR results
+8. Core system processes the results and publishes a `VOICE` event
+9. Voice module speaks the response to the user
 
-### **Phase 4: Physical AI Embodiment**
-- Design a humanoid robotic form
-- Integrate haptic feedback & AI touch response
-- Research Neuralink-style BCI for direct AI-human interaction
+This decoupled approach allows components to evolve independently while maintaining system cohesion.
 
----
+## Data Flow
 
-## **7. Conclusion**
-This architecture ensures modularity, scalability, and flexibility in implementing AI-driven PC automation, smart home control, and future AI embodiment phases. The current focus is on real-time screen awareness, voice interaction, and automation, with a structured roadmap for expanding AI presence in virtual and physical spaces.
+### Configuration Data
+- Loaded at startup from `config/settings.yaml`
+- Accessed by all components through ConfigManager
+- Can be updated during runtime
 
+### User Input
+- Comes from voice recognition or direct text input
+- Converted to commands or queries
+- Processed by Core System
+
+### System State
+- Maintained in Core System
+- Includes current context, active components, etc.
+- Components can query state as needed
+
+### Results and Outputs
+- Voice responses through TTS
+- Visual feedback (in future versions)
+- Automation actions
+- Smart home controls
+
+## Deployment Options
+
+### Local Development
+- Run directly on the local machine
+- Components started individually or via startup script
+- Ideal for development and testing
+
+### Containerized Deployment
+- Docker containers for each major component
+- Docker Compose for orchestration
+- Enables consistent deployment across environments
+
+### Hybrid Approach
+- Core system and essential components run locally
+- Resource-intensive components run in containers
+- Balances performance and isolation
+
+## Extension Points
+
+The architecture is designed with clear extension points:
+
+1. **Plugin System** (Planned): Add new capabilities without modifying core code
+2. **Service Interfaces**: Replace or enhance individual services
+3. **Event Handlers**: Add new event types and handlers
+4. **Configuration Options**: Customize behavior through configuration
+5. **Voice and Vision Models**: Replace with custom or improved models
+
+## Technical Stack
+
+- **Python 3.10+**: Core programming language
+- **FastAPI**: API services
+- **PyQt5**: GUI components (for presence system)
+- **PyTorch**: Machine learning framework
+- **OpenCV**: Computer vision
+- **Tesseract OCR**: Text extraction
+- **Vosk/Whisper**: Speech recognition
+- **TTS (Jenny/Coqui)**: Text-to-speech
+- **Docker**: Containerization
+- **YAML/JSON**: Configuration
+
+## Development Workflow
+
+1. **Component Development**: Enhance individual components
+2. **Integration Testing**: Verify component interaction
+3. **System Testing**: Test end-to-end functionality
+4. **Performance Optimization**: Ensure efficient resource usage
+5. **Deployment**: Package for distribution
+
+## Future Directions
+
+The architecture is designed to support future enhancements:
+
+1. **AI Integration**: Local language models for advanced reasoning
+2. **Extended Context Awareness**: Better understanding of user activity
+3. **Advanced Automation**: Complex task sequences and workflows
+4. **Physical Integration**: Control of physical devices and robots
+5. **Enhanced Presence**: More sophisticated visual and auditory presence
+
+## Conclusion
+
+Sabrina AI's architecture provides a solid foundation for a privacy-focused, locally-running AI assistant. Its modular, event-driven design enables continuous improvement and extension while maintaining system integrity and reliability.

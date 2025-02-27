@@ -1,97 +1,255 @@
 """
-3️⃣ hearing.py – AI Speech Recognition & Voice Commands
-🔹 Purpose: Enables real-time voice command recognition for hands-free AI control.
-🔹 Key Functions:
-✔ Uses Whisper ASR for high-accuracy speech-to-text transcription.
-✔ Processes recorded audio and converts it into text.
-✔ Filters background noise to improve recognition accuracy.
-🔹 Use Cases:
-✅ Enables wake-word detection for hands-free operation.
-✅ Converts spoken commands into text for further processing.
-✅ Helps in dictation and voice-based control.
+Enhanced Hearing Module for Sabrina AI
+=====================================
+Provides real voice recognition with wake word detection.
 """
-from vosk import Model, KaldiRecognizer
-import pyaudio
-import json
-import keyboard
-import time
-import os
-import wget
 
-def find_vosk_model(directory="../../models/"):
-    """Find the correct Vosk model folder dynamically."""
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-    subdirs = [d for d in os.listdir(directory) if os.path.isdir(os.path.join(directory, d))]
-    for subdir in subdirs:
-        if "vosk-model" in subdir:
-            return os.path.join(directory, subdir)
-    return None
+import os
+import time
+import logging
+import threading
+import json
+import queue
+import pyaudio
+import keyboard
+import wave
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("hearing")
 
 class Hearing:
-    def __init__(self, wake_word="hey sabrina", model_path="models/"): 
-        """Initialize Vosk for wake-word detection."""
-        self.model_path = find_vosk_model(model_path) or self.download_model()
-        self.model = Model(self.model_path)
-        self.recognizer = KaldiRecognizer(self.model, 16000)
-        self.audio_stream = pyaudio.PyAudio().open(
-            rate=16000, channels=1, format=pyaudio.paInt16, input=True, frames_per_buffer=4096
-        )
+    """Enhanced hearing module with real wake word detection and voice recognition"""
+    
+    def __init__(self, wake_word="hey sabrina", model_path="models/vosk-model"):
+        """
+        Initialize the hearing module with real functionality
+        
+        Args:
+            wake_word: Wake word to activate the system
+            model_path: Path to the voice recognition model
+        """
         self.wake_word = wake_word.lower()
-        self.active = True  # Controls whether the listener is active
-
-    def download_model(self):
-        """Download Vosk model if it's not found in the specified path."""
-        print("[Downloading Vosk Model]")
-        model_url = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
-        model_zip_path = "models/vosk-model.zip"
-        wget.download(model_url, model_zip_path)
-        import zipfile
-        with zipfile.ZipFile(model_zip_path, 'r') as zip_ref:
-            zip_ref.extractall("models/")
-        os.remove(model_zip_path)
-        print("[Vosk Model Downloaded and Extracted]")
-        return find_vosk_model()
-
-    def listen_for_wake_word(self):
-        """Continuously listens for the wake word using Vosk."""
-        print("[Listening for wake word or hotkey Ctrl+Shift+S]")
-        while True:
-            if not self.active:
-                time.sleep(1)  # Pause listening if not active
-                continue
-
-            data = self.audio_stream.read(4096, exception_on_overflow=False)
-            if self.recognizer.AcceptWaveform(data):
-                result = json.loads(self.recognizer.Result())
-                transcript = result.get("text", "").lower()
-                if self.wake_word in transcript:
-                    print(f"[Wake-word detected: {self.wake_word}]")
-                    self.active = False  # Disable listener temporarily
-                    command = self.listen()
-                    print(f"[User Command] {command}")
-                    self.active = True  # Re-enable listener after processing
+        self.model_path = model_path
+        self.hotkey = "ctrl+shift+s"  # Default hotkey
+        
+        # Initialize audio settings
+        self.rate = 16000
+        self.channels = 1
+        self.chunk = 4096
+        self.format = pyaudio.paInt16
+        
+        # Initialize components
+        self.audio = pyaudio.PyAudio()
+        self.stream = None
+        self.listening_thread = None
+        self.running = False
+        
+        # Initialize models
+        self.vosk_model = self._load_vosk_model()
+        self.active = True  # Whether the listener is active
+        
+        logger.info(f"Hearing module initialized with wake word: {self.wake_word}")
+    
+    def _load_vosk_model(self):
+        """
+        Load the Vosk model for wake word detection
+        
+        Returns:
+            Vosk model, or None if not available
+        """
+        try:
+            from vosk import Model, KaldiRecognizer
             
-            if keyboard.is_pressed("ctrl+shift+s"):
-                print("[Hotkey activated!]")
-                self.active = False  # Disable listener temporarily
-                command = self.listen()
-                print(f"[User Command] {command}")
-                self.active = True  # Re-enable listener after processing
-
-    def listen(self):
-        """Records and transcribes user speech to text."""
-        print("Listening for command...")
-        self.recognizer.Reset()
-        while True:
-            data = self.audio_stream.read(4096, exception_on_overflow=False)
-            if self.recognizer.AcceptWaveform(data):
-                result = json.loads(self.recognizer.Result())
-                transcript = result.get("text", "").strip()
-                if transcript:
-                    return transcript
-        return ""
-
-if __name__ == "__main__":
-    hearing = Hearing()
-    hearing.listen_for_wake_word()
+            # Check if model directory exists
+            if not os.path.exists(self.model_path):
+                logger.warning(f"Vosk model directory not found: {self.model_path}")
+                
+                # Check if parent directory exists
+                parent_dir = os.path.dirname(self.model_path)
+                if not os.path.exists(parent_dir):
+                    os.makedirs(parent_dir, exist_ok=True)
+                
+                # Download model if not available
+                logger.info("Attempting to download Vosk model...")
+                self._download_vosk_model()
+            
+            # Load model
+            if os.path.exists(self.model_path):
+                model = Model(self.model_path)
+                recognizer = KaldiRecognizer(model, self.rate)
+                logger.info("Vosk model loaded successfully")
+                return recognizer
+            else:
+                logger.error("Failed to load Vosk model")
+                return None
+                
+        except ImportError:
+            logger.error("Vosk not installed - wake word detection will be limited")
+            return None
+        except Exception as e:
+            logger.error(f"Error loading Vosk model: {str(e)}")
+            return None
+    
+    def _download_vosk_model(self):
+        """Download the Vosk model if not available"""
+        try:
+            import wget
+            import zipfile
+            
+            # URL for small English model
+            model_url = "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip"
+            
+            # Create temporary file for download
+            model_zip_path = "models/vosk-model.zip"
+            
+            # Download model
+            logger.info(f"Downloading Vosk model from {model_url}")
+            wget.download(model_url, model_zip_path)
+            
+            # Extract model
+            logger.info("Extracting Vosk model...")
+            with zipfile.ZipFile(model_zip_path, 'r') as zip_ref:
+                zip_ref.extractall("models/")
+            
+            # Remove zip file
+            os.remove(model_zip_path)
+            
+            # Find extracted directory and rename if needed
+            for item in os.listdir("models/"):
+                if os.path.isdir(os.path.join("models/", item)) and "vosk-model" in item:
+                    if item != os.path.basename(self.model_path):
+                        os.rename(os.path.join("models/", item), self.model_path)
+                    break
+            
+            logger.info("Vosk model downloaded and extracted successfully")
+            
+        except Exception as e:
+            logger.error(f"Error downloading Vosk model: {str(e)}")
+    
+    def listen_for_wake_word(self):
+        """
+        Listen for the wake word or hotkey activation
+        
+        Returns:
+            True if wake word detected, False otherwise
+        """
+        logger.info(f"Listening for wake word '{self.wake_word}' or hotkey {self.hotkey}")
+        
+        if not self.vosk_model:
+            logger.warning("Vosk model not available - using console input for testing")
+            user_input = input("Say the wake word or press Enter to simulate it: ")
+            return True
+        
+        # Start audio stream if not already running
+        if not self.stream:
+            self.stream = self.audio.open(
+                format=self.format,
+                channels=self.channels,
+                rate=self.rate,
+                input=True,
+                frames_per_buffer=self.chunk
+            )
+        
+        # Listen for wake word
+        self.active = True
+        while self.active:
+            try:
+                # Check for hotkey
+                if keyboard.is_pressed(self.hotkey):
+                    logger.info(f"Hotkey {self.hotkey} activated")
+                    return True
+                
+                # Get audio data
+                data = self.stream.read(self.chunk, exception_on_overflow=False)
+                
+                # Process with Vosk
+                if self.vosk_model.AcceptWaveform(data):
+                    result = json.loads(self.vosk_model.Result())
+                    text = result.get("text", "").lower()
+                    
+                    # Check for wake word
+                    if self.wake_word in text:
+                        logger.info(f"Wake word detected: {self.wake_word}")
+                        return True
+                
+                # Pause briefly to reduce CPU usage
+                time.sleep(0.01)
+                
+            except Exception as e:
+                logger.error(f"Error in wake word detection: {str(e)}")
+                time.sleep(1)  # Pause longer on error
+    
+    def listen(self, timeout=10.0):
+        """
+        Listen for user input with timeout
+        
+        Args:
+            timeout: Timeout in seconds
+            
+        Returns:
+            Transcribed text, or empty string if timeout
+        """
+        logger.info("Listening for user input...")
+        
+        if not self.vosk_model:
+            logger.warning("Vosk model not available - using console input for testing")
+            return input("Say something: ")
+        
+        # Start audio stream if not already running
+        if not self.stream:
+            self.stream = self.audio.open(
+                format=self.format,
+                channels=self.channels,
+                rate=self.rate,
+                input=True,
+                frames_per_buffer=self.chunk
+            )
+        
+        # Reset recognizer for new input
+        self.vosk_model.Reset()
+        
+        # Listen for user input with timeout
+        start_time = time.time()
+        result_text = ""
+        
+        while time.time() - start_time < timeout:
+            try:
+                # Get audio data
+                data = self.stream.read(self.chunk, exception_on_overflow=False)
+                
+                # Process with Vosk
+                if self.vosk_model.AcceptWaveform(data):
+                    result = json.loads(self.vosk_model.Result())
+                    text = result.get("text", "").strip()
+                    
+                    if text:
+                        logger.info(f"Heard: {text}")
+                        result_text = text
+                        break
+                
+                # Pause briefly to reduce CPU usage
+                time.sleep(0.01)
+                
+            except Exception as e:
+                logger.error(f"Error in voice recognition: {str(e)}")
+                time.sleep(1)  # Pause longer on error
+        
+        # Handle timeout
+        if not result_text:
+            logger.warning("Listening timeout - no input detected")
+        
+        return result_text
+    
+    def close(self):
+        """Close the hearing module and release resources"""
+        if self.stream:
+            self.stream.stop_stream()
+            self.stream.close()
+            self.stream = None
+        
+        if self.audio:
+            self.audio.terminate()
+            self.audio = None
+        
+        logger.info("Hearing module closed")

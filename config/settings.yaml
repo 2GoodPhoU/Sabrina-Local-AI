@@ -1,0 +1,24 @@
+echo "core:
+  debug_mode: true
+  log_level: INFO
+
+voice:
+  api_url: http://localhost:8100
+  volume: 0.8
+  speed: 1.0
+  pitch: 1.0
+  emotion: normal
+
+vision:
+  capture_method: auto
+  use_ocr: true
+  use_object_detection: true
+  max_images: 5
+
+hearing:
+  wake_word: hey sabrina
+  silence_threshold: 0.03
+
+automation:
+  mouse_move_duration: 0.2
+  typing_interval: 0.1" > config/settings.yaml
