@@ -35,7 +35,7 @@
         "performance_stats": false
     },
     "interaction": {
-        "click_through_mode": true,
+        "click_through_mode": false,
         "context_menu_enabled": true,
         "auto_respond_to_click": true
     },
