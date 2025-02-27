@@ -8,7 +8,6 @@ import os
 import json
 
 from ..utils.error_handling import logger, ErrorHandler
-from ..utils.event_system import Event, EventType, EventPriority
 from ..constants import ANIMATION_STATES, ASSETS_FOLDER
 
 class SettingsMenu(QWidget):

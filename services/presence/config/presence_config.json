@@ -3,7 +3,7 @@
         "width": 500,
         "height": 500,
         "padding_right": 20,
-        "transparency_level": 0.83,
+        "transparency_level": 0.7,
         "enable_dragging": true,
         "lock_position": false
     },
