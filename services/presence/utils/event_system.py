@@ -4,7 +4,7 @@ import queue
 import time
 import uuid
 from enum import Enum, auto
-from error_handling import ErrorHandler, logger
+from .error_handling import ErrorHandler, logger  # Changed to relative import
 from typing import Dict, List, Callable, Any, Optional
 
 class EventType(Enum):
@@ -157,6 +157,25 @@ class EventBus:
         self.handlers[handler.id] = handler
         logger.debug(f"Registered event handler: {handler.id}")
         return handler.id
+    
+    # Fixed method to allow proper handler registration
+    def create_event_handler(self, event_types, callback, min_priority=EventPriority.LOW, sources=None):
+        """Create an event handler
+        
+        Args:
+            event_types: List of event types to handle or single event type
+            callback: Function to call when event is processed
+            min_priority: Minimum priority level to handle
+            sources: List of sources to accept events from (None = all)
+            
+        Returns:
+            EventHandler instance
+        """
+        # Convert single event type to list
+        if not isinstance(event_types, list) and event_types is not None:
+            event_types = [event_types]
+            
+        return EventHandler(callback, event_types, min_priority, sources)
     
     def unregister_handler(self, handler_id: str) -> bool:
         """Unregister an event handler

@@ -1,4 +1,3 @@
-# services/presence/utils/__init__.py
 """
 Utility modules for Sabrina's Presence System
 """

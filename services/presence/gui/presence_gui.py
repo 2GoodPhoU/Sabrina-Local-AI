@@ -10,7 +10,7 @@ import json
 import time
 import screeninfo
 
-from .animated_label import AnimatedLabel
+from .animation_label import AnimatedLabel
 from .settings_menu import SettingsMenu
 from .system_tray import setup_system_tray, show_tray_notification
 

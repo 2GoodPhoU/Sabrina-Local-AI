@@ -4,7 +4,7 @@ import gc
 import time
 import psutil
 from PyQt5.QtGui import QMovie, QPixmap
-from error_handling import ErrorHandler, logger
+from .error_handling import ErrorHandler, logger  # Changed to relative import
 
 class ResourceManager:
     """Manages resources for the Presence System to optimize memory usage"""

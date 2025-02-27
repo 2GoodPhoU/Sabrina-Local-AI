@@ -1,4 +1,3 @@
-# services/presence/animation/__init__.py
 """
 Animation components for Sabrina's Presence System
 """

@@ -114,25 +114,28 @@ class PresenceSystem:
     def register_event_handlers(self):
         """Register event handlers for the system"""
         # Register animation event handler
-        self.event_bus.register_handler(
+        animation_handler = self.event_bus.create_event_handler(
             EventType.ANIMATION_CHANGE,
             self.handle_animation_event,
-            min_priority=EventPriority.LOW
+            EventPriority.LOW
         )
+        self.event_bus.register_handler(animation_handler)
         
         # Register system event handler
-        self.event_bus.register_handler(
+        system_handler = self.event_bus.create_event_handler(
             EventType.SYSTEM_STATE,
             self.handle_system_event,
-            min_priority=EventPriority.LOW
+            EventPriority.LOW
         )
+        self.event_bus.register_handler(system_handler)
         
         # Register settings event handler
-        self.event_bus.register_handler(
+        settings_handler = self.event_bus.create_event_handler(
             EventType.SETTINGS_CHANGE,
             self.handle_settings_event,
-            min_priority=EventPriority.NORMAL
+            EventPriority.NORMAL
         )
+        self.event_bus.register_handler(settings_handler)
         
         logger.info("Registered event handlers")
     

@@ -2,7 +2,7 @@
 import os
 import json
 import copy
-from error_handling import ErrorHandler, logger
+from .error_handling import ErrorHandler, logger  # Changed from "from error_handling" to "from .error_handling"
 
 class ConfigManager:
     """Manages configuration settings for the Presence System"""
@@ -204,3 +204,28 @@ class ConfigManager:
                 result[key] = value
                 
         return result
+        
+    def load_config_from_file(self, file_path):
+        """Load configuration from a specific file path
+        
+        Args:
+            file_path: Path to the configuration file
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not os.path.exists(file_path):
+            logger.warning(f"Configuration file not found: {file_path}")
+            return False
+            
+        try:
+            with open(file_path, 'r') as f:
+                loaded_config = json.load(f)
+                
+            # Merge with default config to ensure all keys exist
+            self.config = self._merge_configs(self.DEFAULT_CONFIG, loaded_config)
+            logger.info(f"Configuration loaded successfully from {file_path}")
+            return True
+        except Exception as e:
+            ErrorHandler.log_error(e, f"Failed to load configuration from {file_path}")
+            return False
