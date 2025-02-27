@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# presence_system.py - Main launcher for Sabrina's Presence System
+"""
+Main entry point for Sabrina's Presence System
+Handles initialization, event processing, and lifecycle management
+"""
 
 import sys
 import os
@@ -7,13 +10,12 @@ import argparse
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import Qt, QTimer
 
-# Import improved modules
-from error_handling import ErrorHandler, logger
-from resource_management import ResourceManager
-from config_manager import ConfigManager
-from event_system import EventBus, EventType, EventPriority, Event, register_animation_handler
-
-from presence_enhancements import EnhancedPresenceGUI
+# Import from restructured modules
+from .utils.error_handling import ErrorHandler, logger
+from .utils.resource_management import ResourceManager
+from .utils.config_manager import ConfigManager
+from .utils.event_system import EventBus, EventType, EventPriority, Event
+from .gui.presence_gui import PresenceGUI
 
 class PresenceSystem:
     """Main Presence System with improved error handling, resource management, and event-driven architecture"""
@@ -41,7 +43,7 @@ class PresenceSystem:
         
         # Create presence GUI with resource manager
         logger.info("Creating presence GUI")
-        self.presence = EnhancedPresenceGUI(
+        self.presence = PresenceGUI(
             resource_manager=self.resource_manager,
             config_manager=self.config_manager,
             event_bus=self.event_bus
@@ -101,7 +103,7 @@ class PresenceSystem:
         if self.args.opacity is not None:
             opacity = max(10, min(100, self.args.opacity))  # Keep between 10-100
             self.presence.setWindowOpacity(opacity / 100)
-            self.presence.transparency_slider.setValue(opacity)
+            self.presence.settings_menu.transparency_slider.setValue(opacity)
             logger.info(f"Set opacity to {opacity}% from command line argument")
         
         # Set debug mode if specified
@@ -112,7 +114,11 @@ class PresenceSystem:
     def register_event_handlers(self):
         """Register event handlers for the system"""
         # Register animation event handler
-        register_animation_handler(self.handle_animation_event)
+        self.event_bus.register_handler(
+            EventType.ANIMATION_CHANGE,
+            self.handle_animation_event,
+            min_priority=EventPriority.LOW
+        )
         
         # Register system event handler
         self.event_bus.register_handler(
@@ -224,11 +230,10 @@ class PresenceSystem:
     
     def run_animation_test(self):
         """Run a test sequence of animations."""
+        from .constants import ANIMATION_STATES
         from PyQt5.QtCore import QTimer
         
-        # Get all animation states
-        states = self.presence.animation_manager.get_available_states()
-        logger.info(f"Available animations: {', '.join(states)}")
+        logger.info(f"Available animations: {', '.join(ANIMATION_STATES)}")
         
         # Create a test sequence
         test_sequence = ["idle", "listening", "talking", "working", "thinking", 

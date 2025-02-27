@@ -11,6 +11,28 @@ The Presence System has been enhanced with four major improvements:
 3. **Configuration Management**: External configuration file for easier tuning
 4. **Event System**: Proper event handling for integration with other components
 
+services/presence/
+├── __init__.py                      # Makes the directory a package
+├── presence_system.py               # Main entry point (keep as is)
+├── gui/
+│   ├── __init__.py
+│   ├── animated_label.py            # Enhanced QLabel with animations
+│   ├── presence_gui.py              # Main GUI class (split from presence_enhancements.py)
+│   ├── settings_menu.py             # Settings menu UI and logic
+│   └── system_tray.py               # System tray functionality
+├── animation/
+│   ├── __init__.py
+│   ├── animation_manager.py         # Keep as is
+│   └── animation_transitions.py     # Animation transition functions
+├── utils/
+│   ├── __init__.py
+│   ├── config_manager.py            # Keep as is
+│   ├── error_handling.py            # Keep as is
+│   ├── event_system.py              # Keep as is
+│   └── resource_management.py       # Keep as is
+├── constants.py                     # Renamed from presence_constants.py
+└── README.md                        # Keep as is
+
 ## 1. Error Handling
 
 The `error_handling.py` module provides centralized error handling for the entire Presence System.
@@ -174,22 +196,6 @@ The `integration_example.py` file demonstrates how all these improvements work t
 ```bash
 python integration_example.py
 ```
-
-## Updating Existing Code
-
-To use these improvements in your existing Presence System:
-
-1. Copy the new files into your project:
-   - `error_handling.py`
-   - `resource_management.py`
-   - `config_manager.py`
-   - `event_system.py`
-
-2. Update your `presence_constants.py` to use the configuration system.
-
-3. Modify your `presence_system.py` or main script to initialize and use the improvements.
-
-4. Update your `presence_enhancements.py` to use the error handling and resource management.
 
 ## Next Steps
 

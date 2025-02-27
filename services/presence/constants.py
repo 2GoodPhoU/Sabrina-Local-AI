@@ -1,6 +1,9 @@
-# presence_constants.py - Configuration constants for Sabrina AI's presence system
+"""
+Constants for Sabrina's Presence System
+Centralized configuration constants for consistent settings
+"""
 import os
-from config_manager import ConfigManager
+from .utils.config_manager import ConfigManager
 
 # Initialize config manager
 config = ConfigManager()
@@ -23,7 +26,7 @@ ENABLE_DRAGGING = get_config("window", "enable_dragging", True)  # Allow clickin
 LOCK_POSITION = get_config("window", "lock_position", False)  # Prevent movement if locked
 
 ### ANIMATION SETTINGS ###
-ASSETS_FOLDER = os.path.join(os.path.dirname(__file__), "assets")  # Path to animation assets
+ASSETS_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), "presence", "assets")  # Path to animation assets
 DEFAULT_ANIMATION = get_config("animations", "default_animation", "idle")  # Default animation on startup
 
 # Animation priority levels (higher numbers = higher priority)
@@ -33,7 +36,7 @@ ANIMATION_PRIORITY = get_config("animations", "priorities", {
     "success": 3,     # Medium-high priority
     "listening": 3,   # Medium-high priority
     "working": 2,     # Medium priority
-    "thinking": 2,    # Medium priority
+    "thinking": 2,     # Medium priority
     "waiting": 2,     # Medium priority
     "idle": 1         # Lowest priority - default state
 })
