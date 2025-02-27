@@ -62,6 +62,18 @@ def check_python_dependencies():
             elif package == "pytesseract":
                 import pytesseract
                 logger.info(f"✓ {package} is installed")
+            elif package == "pillow":
+                try:
+                    import PIL
+                    logger.info(f"✓ {package} is installed (as PIL)")
+                except ImportError:
+                    # Try alternative import
+                    try:
+                        from PIL import Image
+                        logger.info(f"✓ {package} is installed (as PIL.Image)")
+                    except ImportError:
+                        missing_packages.append(package)
+                        logger.warning(f"✗ {package} is not installed")
             else:
                 __import__(package.replace("-", "_"))
                 logger.info(f"✓ {package} is installed")
