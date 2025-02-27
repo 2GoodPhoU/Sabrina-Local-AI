@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  # Main Sabrina AI Core
+  sabrina-core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sabrina-core
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./models:/app/models
+    environment:
+      - SABRINA_CORE_DEBUG_MODE=false
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - voice-service
+      - vision-service
+    networks:
+      - sabrina-network
+    command: ["--config", "config/settings.yaml"]
+
+  # Voice Service
+  voice-service:
+    build:
+      context: ./services/voice
+      dockerfile: voice.Dockerfile
+    container_name: sabrina-voice
+    ports:
+      - "8100:8100"
+    volumes:
+      - ./config:/app/config
+      - ./models:/app/models
+      - ${XDG_RUNTIME_DIR}/pulse:${XDG_RUNTIME_DIR}/pulse
+    environment:
+      - PULSE_SERVER=unix:${XDG_RUNTIME_DIR}/pulse/native
+    networks:
+      - sabrina-network
+    devices:
+      - /dev/snd:/dev/snd
+
+  # Vision Service (only needed for advanced object detection)
+  vision-service:
+    build:
+      context: ./services/vision
+      dockerfile: vision.Dockerfile
+    container_name: sabrina-vision
+    volumes:
+      - ./config:/app/config
+      - ./models:/app/models
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    environment:
+      - DISPLAY=${DISPLAY}
+    networks:
+      - sabrina-network
+
+  # Smart Home Integration (optional)
+  smart-home:
+    build:
+      context: ./services/smart_home
+      dockerfile: smart_home.Dockerfile
+    container_name: sabrina-smart-home
+    ports:
+      - "8500:8500"
+    volumes:
+      - ./config:/app/config
+    env_file:
+      - ./services/smart_home/.env
+    networks:
+      - sabrina-network
+    # Optional - only start if .env exists
+    profiles:
+      - smart-home
+
+networks:
+  sabrina-network:
+    driver: bridge

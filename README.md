@@ -1,146 +1,209 @@
-# Sabrina AI - Local AI Assistant
+# Sabrina AI - Enhanced Local AI Assistant
 
-## **What is Sabrina AI?**
-Sabrina AI is a **local AI-powered personal assistant** that integrates **voice interaction, screen awareness, and PC automation** to assist in daily tasks. Unlike cloud-based AI, Sabrina runs **entirely on your machine**, ensuring **privacy and full control** over interactions.
+An integrated AI assistant that combines voice interaction, screen awareness, and PC automation into a cohesive, privacy-focused local AI system.
 
-### **Key Features:**
-- **Real-time Speech Recognition** (via Whisper ASR)
-- **Text-to-Speech Synthesis** (via Jenny TTS API)
-- **Screen OCR & Object Detection** (via OpenCV, YOLO, Tesseract)
-- **PC Automation** (via PyAutoGUI for keyboard & mouse control)
-- **Voice Command Execution** (hands-free interaction)
-- **Smart Home Integration** (Google Home & Home Assistant)
+## 🚀 New Architecture Overview
 
----
+This repository contains the enhanced version of Sabrina AI with a new, more robust architecture featuring:
 
-## **How to Set Up & Use Sabrina AI**
+- **Centralized Error Handling**: Comprehensive error tracking, logging, and recovery
+- **Event-Based Communication**: Cross-module messaging using a central event bus
+- **Unified Configuration**: Centralized configuration with validation and hot-reloading
+- **Modular Component Design**: Clean separation between core functionalities
+- **Docker Integration**: Containerized services for easier deployment
+- **Improved Voice Integration**: Robust TTS system with error handling and retries
 
-### **1️⃣ Install Python 3.10+**
-Ensure you have Python installed:
+## 📋 Prerequisites
+
+- **Python 3.10+**
+- **Docker** and **Docker Compose** (for containerized deployment)
+- **FFmpeg** (for audio processing)
+- **Tesseract OCR** (for text recognition)
+- **CUDA-capable GPU** (recommended for object detection)
+
+## 🔧 Installation & Setup
+
+### Option 1: Local Development Setup
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/yourusername/sabrina-ai.git
+   cd sabrina-ai
+   ```
+
+2. **Set up a virtual environment:**
+   ```bash
+   python -m venv venv
+   # On Windows:
+   venv\Scripts\activate
+   # On Linux/macOS:
+   source venv/bin/activate
+   ```
+
+3. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Create required directories:**
+   ```bash
+   mkdir -p logs data config models
+   ```
+
+5. **Run the setup script:**
+   ```bash
+   python scripts/setup_env.py
+   ```
+
+### Option 2: Docker Deployment
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/yourusername/sabrina-ai.git
+   cd sabrina-ai
+   ```
+
+2. **Build and run with Docker Compose:**
+   ```bash
+   docker-compose up -d
+   ```
+
+3. **Check logs:**
+   ```bash
+   docker-compose logs -f
+   ```
+
+## 🚀 Running Sabrina AI
+
+### Running the Core System (Local Development)
+
 ```bash
-python --version  # Ensure version 3.10 or higher
-```
-If not installed, download it from [Python’s official site](https://www.python.org/downloads/).
+# Start the Voice API service
+cd services/voice
+python voice_api.py &
 
-### **2️⃣ Set Up a Python Virtual Environment**
-Create and activate a virtual environment to avoid dependency conflicts:
-```bash
-# Create virtual environment
-python -m venv sabrina_env
-
-# Activate the environment
-# Windows:
-sabrina_env\Scripts\activate
-# Linux/macOS:
-source sabrina_env/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
+# Run the main Sabrina AI system
+python scripts/start_sabrina.py
 ```
 
-### **3️⃣ Start the AI Components**
-To launch **Sabrina AI**, follow these steps:
+### Command Line Options
 
-#### **Step 1: Spin Up Required Docker Containers**
-```bash
-# Ensure Docker is running
-docker --version  # Check if Docker is installed
+```
+usage: start_sabrina.py [-h] [--config CONFIG] [--debug] [--no-voice] [--no-vision]
 
-# Build and start voice & vision services
-cd docker
-docker-compose up -d
+Sabrina AI - Local AI Assistant
+
+options:
+  -h, --help       show this help message and exit
+  --config CONFIG  Path to configuration file
+  --debug          Enable debug mode
+  --no-voice       Disable voice output
+  --no-vision      Disable vision processing
 ```
 
-#### **Step 2: Run Sabrina AI Core**
-```bash
-cd core
-python core.py
+## 📂 Project Structure
+
 ```
-
-### **4️⃣ Interacting with Sabrina AI**
-Once running, Sabrina listens for voice commands, analyzes your screen, and performs automation tasks.
-
-#### **Basic Commands:**
-| Command        | Functionality |
-|---------------|--------------|
-| `!say Hello`  | Speak aloud using TTS |
-| `!click`      | Click at the cursor position |
-| `!move X Y`   | Move cursor to (X, Y) |
-| `!type Hello` | Type ‘Hello’ |
-| `!exit`       | Shut down AI assistant |
-
----
-
-## **Project Structure**
-```
-/ai-embodiment
-│-- /api
-│   │-- voice_api.py
+/sabrina-ai
 │-- /core
-│   │-- core.py
-│   │-- memory.py
-│   │-- config.py
+│   │-- sabrina_core.py  # Enhanced core engine
+│-- /utilities
+│   │-- config_manager.py  # Unified configuration
+│   │-- error_handler.py   # Centralized error handling
+│   │-- event_system.py    # Event-based communication
 │-- /services
 │   │-- /hearing
-│   │   │-- hearing.py
 │   │-- /vision
-│   │   │-- vision.py
 │   │-- /automation
-│   │   │-- automation.py
-│   │-- /smart_home
-│   │   │-- smart_home.py
 │   │-- /voice
-│   │   │-- voice.py
-│-- /models
-│   │-- nlp_model.py
-│   │-- vision_model.py
-│   │-- automation_model.py
-│   │-- memory_model.py
+│   │   │-- voice_api.py
+│   │   │-- voice_api_client.py
+│   │-- /smart_home
 │-- /scripts
-│   │-- start_services.py
-│   │-- setup_env.py
-│   │-- deploy_containers.py
+│   │-- start_sabrina.py  # Main startup script
+│   │-- setup_env.py      # Environment setup
 │-- /config
-│   │-- settings.yaml
-│   │-- api_keys.env
-│-- /data
-│   │-- logs/
-│   │-- db/
-│   │-- cache/
-│-- /tests
-│   │-- test_hearing.py
-│   │-- test_vision.py
-│   │-- test_automation.py
-│   │-- test_memory.py
-│-- /docs
-│   │-- architecture.md
-│   │-- system_overview.md
-│-- /docker
-│   │-- /voice
-│   │   │-- Dockerfile
-│   │   │-- docker-compose.yml
-│   │-- /smart_home
-│   │   │-- Dockerfile
-│   │   │-- docker-compose.yml
-│-- README.md
-│-- requirements.txt
+│   │-- settings.yaml     # Main configuration
+│-- /data                 # Data storage
+│-- /logs                 # System logs
+│-- /models               # AI models
+│-- /docs                 # Documentation
+│-- docker-compose.yml    # Docker Compose setup
+│-- Dockerfile            # Docker configuration
+│-- requirements.txt      # Project dependencies
+│-- README.md             # This file
 ```
 
-### **5️⃣ Stopping Sabrina AI**
-To shut down Sabrina AI and its services:
-```bash
-# Stop AI Core
-Ctrl + C  # In terminal running core.py
+## 🧩 Core Components
 
-# Stop and remove all running containers
-cd docker
-docker-compose down
+- **SabrinaCore**: Central orchestration engine for the AI system
+- **ConfigManager**: Unified configuration handling
+- **ErrorHandler**: Comprehensive error handling system
+- **EventBus**: Event-based communication between components
+- **VoiceAPIClient**: Client for the TTS Voice API service
+- **VisionCore**: Screen analysis and OCR functionality
+- **Hearing**: Voice recognition and command processing
+- **Actions**: PC automation and control
+
+## 🛠️ Configuration
+
+The main configuration file is located at `config/settings.yaml` and follows this structure:
+
+```yaml
+core:
+  debug_mode: false
+  log_level: INFO
+
+voice:
+  api_url: http://localhost:8100
+  volume: 0.8
+  speed: 1.0
+  pitch: 1.0
+  emotion: normal
+
+vision:
+  capture_method: auto
+  use_ocr: true
+  use_object_detection: true
+  max_images: 5
+
+# Additional sections...
 ```
 
-### **6️⃣ Additional Notes & Future Enhancements**
-Planned improvements include:
-- **Advanced Conversational Memory**
-- **Real-time Event-Driven Automations**
-- **3D Virtual AI Avatar Integration**
+## 🔄 Event System
 
-For any issues, refer to the [architecture documentation](docs/architecture.md) or open an issue in the repository.
+Components communicate through a centralized event system. Example:
+
+```python
+# Register an event handler
+def handle_voice_event(event):
+    print(f"Voice event received: {event.data.get('text')}")
+
+handler_id = event_bus.register_handler(
+    event_bus.create_event_handler(
+        EventType.VOICE,
+        handle_voice_event
+    )
+)
+
+# Post an event
+event_bus.post_event(
+    Event(
+        event_type=EventType.VOICE,
+        data={"text": "Hello, world!"},
+        source="example"
+    )
+)
+```
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/your-feature`
+3. Commit your changes: `git commit -am 'Add your feature'`
+4. Push the branch: `git push origin feature/your-feature`
+5. Submit a pull request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
