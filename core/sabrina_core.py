@@ -21,7 +21,7 @@ import traceback
 from services.vision.vision_core import VisionCore
 from services.hearing.hearing import Hearing
 from services.automation.automation import Actions
-from services.voice.voice_api_client import VoiceAPIClient
+from services.voice.voice_api import VoiceAPIClient
 
 # Configuration and utility imports
 from utilities.config_manager import ConfigManager
