@@ -16,6 +16,7 @@ __pycache__/
 /logs/
 /cache/
 /data/temp/
+/data/captures/
 
 # Ignore animation assets (optional)
 assets/*

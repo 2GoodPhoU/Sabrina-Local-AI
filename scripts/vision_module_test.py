@@ -116,7 +116,7 @@ def test_screen_capture(save_dir, display_images=False):
         
         logger.info("Creating VisionCore instance...")
         vision_core = VisionCore()
-        
+
         # Override capture directory if needed
         if save_dir:
             vision_core.capture_directory = str(save_dir)
@@ -129,14 +129,25 @@ def test_screen_capture(save_dir, display_images=False):
         if capture_result and os.path.exists(capture_result):
             logger.info(f"✓ Screen captured successfully: {capture_result}")
             
-            # Display the captured image if requested
+            # Modify the display_images part in test_screen_capture function:
             if display_images:
                 try:
                     import cv2
                     img = cv2.imread(capture_result)
-                    cv2.imshow("Captured Screen", img)
-                    cv2.waitKey(3000)  # Display for 3 seconds
-                    cv2.destroyAllWindows()
+                    try:
+                        cv2.imshow("Captured Screen", img)
+                        cv2.waitKey(3000)  # Display for 3 seconds
+                        cv2.destroyAllWindows()
+                    except cv2.error as e:
+                        logger.warning(f"OpenCV couldn't display the image (missing GUI support): {e}")
+                        logger.info("Image was captured successfully but can't be displayed with this OpenCV build")
+                        # Alternative: open the image with the default image viewer
+                        import os
+                        if os.name == 'nt':  # Windows
+                            os.startfile(capture_result)
+                        elif os.name == 'posix':  # Linux/Mac
+                            import subprocess
+                            subprocess.call(('xdg-open', capture_result))
                 except Exception as e:
                     logger.error(f"Failed to display image: {str(e)}")
             

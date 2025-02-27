@@ -39,10 +39,23 @@ def parse_arguments():
 
 def check_directories():
     """Ensure required directories exist"""
-    dirs = ["logs", "data", "config"]
+    # Update paths to use full project directory
+    project_dir = Path(__file__).parent.parent.absolute()  # Go up to project root
+    
+    dirs = [
+        project_dir / "logs",
+        project_dir / "data",
+        project_dir / "data" / "captures",  # This is the correct path for screen captures
+        project_dir / "config"
+    ]
+    
     for d in dirs:
-        os.makedirs(project_dir / d, exist_ok=True)
-    logger.info("Required directories exist")
+        os.makedirs(d, exist_ok=True)
+        logger.info(f"Ensured directory exists: {d}")
+    
+    captures_dir = project_dir / "data" / "captures"
+    logger.info(f"Using captures directory: {captures_dir}")
+    return captures_dir
 
 def check_python_dependencies():
     """Check if required Python packages are installed"""
@@ -110,7 +123,7 @@ def check_voice_service():
 
 def start_voice_service():
     """Start the voice service"""
-    voice_api_path = project_dir / "voice" / "voice_api.py"
+    voice_api_path = project_dir / "services" / "voice" / "voice_api.py"
     
     if not voice_api_path.exists():
         logger.error(f"Voice API script not found at {voice_api_path}")
