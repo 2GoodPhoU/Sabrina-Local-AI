@@ -19,7 +19,6 @@ WINDOW_HEIGHT = get_config("window", "height", 500)  # Height of AI Presence win
 PADDING_RIGHT = get_config("window", "padding_right", 20)  # Padding from the right screen edge
 
 ### TRANSPARENCY & INTERACTIVITY ###
-ENABLE_TRANSPARENCY = get_config("window", "enable_transparency", True)  # Enable transparent background
 TRANSPARENCY_LEVEL = get_config("window", "transparency_level", 0.85)  # Opacity level (0.0 = fully transparent, 1.0 = fully opaque)
 CLICK_THROUGH_MODE = get_config("interaction", "click_through_mode", False)  # Allow interactions behind the AI overlay
 ENABLE_DRAGGING = get_config("window", "enable_dragging", True)  # Allow clicking and dragging the window

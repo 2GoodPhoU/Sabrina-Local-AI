@@ -12,7 +12,6 @@ class ConfigManager:
             "width": 500,
             "height": 500,
             "padding_right": 20,
-            "enable_transparency": True,
             "transparency_level": 0.85,
             "enable_dragging": True,
             "lock_position": False

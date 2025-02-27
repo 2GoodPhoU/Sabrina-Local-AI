@@ -107,11 +107,7 @@ class PresenceGUI(QMainWindow):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)  
         
         # Set transparency
-        enable_transparency = window_config.get("enable_transparency", True)
         transparency_level = window_config.get("transparency_level", 0.85)
-        if enable_transparency:
-            self.setAttribute(Qt.WA_TranslucentBackground)  
-            self.setWindowOpacity(transparency_level)  
 
         # Dragging and position locking
         self.drag_enabled = window_config.get("enable_dragging", True) and not window_config.get("lock_position", False)
