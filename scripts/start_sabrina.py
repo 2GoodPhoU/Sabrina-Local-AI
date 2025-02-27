@@ -17,7 +17,7 @@ from typing import Dict, Any, Optional
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 
 # Import core system components
-from core.sabrina_core import SabrinaCore
+from core.enhanced_sabrina_core import SabrinaCore
 from utilities.config_manager import ConfigManager
 from utilities.error_handler import ErrorHandler, ErrorSeverity, ErrorCategory
 

@@ -18,7 +18,7 @@ import json
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 
 # Import all major components
-from core.sabrina_core import SabrinaCore
+from core.enhanced_sabrina_core import SabrinaCore
 from services.voice.voice_api_client import VoiceAPIClient
 from services.vision.vision_core import VisionCore
 from services.automation.automation import Actions
