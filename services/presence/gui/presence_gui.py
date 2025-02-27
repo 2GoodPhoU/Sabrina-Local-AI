@@ -20,7 +20,6 @@ from ..utils.event_system import EventBus, EventType, EventPriority, Event
 from ..animation.animation_transitions import cross_fade
 from ..constants import ANIMATION_STATES, ANIMATION_PRIORITY, ASSETS_FOLDER, DEFAULT_ANIMATION
 
-# Define SelectiveClickThroughWidget before PresenceGUI to ensure it exists
 class SelectiveClickThroughWidget(QWidget):
     """Custom widget that allows click-through in some areas but not others"""
     
@@ -40,6 +39,7 @@ class SelectiveClickThroughWidget(QWidget):
     def set_click_through(self, enabled):
         """Enable or disable click-through mode"""
         self.click_through_enabled = enabled
+        self.update()  # Force update to apply changes
         
     def event(self, event):
         """Override event handler to implement selective click-through"""
@@ -60,7 +60,7 @@ class SelectiveClickThroughWidget(QWidget):
                     # In interactive region, handle event normally
                     return super().event(event)
                     
-            # Not in any interactive region, let the event pass through (ignore it)
+            # Not in any interactive region, let the event pass through
             return False
             
         # Handle all other events normally
@@ -265,15 +265,28 @@ class PresenceGUI(QMainWindow):
             
         self.selective_widget.clear_interactive_regions()
         
-        # Add settings button region
+        # Add settings button region - make slightly larger for easier clicking
         if hasattr(self, 'settings_button'):
-            self.selective_widget.add_interactive_region(QRegion(self.settings_button.geometry()))
+            button_geo = self.settings_button.geometry()
+            # Make the clickable region slightly larger (5px padding)
+            larger_region = QRegion(
+                button_geo.x() - 5, 
+                button_geo.y() - 5,
+                button_geo.width() + 10,
+                button_geo.height() + 10
+            )
+            self.selective_widget.add_interactive_region(larger_region)
         
-        # Add settings menu region
+        # Add settings menu region if visible
         if hasattr(self, 'settings_menu') and self.settings_menu.isVisible():
-            self.selective_widget.add_interactive_region(QRegion(self.settings_menu.geometry()))
+            menu_geo = self.settings_menu.geometry()
+            self.selective_widget.add_interactive_region(QRegion(menu_geo))
             
-        # Add any other interactive elements here
+            # Also add all child widgets of settings menu
+            for child in self.settings_menu.findChildren(QWidget):
+                if child.isVisible():
+                    child_geo = child.geometry().translated(menu_geo.topLeft())
+                    self.selective_widget.add_interactive_region(QRegion(child_geo))
         
         logger.debug(f"Updated interactive regions: {len(self.selective_widget.interactive_regions)} regions")
 
@@ -658,6 +671,12 @@ class PresenceGUI(QMainWindow):
         # Toggle state
         self.click_through_enabled = not self.click_through_enabled
         
+        # Update selective widget
+        if hasattr(self, 'selective_widget'):
+            self.selective_widget.set_click_through(self.click_through_enabled)
+            # Force update of interactive regions
+            self.update_interactive_regions()
+        
         # Update button text
         if hasattr(self, 'settings_menu'):
             self.settings_menu.update_click_through_button()
@@ -667,6 +686,13 @@ class PresenceGUI(QMainWindow):
         self.config_manager.save_config()
         
         logger.info(f"Click-through mode toggled: {self.click_through_enabled}")
+        
+        # If click-through is enabled, enable WindowTransparentForInput attribute
+        # Note: This is needed as an additional step for click-through to work properly
+        if self.click_through_enabled:
+            self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        else:
+            self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         
         # Post event about click-through change
         self.event_bus.post_event(
