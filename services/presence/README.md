@@ -12,26 +12,26 @@ The Presence System has been enhanced with four major improvements:
 4. **Event System**: Proper event handling for integration with other components
 
 services/presence/
-├── __init__.py                      # Makes the directory a package
-├── presence_system.py               # Main entry point (keep as is)
+├── __init__.py                      # Package initialization
+├── presence_system.py               # Main controller class
+├── constants.py                     # Centralized constants and configuration
+├── run.py                           # Entry point script
 ├── gui/
-│   ├── __init__.py
-│   ├── animated_label.py            # Enhanced QLabel with animations
-│   ├── presence_gui.py              # Main GUI class (split from presence_enhancements.py)
-│   ├── settings_menu.py             # Settings menu UI and logic
+│   ├── __init__.py                  # GUI package initialization
+│   ├── animated_label.py            # Enhanced QLabel with animation support
+│   ├── presence_gui.py              # Main GUI window (formerly EnhancedPresenceGUI)
+│   ├── settings_menu.py             # Settings panel component
 │   └── system_tray.py               # System tray functionality
 ├── animation/
-│   ├── __init__.py
-│   ├── animation_manager.py         # Keep as is
+│   ├── __init__.py                  # Animation package initialization
 │   └── animation_transitions.py     # Animation transition functions
-├── utils/
-│   ├── __init__.py
-│   ├── config_manager.py            # Keep as is
-│   ├── error_handling.py            # Keep as is
-│   ├── event_system.py              # Keep as is
-│   └── resource_management.py       # Keep as is
-├── constants.py                     # Renamed from presence_constants.py
-└── README.md                        # Keep as is
+└── utils/                           # Utility modules (reused from existing code)
+    ├── __init__.py                  # Utils package initialization
+    ├── config_manager.py
+    ├── error_handling.py
+    ├── event_system.py
+    └── resource_management.py
+└── assets/
 
 ## 1. Error Handling
 
