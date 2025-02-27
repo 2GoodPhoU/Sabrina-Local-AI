@@ -171,6 +171,61 @@ class VisionCore:
             analysis["active_window"] = active_window
         
         return analysis
+    
+    def detect_ui_elements(self, image_path):
+        """
+        Detect UI elements in the given image
+        
+        Args:
+            image_path: Path to the image file
+            
+        Returns:
+            List of detected UI elements with their coordinates and types
+        """
+        # Check if VisionAI is available (YOLO-based detection)
+        if hasattr(self, 'vision_ai') and self.vision_ai is not None:
+            # Use VisionAI for detection if available
+            return self.vision_ai.detect_objects(image_path)
+        
+        # Fallback to basic detection if VisionAI not available
+        try:
+            import cv2
+            import numpy as np
+            
+            # Load image
+            img = cv2.imread(image_path)
+            if img is None:
+                print(f"[VisionCore] Error: Could not read image: {image_path}")
+                return []
+            
+            # Convert to grayscale for simple edge detection
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            
+            # Basic edge detection to find potential UI elements
+            edges = cv2.Canny(gray, 50, 150)
+            
+            # Find contours which might be UI elements
+            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            # Filter contours by size (avoid small noise)
+            min_area = 500  # Minimum area threshold
+            valid_contours = [c for c in contours if cv2.contourArea(c) > min_area]
+            
+            # Extract information about detected elements
+            elements = []
+            for i, contour in enumerate(valid_contours):
+                x, y, w, h = cv2.boundingRect(contour)
+                elements.append({
+                    "type": "unknown_ui_element",
+                    "coordinates": [int(x), int(y), int(x+w), int(y+h)],
+                    "confidence": 0.5,  # Default confidence
+                    "text": ""  # No text available without OCR
+                })
+            
+            return elements
+        except Exception as e:
+            print(f"[VisionCore] Error detecting UI elements: {str(e)}")
+            return []
 
 
 class VisionOCR:
