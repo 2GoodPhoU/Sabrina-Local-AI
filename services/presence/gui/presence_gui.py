@@ -1,10 +1,9 @@
 """
-Fixed PresenceGUI initialization order to avoid attribute errors.
-The fix ensures click_through_enabled is set before creating the settings menu.
+Main GUI component for Sabrina's Presence System
 """
-from PyQt5.QtWidgets import QMainWindow, QLabel, QPushButton, QWidget, QVBoxLayout, QApplication
-from PyQt5.QtCore import Qt, QPropertyAnimation, QPoint, QTimer
-from PyQt5.QtGui import QMovie, QPixmap
+from PyQt5.QtWidgets import QMainWindow, QPushButton, QWidget, QVBoxLayout, QApplication, QSystemTrayIcon
+from PyQt5.QtCore import Qt, QPropertyAnimation, QEvent
+from PyQt5.QtGui import QMovie, QPixmap, QRegion
 import os
 import json
 import time
@@ -20,6 +19,52 @@ from ..utils.config_manager import ConfigManager
 from ..utils.event_system import EventBus, EventType, EventPriority, Event
 from ..animation.animation_transitions import cross_fade
 from ..constants import ANIMATION_STATES, ANIMATION_PRIORITY, ASSETS_FOLDER, DEFAULT_ANIMATION
+
+# Define SelectiveClickThroughWidget before PresenceGUI to ensure it exists
+class SelectiveClickThroughWidget(QWidget):
+    """Custom widget that allows click-through in some areas but not others"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.interactive_regions = []  # List of QRegion objects that should capture mouse events
+        self.click_through_enabled = False
+        
+    def add_interactive_region(self, region):
+        """Add a region that should capture mouse events"""
+        self.interactive_regions.append(region)
+        
+    def clear_interactive_regions(self):
+        """Clear all interactive regions"""
+        self.interactive_regions = []
+        
+    def set_click_through(self, enabled):
+        """Enable or disable click-through mode"""
+        self.click_through_enabled = enabled
+        
+    def event(self, event):
+        """Override event handler to implement selective click-through"""
+        # If click-through is disabled, handle events normally
+        if not self.click_through_enabled:
+            return super().event(event)
+            
+        # For mouse events, check if they're in an interactive region
+        if (event.type() == QEvent.MouseButtonPress or 
+            event.type() == QEvent.MouseButtonRelease or 
+            event.type() == QEvent.MouseMove or
+            event.type() == QEvent.MouseButtonDblClick):
+            
+            # Check if mouse position is within any interactive region
+            mouse_pos = event.pos()
+            for region in self.interactive_regions:
+                if region.contains(mouse_pos):
+                    # In interactive region, handle event normally
+                    return super().event(event)
+                    
+            # Not in any interactive region, let the event pass through (ignore it)
+            return False
+            
+        # Handle all other events normally
+        return super().event(event)
 
 class PresenceGUI(QMainWindow):
     """Main Presence GUI with improved error handling, resource management, and event-driven architecture"""
@@ -114,6 +159,51 @@ class PresenceGUI(QMainWindow):
         # Log successful initialization
         logger.info("Presence GUI initialized successfully")
 
+    def setup_ui(self):
+        """Initialize the UI components with improved layout"""
+        # Create the selective widget first
+        self.selective_widget = SelectiveClickThroughWidget(self)
+        self.setCentralWidget(self.selective_widget)
+        
+        # Main layout for the selective widget
+        self.main_layout = QVBoxLayout(self.selective_widget)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Create animation container with absolute positioning
+        self.animation_container = QWidget()
+        self.animation_container.setLayout(QVBoxLayout())
+        self.animation_container.layout().setContentsMargins(0, 0, 0, 0)
+        
+        # Create animation labels with stacked layout
+        self.current_label = AnimatedLabel(self)
+        self.current_label.setAlignment(Qt.AlignCenter)
+        self.next_label = AnimatedLabel(self)
+        self.next_label.setAlignment(Qt.AlignCenter)
+        self.next_label.setOpacity(0.0)  # Start with fully transparent
+        
+        # Position labels with absolute layout
+        window_config = self.config_manager.get_config("window", None, {})
+        window_width = window_config.get("width", 500)
+        window_height = window_config.get("height", 500)
+        animation_top_margin = 30  # Below settings button
+        
+        self.current_label.setGeometry(0, animation_top_margin, window_width, window_height - animation_top_margin)
+        self.next_label.setGeometry(0, animation_top_margin, window_width, window_height - animation_top_margin)
+        
+        # Settings button in top right corner
+        self.settings_button = QPushButton("⚙", self.selective_widget)
+        self.settings_button.setGeometry(window_width - 30, 5, 25, 25)
+        self.settings_button.clicked.connect(self.toggle_settings)
+        self.settings_button.setStyleSheet("background-color: white; color: black; border-radius: 5px;")
+
+        # Settings menu
+        self.settings_menu = SettingsMenu(self, self.config_manager, self.resource_manager, self.event_bus)
+
+        # Add animations to main layout
+        self.main_layout.addWidget(self.animation_container)
+
+    # Rest of the class methods remain unchanged...
+
     def load_animation_manager(self):
         """Initialize and load the animation manager"""
         try:
@@ -193,6 +283,10 @@ class PresenceGUI(QMainWindow):
 
     def setup_ui(self):
         """Initialize the UI components with improved layout"""
+        # Create the selective widget first
+        self.selective_widget = SelectiveClickThroughWidget(self)
+        self.setCentralWidget(self.selective_widget)
+        
         # Main layout for the selective widget
         self.main_layout = QVBoxLayout(self.selective_widget)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
@@ -729,48 +823,3 @@ class PresenceGUI(QMainWindow):
         # This method is called during initialization to set up event listeners
         # It's already implemented in the __init__ method but needs to be defined
         pass
-
-class SelectiveClickThroughWidget(QWidget):
-    """Custom widget that allows click-through in some areas but not others"""
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.interactive_regions = []  # List of QRegion objects that should capture mouse events
-        self.click_through_enabled = False
-        
-    def add_interactive_region(self, region):
-        """Add a region that should capture mouse events"""
-        self.interactive_regions.append(region)
-        
-    def clear_interactive_regions(self):
-        """Clear all interactive regions"""
-        self.interactive_regions = []
-        
-    def set_click_through(self, enabled):
-        """Enable or disable click-through mode"""
-        self.click_through_enabled = enabled
-        
-    def event(self, event):
-        """Override event handler to implement selective click-through"""
-        # If click-through is disabled, handle events normally
-        if not self.click_through_enabled:
-            return super().event(event)
-            
-        # For mouse events, check if they're in an interactive region
-        if (event.type() == QEvent.MouseButtonPress or 
-            event.type() == QEvent.MouseButtonRelease or 
-            event.type() == QEvent.MouseMove or
-            event.type() == QEvent.MouseButtonDblClick):
-            
-            # Check if mouse position is within any interactive region
-            mouse_pos = event.pos()
-            for region in self.interactive_regions:
-                if region.contains(mouse_pos):
-                    # In interactive region, handle event normally
-                    return super().event(event)
-                    
-            # Not in any interactive region, let the event pass through (ignore it)
-            return False
-            
-        # Handle all other events normally
-        return super().event(event)
