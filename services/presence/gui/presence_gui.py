@@ -1,7 +1,7 @@
 """
 Main GUI component for Sabrina's Presence System
 """
-from PyQt5.QtWidgets import QMainWindow, QPushButton, QWidget, QVBoxLayout, QApplication, QSystemTrayIcon
+from PyQt5.QtWidgets import QMainWindow, QPushButton, QWidget, QVBoxLayout, QApplication, QSystemTrayIcon, QMenu
 from PyQt5.QtCore import Qt, QPropertyAnimation, QEvent
 from PyQt5.QtGui import QMovie, QPixmap, QRegion
 import os
@@ -42,27 +42,43 @@ class SelectiveClickThroughWidget(QWidget):
         self.update()  # Force update to apply changes
         
     def event(self, event):
-        """Override event handler to implement selective click-through"""
+        """Override event handler with debug output to help diagnose issues"""
+        # For debugging purposes - enable in debug mode only
+        debug_mode = hasattr(self, 'parent') and hasattr(self.parent(), 'config_manager') and \
+                    self.parent().config_manager.get_config("debug", "debug_mode", False)
+        
         # If click-through is disabled, handle events normally
         if not self.click_through_enabled:
             return super().event(event)
-            
+        
         # For mouse events, check if they're in an interactive region
         if (event.type() == QEvent.MouseButtonPress or 
             event.type() == QEvent.MouseButtonRelease or 
-            event.type() == QEvent.MouseMove or
             event.type() == QEvent.MouseButtonDblClick):
             
             # Check if mouse position is within any interactive region
             mouse_pos = event.pos()
+            
+            if debug_mode:
+                print(f"Mouse event at position: {mouse_pos.x()}, {mouse_pos.y()}")
+                print(f"Interactive regions count: {len(self.interactive_regions)}")
+                
+                for i, region in enumerate(self.interactive_regions):
+                    contains = region.contains(mouse_pos)
+                    print(f"Region {i}: Contains point: {contains}, Rect: {region.boundingRect()}")
+            
             for region in self.interactive_regions:
                 if region.contains(mouse_pos):
+                    if debug_mode:
+                        print("Event in interactive region - handling normally")
                     # In interactive region, handle event normally
                     return super().event(event)
-                    
+            
+            if debug_mode:
+                print("Event not in any interactive region - passing through")
             # Not in any interactive region, let the event pass through
             return False
-            
+        
         # Handle all other events normally
         return super().event(event)
 
@@ -265,33 +281,56 @@ class PresenceGUI(QMainWindow):
             
         self.selective_widget.clear_interactive_regions()
         
-        # Add settings button region - make slightly larger for easier clicking
+        # Add settings button region - make MUCH larger for easier clicking
         if hasattr(self, 'settings_button'):
             button_geo = self.settings_button.geometry()
-            # Make the clickable region slightly larger (5px padding)
+            # Make the clickable region significantly larger (15px padding)
             larger_region = QRegion(
-                button_geo.x() - 5, 
-                button_geo.y() - 5,
-                button_geo.width() + 10,
-                button_geo.height() + 10
+                button_geo.x() - 15, 
+                button_geo.y() - 15,
+                button_geo.width() + 30,
+                button_geo.height() + 30
             )
             self.selective_widget.add_interactive_region(larger_region)
+            logger.debug(f"Added settings button region: {button_geo}")
         
         # Add settings menu region if visible
         if hasattr(self, 'settings_menu') and self.settings_menu.isVisible():
             menu_geo = self.settings_menu.geometry()
-            self.selective_widget.add_interactive_region(QRegion(menu_geo))
+            # Add larger margin around the menu (10px)
+            larger_menu_region = QRegion(
+                menu_geo.x() - 10,
+                menu_geo.y() - 10,
+                menu_geo.width() + 20,
+                menu_geo.height() + 20
+            )
+            self.selective_widget.add_interactive_region(larger_menu_region)
             
             # Also add all child widgets of settings menu
             for child in self.settings_menu.findChildren(QWidget):
                 if child.isVisible():
                     child_geo = child.geometry().translated(menu_geo.topLeft())
-                    self.selective_widget.add_interactive_region(QRegion(child_geo))
+                    # Make click regions larger for each child widget
+                    larger_child_region = QRegion(
+                        child_geo.x() - 5,
+                        child_geo.y() - 5,
+                        child_geo.width() + 10,
+                        child_geo.height() + 10
+                    )
+                    self.selective_widget.add_interactive_region(larger_child_region)
+        
+        # Add a region for the entire top bar area to make it easier to drag the window
+        top_bar_height = 40
+        top_bar_region = QRegion(0, 0, self.width(), top_bar_height)
+        self.selective_widget.add_interactive_region(top_bar_region)
         
         logger.debug(f"Updated interactive regions: {len(self.selective_widget.interactive_regions)} regions")
+        
+        # Force a redraw
+        self.update()
 
     def setup_ui(self):
-        """Initialize the UI components with improved layout"""
+        """Initialize the UI components with improved layout and accessibility"""
         # Create the selective widget first
         self.selective_widget = SelectiveClickThroughWidget(self)
         self.setCentralWidget(self.selective_widget)
@@ -316,22 +355,54 @@ class PresenceGUI(QMainWindow):
         window_config = self.config_manager.get_config("window", None, {})
         window_width = window_config.get("width", 500)
         window_height = window_config.get("height", 500)
-        animation_top_margin = 30  # Below settings button
+        animation_top_margin = 40  # Increased margin to make room for a larger settings button
         
         self.current_label.setGeometry(0, animation_top_margin, window_width, window_height - animation_top_margin)
         self.next_label.setGeometry(0, animation_top_margin, window_width, window_height - animation_top_margin)
         
-        # Settings button in top right corner
-        self.settings_button = QPushButton("⚙", self.selective_widget)
-        self.settings_button.setGeometry(window_width - 30, 5, 25, 25)
+        # Enhanced settings button in top right corner - LARGER and MORE VISIBLE
+        self.settings_button = QPushButton("⚙ Settings", self.selective_widget)
+        self.settings_button.setGeometry(window_width - 100, 10, 90, 30)  # Much larger button
         self.settings_button.clicked.connect(self.toggle_settings)
-        self.settings_button.setStyleSheet("background-color: white; color: black; border-radius: 5px;")
+        self.settings_button.setStyleSheet("""
+            background-color: rgba(255, 255, 255, 220); 
+            color: black; 
+            border-radius: 5px;
+            font-weight: bold;
+        """)
+        # Add tooltip for better usability
+        self.settings_button.setToolTip("Open Settings (Right-click anywhere for menu)")
 
         # Settings menu
         self.settings_menu = SettingsMenu(self, self.config_manager, self.resource_manager, self.event_bus)
 
         # Add animations to main layout
         self.main_layout.addWidget(self.animation_container)
+        
+        # Make sure settings button is above other elements
+        self.settings_button.raise_()
+        
+        # Force update of interactive regions
+        self.update_interactive_regions()
+    
+    def contextMenuEvent(self, event):
+        """Handle right-click event to show context menu"""
+        # Create context menu
+        context_menu = QMenu(self)
+        
+        # Add menu options
+        settings_action = context_menu.addAction("Open Settings")
+        toggle_click_through_action = context_menu.addAction("Toggle Click-Through Mode")
+        context_menu.addSeparator()
+        exit_action = context_menu.addAction("Exit Sabrina AI")
+        
+        # Connect actions to their respective functions
+        settings_action.triggered.connect(self.show_settings)
+        toggle_click_through_action.triggered.connect(self.toggle_click_through)
+        exit_action.triggered.connect(self.safe_exit)
+        
+        # Show the menu at the cursor position
+        action = context_menu.exec_(self.mapToGlobal(event.pos()))
 
     def toggle_settings(self):
         """Show or hide the settings menu"""
