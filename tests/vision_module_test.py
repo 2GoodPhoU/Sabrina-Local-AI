@@ -113,6 +113,7 @@ def test_screen_capture(save_dir, display_images=False):
     """Test the screen capture functionality"""
     try:
         from services.vision.vision_core import VisionCore
+        import os  # Import os module within the function scope
         
         logger.info("Creating VisionCore instance...")
         vision_core = VisionCore()
@@ -129,7 +130,7 @@ def test_screen_capture(save_dir, display_images=False):
         if capture_result and os.path.exists(capture_result):
             logger.info(f"✓ Screen captured successfully: {capture_result}")
             
-            # Modify the display_images part in test_screen_capture function:
+            # Display image if requested
             if display_images:
                 try:
                     import cv2
@@ -142,7 +143,6 @@ def test_screen_capture(save_dir, display_images=False):
                         logger.warning(f"OpenCV couldn't display the image (missing GUI support): {e}")
                         logger.info("Image was captured successfully but can't be displayed with this OpenCV build")
                         # Alternative: open the image with the default image viewer
-                        import os
                         if os.name == 'nt':  # Windows
                             os.startfile(capture_result)
                         elif os.name == 'posix':  # Linux/Mac

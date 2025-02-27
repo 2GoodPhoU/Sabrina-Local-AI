@@ -1,0 +1,53 @@
+{
+    "window": {
+        "width": 500,
+        "height": 500,
+        "padding_right": 20,
+        "transparency_level": 0.66,
+        "enable_dragging": true,
+        "lock_position": false
+    },
+    "animations": {
+        "default_animation": "idle",
+        "transition_duration": 300,
+        "enable_transitions": true,
+        "priorities": {
+            "talking": 5,
+            "error": 4,
+            "success": 3,
+            "listening": 3,
+            "working": 2,
+            "thinking": 2,
+            "waiting": 2,
+            "idle": 1
+        }
+    },
+    "system_tray": {
+        "minimize_to_tray": true,
+        "show_notifications": true
+    },
+    "themes": {
+        "default_theme": "default"
+    },
+    "debug": {
+        "debug_mode": false,
+        "log_animations": false,
+        "performance_stats": false
+    },
+    "interaction": {
+        "click_through_mode": false,
+        "context_menu_enabled": true,
+        "auto_respond_to_click": true
+    },
+    "advanced": {
+        "resource_cleanup_threshold": 10,
+        "inactive_resource_timeout": 60,
+        "max_history_entries": 20
+    },
+    "voice": {
+        "volume": 0.55,
+        "speed": 1.0,
+        "pitch": 1.0,
+        "emotion": "normal"
+    }
+}

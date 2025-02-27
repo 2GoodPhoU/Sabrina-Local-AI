@@ -84,10 +84,10 @@ def init_voice_client(event_bus=None):
         except ImportError:
             logger.warning("VoiceAPIClient not found, voice features will be limited")
             return None
-        
+
         # Create voice client
         voice_client = voice_client_class("http://localhost:8100")
-        
+
         # Test connection
         connection_successful = voice_client.test_connection()
         if connection_successful:
@@ -180,11 +180,11 @@ def demonstrate_voice(voice_client):
                 print("\n2. Testing voice settings...")
                 
                 # Test different speeds
-                voice_client.update_settings({"speed": 1.2})
+                voice_client.update_settings({"speed": 1.9})
                 voice_client.speak("I can speak faster when needed.")
                 time.sleep(2)
                 
-                voice_client.update_settings({"speed": 0.8})
+                voice_client.update_settings({"speed": 0.2})
                 voice_client.speak("Or I can slow down when explaining complex things.")
                 time.sleep(2)
                 
