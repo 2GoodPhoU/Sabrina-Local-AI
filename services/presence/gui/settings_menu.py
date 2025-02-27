@@ -1,6 +1,5 @@
 """
-Settings menu for Sabrina's Presence System
-Provides configuration UI for the presence system
+Fixed SettingsMenu initialization to handle potential missing attributes safely.
 """
 from PyQt5.QtWidgets import (QWidget, QLabel, QPushButton, QSlider, QVBoxLayout,
                              QHBoxLayout, QComboBox, QFileDialog, QMessageBox)
@@ -51,8 +50,9 @@ class SettingsMenu(QWidget):
         layout = QVBoxLayout(self)
         
         # Position lock toggle
+        is_locked = getattr(self.parent, 'locked', False)
         self.lock_button = QPushButton(
-            "Position Locked 🔒" if self.parent.locked else "Position Unlocked 🔓", 
+            "Position Locked 🔒" if is_locked else "Position Unlocked 🔓", 
             self
         )
         self.lock_button.clicked.connect(self.parent.toggle_lock)
@@ -65,11 +65,13 @@ class SettingsMenu(QWidget):
         self.theme_selector = QComboBox(self)
         
         # Add available themes
-        for theme in self.parent.themes.keys():
+        themes = getattr(self.parent, 'themes', {})
+        for theme in themes.keys():
             self.theme_selector.addItem(theme)
         
         # Set current theme
-        index = self.theme_selector.findText(self.parent.current_theme)
+        current_theme = getattr(self.parent, 'current_theme', 'default')
+        index = self.theme_selector.findText(current_theme)
         if index >= 0:
             self.theme_selector.setCurrentIndex(index)
         
@@ -154,7 +156,16 @@ class SettingsMenu(QWidget):
     def update_click_through_button(self):
         """Update click-through button text based on current state"""
         if hasattr(self, 'click_through_button'):
-            button_text = "🖱️ Click-Through: ON" if self.parent.click_through_enabled else "🖱️ Click-Through: OFF"
+            # Safely get click_through_enabled from parent with fallback to config
+            is_enabled = False
+            if hasattr(self.parent, 'click_through_enabled'):
+                is_enabled = self.parent.click_through_enabled
+            else:
+                # Fallback to config if attribute is not set yet
+                interaction_config = self.config_manager.get_config("interaction", None, {})
+                is_enabled = interaction_config.get("click_through_mode", False)
+                
+            button_text = "🖱️ Click-Through: ON" if is_enabled else "🖱️ Click-Through: OFF"
             self.click_through_button.setText(button_text)
     
     def import_custom_theme(self):

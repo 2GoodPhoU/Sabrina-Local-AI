@@ -1,6 +1,6 @@
 """
-Main GUI component for Sabrina's Presence System
-Provides the primary visual interface for the presence system
+Fixed PresenceGUI initialization order to avoid attribute errors.
+The fix ensures click_through_enabled is set before creating the settings menu.
 """
 from PyQt5.QtWidgets import QMainWindow, QLabel, QPushButton, QWidget, QVBoxLayout, QApplication
 from PyQt5.QtCore import Qt, QPropertyAnimation, QPoint, QTimer
@@ -25,13 +25,7 @@ class PresenceGUI(QMainWindow):
     """Main Presence GUI with improved error handling, resource management, and event-driven architecture"""
     
     def __init__(self, resource_manager=None, config_manager=None, event_bus=None):
-        """Initialize the Presence GUI with improved components
-        
-        Args:
-            resource_manager: Optional ResourceManager instance
-            config_manager: Optional ConfigManager instance
-            event_bus: Optional EventBus instance
-        """
+        """Initialize the Presence GUI with improved components"""
         super().__init__()
         
         # Initialize improved components
@@ -84,7 +78,7 @@ class PresenceGUI(QMainWindow):
         self.current_theme = themes_config.get("default_theme", "default")
         self.themes = self.load_themes()
         
-        # Click-through mode
+        # Click-through mode - IMPORTANT: This needs to be set BEFORE creating settings_menu
         self.click_through_enabled = interaction_config.get("click_through_mode", False)
         
         # Interactive areas tracking
@@ -96,6 +90,7 @@ class PresenceGUI(QMainWindow):
         # Initial click-through status - make sure flags are set correctly based on initial state
         if self.click_through_enabled:
             self.setWindowFlags(self.windowFlags() | Qt.WindowTransparentForInput)
+            self.show()  # Need to show again after changing flags
             
         # Setup System Tray
         self.tray_icon = setup_system_tray(self)
@@ -153,6 +148,7 @@ class PresenceGUI(QMainWindow):
         
         return animations
 
+    
     def is_in_interactive_area(self, pos):
         """Check if a point is in an interactive area (settings menu, buttons)"""
         # Check settings menu
@@ -169,15 +165,36 @@ class PresenceGUI(QMainWindow):
                 return True
                 
         return False
+    
+    def update_click_through_mode(self):
+        """Update click-through mode based on current settings"""
+        if hasattr(self, 'selective_widget'):
+            self.selective_widget.set_click_through(self.click_through_enabled)
+            logger.info(f"Click-through mode updated: {self.click_through_enabled}")
+
+    def update_interactive_regions(self):
+        """Update the interactive regions that should capture mouse events"""
+        if not hasattr(self, 'selective_widget'):
+            return
+            
+        self.selective_widget.clear_interactive_regions()
+        
+        # Add settings button region
+        if hasattr(self, 'settings_button'):
+            self.selective_widget.add_interactive_region(QRegion(self.settings_button.geometry()))
+        
+        # Add settings menu region
+        if hasattr(self, 'settings_menu') and self.settings_menu.isVisible():
+            self.selective_widget.add_interactive_region(QRegion(self.settings_menu.geometry()))
+            
+        # Add any other interactive elements here
+        
+        logger.debug(f"Updated interactive regions: {len(self.selective_widget.interactive_regions)} regions")
 
     def setup_ui(self):
         """Initialize the UI components with improved layout"""
-        # Create the main container
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
-        
-        # Create main vertical layout
-        self.main_layout = QVBoxLayout(self.central_widget)
+        # Main layout for the selective widget
+        self.main_layout = QVBoxLayout(self.selective_widget)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         
         # Create animation container with absolute positioning
@@ -186,7 +203,6 @@ class PresenceGUI(QMainWindow):
         self.animation_container.layout().setContentsMargins(0, 0, 0, 0)
         
         # Create animation labels with stacked layout
-        # They will overlay each other in the same position
         self.current_label = AnimatedLabel(self)
         self.current_label.setAlignment(Qt.AlignCenter)
         self.next_label = AnimatedLabel(self)
@@ -194,17 +210,16 @@ class PresenceGUI(QMainWindow):
         self.next_label.setOpacity(0.0)  # Start with fully transparent
         
         # Position labels with absolute layout
-        # Top-right corner, below settings button
-        animation_top_margin = 30  # Below settings button
         window_config = self.config_manager.get_config("window", None, {})
         window_width = window_config.get("width", 500)
         window_height = window_config.get("height", 500)
+        animation_top_margin = 30  # Below settings button
         
         self.current_label.setGeometry(0, animation_top_margin, window_width, window_height - animation_top_margin)
         self.next_label.setGeometry(0, animation_top_margin, window_width, window_height - animation_top_margin)
         
         # Settings button in top right corner
-        self.settings_button = QPushButton("⚙", self)
+        self.settings_button = QPushButton("⚙", self.selective_widget)
         self.settings_button.setGeometry(window_width - 30, 5, 25, 25)
         self.settings_button.clicked.connect(self.toggle_settings)
         self.settings_button.setStyleSheet("background-color: white; color: black; border-radius: 5px;")
@@ -214,9 +229,6 @@ class PresenceGUI(QMainWindow):
 
         # Add animations to main layout
         self.main_layout.addWidget(self.animation_container)
-        
-        # Register interactive areas
-        self.update_interactive_areas()
 
     def toggle_settings(self):
         """Show or hide the settings menu"""
@@ -227,6 +239,19 @@ class PresenceGUI(QMainWindow):
             else:
                 self.settings_menu.show()
                 logger.info("Settings menu shown")
+                
+            # Update interactive regions when settings visibility changes
+            self.update_interactive_regions()
+
+    # Override show event to update interactive regions
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.update_interactive_regions()
+        
+    # Override resize event to update geometry of components
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_interactive_regions()
 
     def show_settings(self):
         """Show the settings menu"""
@@ -537,26 +562,15 @@ class PresenceGUI(QMainWindow):
                 "presence_gui"
             )
         )
-
+    
     def toggle_click_through(self):
         """Toggle click-through mode (allows clicking through the AI window)"""
         # Toggle state
         self.click_through_enabled = not self.click_through_enabled
         
-        # Update flags based on new state
-        if self.click_through_enabled:
-            # Enable click-through
-            self.setWindowFlags(self.windowFlags() | Qt.WindowTransparentForInput)
-        else:
-            # Disable click-through
-            self.setWindowFlags(self.windowFlags() & ~Qt.WindowTransparentForInput)
-        
         # Update button text
         if hasattr(self, 'settings_menu'):
             self.settings_menu.update_click_through_button()
-        
-        # Show window again since changing flags hides it
-        self.show()
         
         # Update configuration
         self.config_manager.set_config("interaction", "click_through_mode", self.click_through_enabled)
@@ -676,25 +690,37 @@ class PresenceGUI(QMainWindow):
             QApplication.instance().quit()
 
     def mousePressEvent(self, event):
-        """Handle mouse press events for dragging the window"""
-        if event.button() == Qt.LeftButton and self.drag_enabled:
-            # Store the position if clicking on a non-interactive area
-            if not self.is_in_interactive_area(event.pos()):
-                self.old_pos = event.pos()
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        """Handle mouse move events for dragging the window"""
-        if self.old_pos and self.drag_enabled:
-            delta = event.pos() - self.old_pos
-            self.move(self.pos() + delta)
-        super().mouseMoveEvent(event)
+        """Handle mouse press events for dragging the window or pass through if needed"""
+        if not self.click_through_enabled or self.is_in_interactive_area(event.pos()):
+            # Normal handling - capture the event
+            if event.button() == Qt.LeftButton and self.drag_enabled:
+                # Store the position for dragging if in a non-interactive area
+                if not self.is_in_interactive_area(event.pos()):
+                    self.old_pos = event.pos()
+            super().mousePressEvent(event)
+        # If click-through is enabled and we're not in an interactive area,
+        # don't process the event (allow it to pass through)
 
     def mouseReleaseEvent(self, event):
-        """Handle mouse release events for dragging the window"""
-        if event.button() == Qt.LeftButton:
-            self.old_pos = None
-        super().mouseReleaseEvent(event)
+        """Handle mouse release events for dragging the window or pass through if needed"""
+        if not self.click_through_enabled or self.is_in_interactive_area(event.pos()):
+            # Normal handling - capture the event
+            if event.button() == Qt.LeftButton:
+                self.old_pos = None
+            super().mouseReleaseEvent(event)
+        # If click-through is enabled and we're not in an interactive area,
+        # don't process the event (allow it to pass through)
+
+    def mouseMoveEvent(self, event):
+        """Handle mouse move events for dragging the window or pass through if needed"""
+        if not self.click_through_enabled or self.is_in_interactive_area(event.pos()):
+            # Normal handling - capture the event
+            if self.old_pos and self.drag_enabled:
+                delta = event.pos() - self.old_pos
+                self.move(self.pos() + delta)
+            super().mouseMoveEvent(event)
+        # If click-through is enabled and we're not in an interactive area,
+        # don't process the event (allow it to pass through)
     
     
     def start_event_listener(self):
@@ -704,3 +730,47 @@ class PresenceGUI(QMainWindow):
         # It's already implemented in the __init__ method but needs to be defined
         pass
 
+class SelectiveClickThroughWidget(QWidget):
+    """Custom widget that allows click-through in some areas but not others"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.interactive_regions = []  # List of QRegion objects that should capture mouse events
+        self.click_through_enabled = False
+        
+    def add_interactive_region(self, region):
+        """Add a region that should capture mouse events"""
+        self.interactive_regions.append(region)
+        
+    def clear_interactive_regions(self):
+        """Clear all interactive regions"""
+        self.interactive_regions = []
+        
+    def set_click_through(self, enabled):
+        """Enable or disable click-through mode"""
+        self.click_through_enabled = enabled
+        
+    def event(self, event):
+        """Override event handler to implement selective click-through"""
+        # If click-through is disabled, handle events normally
+        if not self.click_through_enabled:
+            return super().event(event)
+            
+        # For mouse events, check if they're in an interactive region
+        if (event.type() == QEvent.MouseButtonPress or 
+            event.type() == QEvent.MouseButtonRelease or 
+            event.type() == QEvent.MouseMove or
+            event.type() == QEvent.MouseButtonDblClick):
+            
+            # Check if mouse position is within any interactive region
+            mouse_pos = event.pos()
+            for region in self.interactive_regions:
+                if region.contains(mouse_pos):
+                    # In interactive region, handle event normally
+                    return super().event(event)
+                    
+            # Not in any interactive region, let the event pass through (ignore it)
+            return False
+            
+        # Handle all other events normally
+        return super().event(event)
