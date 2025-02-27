@@ -30,7 +30,8 @@ ASSETS_FOLDER = os.path.join(os.path.dirname(os.path.dirname(__file__)), "presen
 DEFAULT_ANIMATION = get_config("animations", "default_animation", "idle")  # Default animation on startup
 
 # Animation priority levels (higher numbers = higher priority)
-ANIMATION_PRIORITY = get_config("animations", "priorities", {
+# In constants.py, add:
+ANIMATION_PRIORITY = {
     "talking": 5,     # Highest priority - override almost everything
     "error": 4,       # High priority - errors should be visible
     "success": 3,     # Medium-high priority
@@ -39,7 +40,7 @@ ANIMATION_PRIORITY = get_config("animations", "priorities", {
     "thinking": 2,     # Medium priority
     "waiting": 2,     # Medium priority
     "idle": 1         # Lowest priority - default state
-})
+}
 
 ### ANIMATION TRANSITION SETTINGS ###
 ENABLE_TRANSITIONS = get_config("animations", "enable_transitions", True)  # Enable smooth transitions between animations

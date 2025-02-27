@@ -53,7 +53,13 @@ class ConfigManager:
             "resource_cleanup_threshold": 10,
             "inactive_resource_timeout": 60,
             "max_history_entries": 20
-        }
+        },
+        "voice": {
+            "volume": 0.8,
+            "speed": 1.0,
+            "pitch": 1.0,
+            "emotion": "normal"
+        },
     }
     
     def __init__(self, config_dir="config", config_filename="presence_config.json"):

@@ -4,7 +4,7 @@
         "height": 500,
         "padding_right": 20,
         "enable_transparency": true,
-        "transparency_level": 0.85,
+        "transparency_level": 0.83,
         "enable_dragging": true,
         "lock_position": false
     },
@@ -36,7 +36,7 @@
         "performance_stats": false
     },
     "interaction": {
-        "click_through_mode": false,
+        "click_through_mode": true,
         "context_menu_enabled": true,
         "auto_respond_to_click": true
     },
@@ -44,5 +44,11 @@
         "resource_cleanup_threshold": 10,
         "inactive_resource_timeout": 60,
         "max_history_entries": 20
+    },
+    "voice": {
+        "volume": 0.54,
+        "speed": 1.0,
+        "pitch": 1.0,
+        "emotion": "normal"
     }
 }

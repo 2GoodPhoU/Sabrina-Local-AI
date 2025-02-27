@@ -467,6 +467,7 @@ class PresenceGUI(QMainWindow):
             ErrorHandler.log_error(e, f"Failed to set animation: {state}")
             return False
 
+    # In presence_gui.py, modify the complete_transition method to have proper null checks:
     def complete_transition(self):
         """Complete the transition between animations by swapping labels"""
         # Swap the current and next label references
@@ -475,9 +476,11 @@ class PresenceGUI(QMainWindow):
         temp_resource_id = None
         
         # Save current movie or pixmap
-        if hasattr(self.current_label, 'movie') and self.current_label.movie():
+        if (hasattr(self.current_label, 'movie') and self.current_label.movie()):
             temp_movie = self.current_label.movie()
-        elif hasattr(self.current_label, 'pixmap') and not self.current_label.pixmap().isNull():
+        elif (hasattr(self.current_label, 'pixmap') and 
+            self.current_label.pixmap() is not None and 
+            not self.current_label.pixmap().isNull()):
             temp_pixmap = self.current_label.pixmap()
         
         # Save resource ID
@@ -485,11 +488,13 @@ class PresenceGUI(QMainWindow):
             temp_resource_id = self.current_label.movie_resource_id
         
         # Update current label with next label's content
-        if hasattr(self.next_label, 'movie') and self.next_label.movie():
+        if (hasattr(self.next_label, 'movie') and self.next_label.movie()):
             self.current_label.setMovie(self.next_label.movie())
             self.current_label.movie_resource_id = self.next_label.movie_resource_id
             self.next_label.setMovie(None)
-        elif hasattr(self.next_label, 'pixmap') and not self.next_label.pixmap().isNull():
+        elif (hasattr(self.next_label, 'pixmap') and 
+            self.next_label.pixmap() is not None and 
+            not self.next_label.pixmap().isNull()):
             self.current_label.setPixmap(self.next_label.pixmap())
             self.current_label.movie_resource_id = None
             self.next_label.setPixmap(QPixmap())
