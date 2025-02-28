@@ -8,7 +8,7 @@ import os
 import time
 import logging
 import json
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Response
 from fastapi.responses import FileResponse
 import uvicorn
 import tempfile
@@ -146,11 +146,63 @@ def generate_speech_pyttsx3(text, speed, volume):
         tts_engine.save_to_file(text, temp_path)
         tts_engine.runAndWait()
         
+        # Ensure audio file is complete by verifying its size
+        # Wait up to 2 seconds for file to be written
+        max_wait = 2  # seconds
+        start_time = time.time()
+        while time.time() - start_time < max_wait:
+            if os.path.getsize(temp_path) > 100:  # File should be larger than 100 bytes
+                break
+            time.sleep(0.1)
+        
         logger.info(f"Speech generated with pyttsx3: {temp_path}")
         return temp_path
     except Exception as e:
         logger.error(f"Error generating speech with pyttsx3: {str(e)}")
         return None
+
+def ensure_valid_wav(file_path):
+    """
+    Ensure the WAV file has valid headers for Windows compatibility
+    Returns path to a fixed file if needed
+    """
+    if not file_path.endswith('.wav'):
+        return file_path
+        
+    try:
+        import wave
+        # Try to open with wave module to check validity
+        try:
+            with wave.open(file_path, 'rb') as wav_file:
+                # If we can read these properties, the file is valid
+                channels = wav_file.getnchannels()
+                sample_width = wav_file.getsampwidth()
+                framerate = wav_file.getframerate()
+                # File is valid
+                return file_path
+        except Exception:
+            logger.warning(f"Invalid WAV file detected: {file_path}, attempting repair")
+            
+            # We need to fix the file - use ffmpeg if available
+            try:
+                import subprocess
+                fixed_path = file_path + ".fixed.wav"
+                
+                # Use ffmpeg to convert/repair the WAV file
+                subprocess.run([
+                    "ffmpeg", "-y", "-i", file_path, 
+                    "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
+                    fixed_path
+                ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                
+                logger.info(f"Successfully repaired WAV file: {fixed_path}")
+                return fixed_path
+            except Exception as e:
+                logger.error(f"Failed to repair WAV file: {str(e)}")
+                return file_path
+    except ImportError:
+        # If wave module is not available, just return the original
+        return file_path
 
 async def generate_speech(text, voice="en-US-JennyNeural", speed=1.0, pitch=1.0, 
                     emotion="normal", volume=0.8):
@@ -181,21 +233,31 @@ async def generate_speech(text, voice="en-US-JennyNeural", speed=1.0, pitch=1.0,
             if "Jenny" in voice:
                 text = f'<mstts:express-as style="sad">{text}</mstts:express-as>'
         
-        return await generate_speech_edge_tts(text, voice, speed, volume)
+        file_path = await generate_speech_edge_tts(text, voice, speed, volume)
     
     elif tts_type == "coqui-tts":
-        return generate_speech_coqui(text, speed)
+        file_path = generate_speech_coqui(text, speed)
     
     elif tts_type == "pyttsx3":
-        return generate_speech_pyttsx3(text, speed, volume)
+        file_path = generate_speech_pyttsx3(text, speed, volume)
     
     else:
         logger.error("No TTS engine available")
         return None
+    
+    # Validate and ensure proper format for WAV files
+    if file_path and file_path.endswith('.wav'):
+        file_path = ensure_valid_wav(file_path)
+    
+    return file_path
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize on startup"""
+    # Create logs directory
+    os.makedirs("logs", exist_ok=True)
+    
+    # Initialize TTS engine
     init_tts_engine()
 
 @app.get("/status")
@@ -241,11 +303,23 @@ async def speak(
         )
         
         if file_path and os.path.exists(file_path):
+            # Determine correct media type
+            if file_path.endswith('.mp3'):
+                media_type = "audio/mpeg"
+                filename = "speech.mp3"
+            else:
+                media_type = "audio/wav"
+                filename = "speech.wav"
+            
+            # Log the file size
+            file_size = os.path.getsize(file_path)
+            logger.info(f"Sending audio file: {file_path}, size: {file_size} bytes")
+            
             # Return the audio file
             return FileResponse(
                 path=file_path,
-                media_type="audio/mpeg" if file_path.endswith(".mp3") else "audio/wav",
-                filename="speech.mp3" if file_path.endswith(".mp3") else "speech.wav"
+                media_type=media_type,
+                filename=filename
             )
         else:
             return {"error": "Failed to generate speech"}
