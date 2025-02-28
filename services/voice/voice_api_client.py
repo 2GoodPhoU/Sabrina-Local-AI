@@ -462,8 +462,12 @@ class VoiceAPIClient:
                 )
                 
                 if response.status_code == 200:
+                    # Check content type
+                    content_type = response.headers.get('Content-Type', '')
+                    is_mp3 = 'audio/mpeg' in content_type
+                    
                     # Save audio to temporary file
-                    audio_file = self._save_audio(response.content)
+                    audio_file = self._save_audio(response.content, is_mp3)
                     if audio_file:
                         # Play audio in a separate thread to avoid blocking
                         threading.Thread(
@@ -539,21 +543,21 @@ class VoiceAPIClient:
         
         return None
     
-    def _save_audio(self, audio_data: bytes) -> Optional[str]:
+    def _save_audio(self, audio_data: bytes, is_mp3: bool = False) -> Optional[str]:
         """
         Save audio data to a temporary file
         
         Args:
             audio_data: Raw audio data
+            is_mp3: Whether the data is in MP3 format
             
         Returns:
             str: Path to the saved audio file, or None if failed
         """
         try:
-            # Determine file extension based on first few bytes
-            is_mp3 = False
-            if len(audio_data) > 2 and audio_data[0:2] == b'\xFF\xFB':
-                is_mp3 = True
+            # Determine file extension based on first few bytes if not specified
+            if not is_mp3 and len(audio_data) > 2:
+                is_mp3 = audio_data[0:2] == b'\xFF\xFB'
             
             # Create a temporary file with appropriate extension
             suffix = '.mp3' if is_mp3 else '.wav'
@@ -587,23 +591,37 @@ class VoiceAPIClient:
         try:
             # Play audio based on platform with hidden window
             if sys.platform == 'win32':  # Windows
-                # On Windows, use PowerShell to play audio without showing player
+                # On Windows, use a more compatible approach
+                is_mp3 = audio_file.lower().endswith('.mp3')
+                
+                if is_mp3:
+                    # For MP3, use PowerShell's MediaPlayer
+                    cmd = f'Add-Type -AssemblyName PresentationCore; ' \
+                          f'$mediaPlayer = New-Object System.Windows.Media.MediaPlayer; ' \
+                          f'$mediaPlayer.Open("file:///{audio_file.replace("\\", "/")}"); ' \
+                          f'$mediaPlayer.Play(); ' \
+                          f'Start-Sleep -s 5; '  # Wait for audio to finish (adjust based on expected length)
+                else:
+                    # For WAV, use System.Media.SoundPlayer but with better error handling
+                    cmd = f'Add-Type -AssemblyName System.Windows.Forms; ' \
+                          f'try {{ ' \
+                          f'  $player = New-Object System.Media.SoundPlayer("{audio_file}"); ' \
+                          f'  $player.Play(); ' \
+                          f'}} catch {{ ' \
+                          f'  Write-Host "Error playing audio: $_"; ' \
+                          f'}}'
+                
+                # Hide the window
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 startupinfo.wShowWindow = 0  # SW_HIDE
                 
-                if audio_file.endswith('.mp3'):
-                    # Use MediaPlayer for MP3
-                    subprocess.Popen(
-                        ["powershell", "-c", f"(New-Object Media.MediaPlayer).OpenUriAsync('{audio_file}')"],
-                        startupinfo=startupinfo
-                    )
-                else:
-                    # Use SoundPlayer for WAV
-                    subprocess.Popen(
-                        ["powershell", "-c", f"(New-Object Media.SoundPlayer '{audio_file}').PlaySync()"],
-                        startupinfo=startupinfo
-                    )
+                subprocess.Popen(
+                    ["powershell", "-Command", cmd],
+                    startupinfo=startupinfo,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
                 
             elif sys.platform == 'darwin':  # macOS
                 # On macOS, use afplay which runs in terminal without UI
@@ -613,15 +631,33 @@ class VoiceAPIClient:
                 
             else:  # Linux and others
                 # On Linux, try different players, starting with the most lightweight
-                players = ['aplay', 'paplay', 'ffplay']
-                for player in players:
-                    try:
-                        subprocess.Popen([player, '-q', audio_file], 
-                                        stdout=subprocess.DEVNULL, 
-                                        stderr=subprocess.DEVNULL)
-                        break
-                    except FileNotFoundError:
-                        continue
+                players = ['aplay', 'paplay', 'ffplay', 'mpg123', 'mplayer']
+                
+                # Use appropriate player based on file type
+                is_mp3 = audio_file.lower().endswith('.mp3')
+                
+                # MP3 files need different players
+                if is_mp3:
+                    mp3_players = ['mpg123', 'mplayer', 'ffplay']
+                    for player in mp3_players:
+                        try:
+                            subprocess.Popen([player, audio_file], 
+                                            stdout=subprocess.DEVNULL, 
+                                            stderr=subprocess.DEVNULL)
+                            break
+                        except FileNotFoundError:
+                            continue
+                else:
+                    # WAV players
+                    wav_players = ['aplay', 'paplay', 'ffplay']
+                    for player in wav_players:
+                        try:
+                            subprocess.Popen([player, '-q', audio_file], 
+                                            stdout=subprocess.DEVNULL, 
+                                            stderr=subprocess.DEVNULL)
+                            break
+                        except FileNotFoundError:
+                            continue
             
             logger.debug(f"Playing audio file (hidden): {audio_file}")
             return True
