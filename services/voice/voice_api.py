@@ -263,13 +263,24 @@ async def startup_event():
 @app.get("/status")
 def status():
     """Check if the Voice API is running"""
+    # Define available voices for Edge TTS
+    available_voices = {
+        "English (US)": [
+            "en-US-JennyNeural", "en-US-GuyNeural", "en-US-AriaNeural", 
+            "en-US-DavisNeural", "en-US-TonyNeural"
+        ],
+        "English (UK)": ["en-GB-SoniaNeural", "en-GB-RyanNeural"],
+        "English (AU)": ["en-AU-NatashaNeural", "en-AU-WilliamNeural"],
+        "Simple Names": ["jenny", "guy", "aria", "davis", "tony", "sonia", "ryan", "natasha"]
+    }
+    
     return {
         "status": "ok",
         "service": "Sabrina Voice API",
         "tts_engine": tts_type,
         "tts_engine_loaded": tts_engine is not None,
         "default_voice": SETTINGS.get("voice", "en-US-JennyNeural"),
-        "available_voices": ["en-US-JennyNeural", "en-US-AriaNeural", "en-US-GuyNeural"]
+        "available_voices": available_voices
     }
 
 @app.get("/speak")
@@ -291,6 +302,9 @@ async def speak(
         speed = max(0.5, min(2.0, speed))
         pitch = max(0.5, min(2.0, pitch))
         volume = max(0.0, min(1.0, volume))
+        
+        # Log voice being used
+        logger.info(f"Using voice: {voice}")
         
         # Generate speech
         file_path = await generate_speech(
@@ -326,6 +340,58 @@ async def speak(
     except Exception as e:
         logger.error(f"Error generating speech: {str(e)}")
         return {"error": str(e)}
+    
+def map_voice_name(voice):
+    """Map simple voice names to full Edge TTS voice IDs"""
+    voice_map = {
+        "jenny": "en-US-JennyNeural",
+        "guy": "en-US-GuyNeural",
+        "aria": "en-US-AriaNeural",
+        "davis": "en-US-DavisNeural",
+        "tony": "en-US-TonyNeural",
+        "sonia": "en-GB-SoniaNeural",
+        "ryan": "en-GB-RyanNeural",
+        "natasha": "en-AU-NatashaNeural"
+    }
+    
+    # If it's already a full voice ID, return it
+    if '-' in voice and 'Neural' in voice:
+        return voice
+        
+    # If it's a short name in our map, return the full ID
+    if voice.lower() in voice_map:
+        logger.info(f"Mapped voice name '{voice}' to '{voice_map[voice.lower()]}'")
+        return voice_map[voice.lower()]
+        
+    # Default to Jenny if we don't recognize the voice
+    logger.warning(f"Unknown voice name '{voice}', defaulting to en-US-JennyNeural")
+    return "en-US-JennyNeural"
+
+async def generate_speech_edge_tts(text, voice, speed, volume):
+    """Generate speech using Edge TTS"""
+    # Create a temporary file for the audio
+    fd, temp_path = tempfile.mkstemp(suffix='.mp3')
+    os.close(fd)
+    
+    try:
+        # Map voice name to full Edge TTS voice ID
+        full_voice_id = map_voice_name(voice)
+        
+        # Configure Edge TTS
+        communicate = tts_engine.Communicate(
+            text, 
+            voice=full_voice_id,
+            rate=f"{int((speed-1)*50):+d}%",  # Convert speed to rate format
+            volume=f"{int(volume*100)}%"
+        )
+        
+        # Generate speech
+        await communicate.save(temp_path)
+        logger.info(f"Speech generated with Edge TTS: {temp_path}")
+        return temp_path
+    except Exception as e:
+        logger.error(f"Error generating speech with Edge TTS: {str(e)}")
+        return None
 
 def main():
     """Run the Voice API server"""

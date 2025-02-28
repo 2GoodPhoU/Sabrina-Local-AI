@@ -173,6 +173,21 @@ def main():
             for key, value in settings.items():
                 print(f"  {key}: {value}")
                 
+            # Try to get available voices from API
+            try:
+                import requests
+                response = requests.get(f"{client.api_url}/status", timeout=5)
+                if response.status_code == 200:
+                    voices_info = response.json().get("available_voices", {})
+                    if voices_info:
+                        print("\nAvailable voices:")
+                        for category, voices in voices_info.items():
+                            print(f"  {category}:")
+                            for voice in voices:
+                                print(f"    - {voice}")
+            except Exception as e:
+                print(f"Could not retrieve voice information: {e}")
+                
         # Test basic TTS
         print("\nStep 2: Testing text-to-speech...")
         tts_ok = test_tts_with_client(client, args.text)

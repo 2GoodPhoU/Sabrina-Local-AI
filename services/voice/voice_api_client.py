@@ -725,8 +725,21 @@ class VoiceAPIClient:
                     logger.warning(f"Invalid value for {key}: {value} (must be a string)")
                     continue
                 
-                # Edge TTS voices
+                # Support for simple voice names (server will map them)
                 value = value.strip()
+                
+                # Common simple names to valid Edge TTS voices
+                voice_aliases = {
+                    "jenny": "en-US-JennyNeural",
+                    "guy": "en-US-GuyNeural",
+                    "aria": "en-US-AriaNeural"
+                }
+                
+                # If using an alias but want to use the full name in settings
+                if value.lower() in voice_aliases and '-' not in value:
+                    logger.info(f"Using simple voice name: '{value}' (server will map it)")
+                elif '-' not in value and 'Neural' not in value:
+                    logger.warning(f"Voice '{value}' may not be a valid Edge TTS voice ID, but will try it anyway")
                 
             elif key == "volume":
                 # Must be a float between 0.0 and 1.0
