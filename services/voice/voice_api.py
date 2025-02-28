@@ -93,6 +93,32 @@ def init_tts_engine():
             logger.error(f"All TTS engines failed to initialize: {str(e)}")
             return False
 
+def map_voice_name(voice):
+    """Map simple voice names to full Edge TTS voice IDs"""
+    voice_map = {
+        "jenny": "en-US-JennyNeural",
+        "guy": "en-US-GuyNeural",
+        "aria": "en-US-AriaNeural",
+        "davis": "en-US-DavisNeural",
+        "tony": "en-US-TonyNeural",
+        "sonia": "en-GB-SoniaNeural",
+        "ryan": "en-GB-RyanNeural",
+        "natasha": "en-AU-NatashaNeural"
+    }
+    
+    # If it's already a full voice ID, return it
+    if '-' in voice and 'Neural' in voice:
+        return voice
+        
+    # If it's a short name in our map, return the full ID
+    if voice.lower() in voice_map:
+        logger.info(f"Mapped voice name '{voice}' to '{voice_map[voice.lower()]}'")
+        return voice_map[voice.lower()]
+        
+    # Default to Jenny if we don't recognize the voice
+    logger.warning(f"Unknown voice name '{voice}', defaulting to en-US-JennyNeural")
+    return "en-US-JennyNeural"
+
 async def generate_speech_edge_tts(text, voice, speed, volume):
     """Generate speech using Edge TTS"""
     # Create a temporary file for the audio
@@ -100,12 +126,19 @@ async def generate_speech_edge_tts(text, voice, speed, volume):
     os.close(fd)
     
     try:
+        # Map voice name to full Edge TTS voice ID
+        full_voice_id = map_voice_name(voice)
+        
+        # Volume must be integer percentage string for Edge TTS
+        # Convert from 0.0-1.0 to Integer percentage for Edge TTS
+        volume_percent = str(int(float(volume) * 100))
+        
         # Configure Edge TTS
         communicate = tts_engine.Communicate(
             text, 
-            voice=voice,
+            voice=full_voice_id,
             rate=f"{int((speed-1)*50):+d}%",  # Convert speed to rate format
-            volume=f"{int(volume*100)}%"
+            volume=f"{volume_percent}%"  # Format as percentage string
         )
         
         # Generate speech
@@ -340,58 +373,6 @@ async def speak(
     except Exception as e:
         logger.error(f"Error generating speech: {str(e)}")
         return {"error": str(e)}
-    
-def map_voice_name(voice):
-    """Map simple voice names to full Edge TTS voice IDs"""
-    voice_map = {
-        "jenny": "en-US-JennyNeural",
-        "guy": "en-US-GuyNeural",
-        "aria": "en-US-AriaNeural",
-        "davis": "en-US-DavisNeural",
-        "tony": "en-US-TonyNeural",
-        "sonia": "en-GB-SoniaNeural",
-        "ryan": "en-GB-RyanNeural",
-        "natasha": "en-AU-NatashaNeural"
-    }
-    
-    # If it's already a full voice ID, return it
-    if '-' in voice and 'Neural' in voice:
-        return voice
-        
-    # If it's a short name in our map, return the full ID
-    if voice.lower() in voice_map:
-        logger.info(f"Mapped voice name '{voice}' to '{voice_map[voice.lower()]}'")
-        return voice_map[voice.lower()]
-        
-    # Default to Jenny if we don't recognize the voice
-    logger.warning(f"Unknown voice name '{voice}', defaulting to en-US-JennyNeural")
-    return "en-US-JennyNeural"
-
-async def generate_speech_edge_tts(text, voice, speed, volume):
-    """Generate speech using Edge TTS"""
-    # Create a temporary file for the audio
-    fd, temp_path = tempfile.mkstemp(suffix='.mp3')
-    os.close(fd)
-    
-    try:
-        # Map voice name to full Edge TTS voice ID
-        full_voice_id = map_voice_name(voice)
-        
-        # Configure Edge TTS
-        communicate = tts_engine.Communicate(
-            text, 
-            voice=full_voice_id,
-            rate=f"{int((speed-1)*50):+d}%",  # Convert speed to rate format
-            volume=f"{int(volume*100)}%"
-        )
-        
-        # Generate speech
-        await communicate.save(temp_path)
-        logger.info(f"Speech generated with Edge TTS: {temp_path}")
-        return temp_path
-    except Exception as e:
-        logger.error(f"Error generating speech with Edge TTS: {str(e)}")
-        return None
 
 def main():
     """Run the Voice API server"""

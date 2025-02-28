@@ -100,8 +100,8 @@ def test_voice_settings(client):
         # Save original settings
         original_settings = client.get_settings()
         
-        # First, make sure we're using Jenny voice
-        client.update_settings({"voice": "jenny"})
+        # First, make sure we're using Jenny voice with full voice name
+        client.update_settings({"voice": "en-US-JennyNeural"})
         client.speak("Hello, I am Jenny, the voice of Sabrina AI.")
         time.sleep(2)
         
