@@ -8,16 +8,18 @@ services:
     container_name: sabrina-voice-api
     ports:
       - "8100:8100"
+    restart: unless-stopped
+    # Audio configuration based on platform
+    # Option 1: Use this on Linux if you need direct sound access
+    # devices:
+    #   - /dev/snd:/dev/snd
+    # Option 2: For PulseAudio on Linux
     volumes:
-      # Mount models and logs directories for persistence
       - ./models:/app/models
       - ./logs:/app/logs
-      # Mount audio devices for sound playback (if needed)
-      - /dev/snd:/dev/snd
+      # Uncomment the line below for PulseAudio (Linux only)
+      # - ${XDG_RUNTIME_DIR}/pulse:/run/pulse:ro
     environment:
       - TZ=UTC
-      # Add any other environment variables needed
-    restart: unless-stopped
-    # Add these lines for audio support on Linux
-    devices:
-      - /dev/snd:/dev/snd
+      # Uncomment the line below for PulseAudio (Linux only)
+      # - PULSE_SERVER=unix:/run/pulse/native
