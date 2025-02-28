@@ -596,21 +596,23 @@ class VoiceAPIClient:
                 
                 if is_mp3:
                     # For MP3, use PowerShell's MediaPlayer
+                    file_path = audio_file.replace("\\", "/")
                     cmd = f'Add-Type -AssemblyName PresentationCore; ' \
                         f'$mediaPlayer = New-Object System.Windows.Media.MediaPlayer; ' \
-                        f'$mediaPlayer.Open("file:///{audio_file.replace("\\", "/")}"); ' \
+                        f'$mediaPlayer.Open("file:///{file_path}"); ' \
                         f'$mediaPlayer.Play(); ' \
-                        f'Start-Sleep -s 5; '  # Wait for audio to finish
+                        f'Start-Sleep -s 5; '
                 else:
-                    # For WAV, use a more reliable method to play audio
+                    # Escape PowerShell's curly braces by doubling them
+                    ps_audio_file = audio_file.replace("\\", "\\\\")  # Double backslashes for PowerShell
                     cmd = f'[System.Reflection.Assembly]::LoadWithPartialName("System.Media") | Out-Null; ' \
-                        f'if (Test-Path "{audio_file}") {{ ' \
-                        f'  $soundFile = New-Object System.IO.FileStream("{audio_file}", [System.IO.FileMode]::Open); ' \
+                        f'if (Test-Path "{ps_audio_file}") {{ ' \
+                        f'  $soundFile = New-Object System.IO.FileStream("{ps_audio_file}", [System.IO.FileMode]::Open); ' \
                         f'  $soundPlayer = New-Object System.Media.SoundPlayer($soundFile); ' \
                         f'  try {{ $soundPlayer.PlaySync(); }} ' \
                         f'  finally {{ $soundFile.Close(); }} ' \
                         f'}} else {{ ' \
-                        f'  Write-Error "File not found: {audio_file}"; ' \
+                        f'  Write-Error "File not found: {ps_audio_file}"; ' \
                         f'}}'
                 
                 # Hide the window
