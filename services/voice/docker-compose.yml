@@ -9,17 +9,12 @@ services:
     ports:
       - "8100:8100"
     restart: unless-stopped
-    # Audio configuration based on platform
-    # Option 1: Use this on Linux if you need direct sound access
-    # devices:
-    #   - /dev/snd:/dev/snd
-    # Option 2: For PulseAudio on Linux
     volumes:
       - ./models:/app/models
       - ./logs:/app/logs
-      # Uncomment the line below for PulseAudio (Linux only)
+      # For Linux systems with PulseAudio
       # - ${XDG_RUNTIME_DIR}/pulse:/run/pulse:ro
     environment:
       - TZ=UTC
-      # Uncomment the line below for PulseAudio (Linux only)
+      # For Linux systems with PulseAudio
       # - PULSE_SERVER=unix:/run/pulse/native

@@ -1,8 +1,8 @@
 """
-Enhanced Voice API Client for Sabrina AI (Docker Compatible)
+Enhanced Voice API Client for Sabrina AI with Piper TTS Support
 =======================================
 This module provides an improved client for interacting with the Voice API service
-running in Docker, with auto-start and hidden audio playback.
+using Piper TTS for high-quality, offline text-to-speech.
 """
 
 import os
@@ -23,10 +23,10 @@ logger = logging.getLogger("voice_api_client")
 
 class VoiceAPIClient:
     """
-    Enhanced client for the Voice API service with Docker compatibility.
+    Enhanced client for the Voice API service with Piper TTS support.
     
     This client handles:
-    - Communication with the containerized Voice API
+    - Communication with the Voice API using Piper TTS
     - Text-to-speech requests with event notifications
     - Hidden audio playback
     - Voice configuration settings management
@@ -51,6 +51,7 @@ class VoiceAPIClient:
         self.retries = 3
         self.retry_delay = 1.0  # seconds
         self.timeout = 10.0  # seconds
+        self.available_voices = []
         
         # Voice settings
         self.settings = {
@@ -58,7 +59,7 @@ class VoiceAPIClient:
             "pitch": 1.0,
             "emotion": "normal",
             "volume": 0.8,
-            "voice": "en-US-JennyNeural"  # Edge TTS Jenny voice
+            "voice": "en_US-amy-medium"  # Default Piper TTS voice
         }
         
         # Find project root directory
@@ -196,6 +197,23 @@ class VoiceAPIClient:
         except Exception as e:
             logger.error(f"Failed to save voice settings: {str(e)}")
     
+    def _fetch_available_voices(self):
+        """Fetch available voices from the API"""
+        try:
+            response = requests.get(f"{self.api_url}/voices", timeout=self.timeout)
+            if response.status_code == 200:
+                data = response.json()
+                self.available_voices = data.get("voices", [])
+                # Update default voice if needed
+                if not self.settings["voice"] in self.available_voices and self.available_voices:
+                    self.settings["voice"] = data.get("default_voice", self.available_voices[0])
+                logger.info(f"Fetched {len(self.available_voices)} available voices")
+                return self.available_voices
+        except Exception as e:
+            logger.error(f"Failed to fetch available voices: {str(e)}")
+        
+        return []
+    
     def start_voice_service(self, timeout=60, check_interval=1.0):
         """
         Start the Voice API service in Docker if it's not already running
@@ -294,6 +312,9 @@ class VoiceAPIClient:
             if self.connected:
                 logger.info("Successfully connected to Voice API service")
                 
+                # Fetch available voices
+                self._fetch_available_voices()
+                
                 # If connected and event bus is available, post status event
                 if self.event_bus and hasattr(self.event_bus, 'post_event'):
                     try:
@@ -306,7 +327,9 @@ class VoiceAPIClient:
                                 data={
                                     "component": "voice",
                                     "status": "connected",
-                                    "url": self.api_url
+                                    "url": self.api_url,
+                                    "tts_engine": "piper",
+                                    "available_voices": len(self.available_voices)
                                 },
                                 source="voice_client"
                             )
@@ -325,6 +348,8 @@ class VoiceAPIClient:
                     
                     if service_started:
                         self.connected = True
+                        # Fetch available voices
+                        self._fetch_available_voices()
                         return True
                 
                 # If not connected and event bus is available, post status event
@@ -365,6 +390,9 @@ class VoiceAPIClient:
                     try:
                         response = requests.get(f"{self.api_url}/status", timeout=self.timeout)
                         self.connected = response.status_code == 200
+                        if self.connected:
+                            # Fetch available voices
+                            self._fetch_available_voices()
                         return self.connected
                     except:
                         pass
@@ -451,7 +479,11 @@ class VoiceAPIClient:
                 # Prepare request parameters
                 params = {
                     "text": text,
-                    **self.settings
+                    "speed": self.settings.get("speed", 1.0),
+                    "pitch": self.settings.get("pitch", 1.0),
+                    "emotion": self.settings.get("emotion", "normal"),
+                    "voice": self.settings.get("voice"),
+                    "volume": self.settings.get("volume", 0.8)
                 }
                 
                 # Send request to voice API
@@ -465,6 +497,11 @@ class VoiceAPIClient:
                     # Check content type
                     content_type = response.headers.get('Content-Type', '')
                     is_mp3 = 'audio/mpeg' in content_type
+                    is_wav = 'audio/wav' in content_type or 'audio/x-wav' in content_type
+                    
+                    # Default to WAV for Piper
+                    if not is_mp3 and not is_wav:
+                        is_wav = True  # Assume WAV for Piper
                     
                     # Save audio to temporary file
                     audio_file = self._save_audio(response.content, is_mp3)
@@ -503,7 +540,16 @@ class VoiceAPIClient:
                     else:
                         logger.error("Failed to save audio file")
                 else:
-                    logger.error(f"Voice API error: {response.status_code}, {response.text}")
+                    error_detail = ""
+                    try:
+                        # Try to get error details from response
+                        error_data = response.json()
+                        if 'detail' in error_data:
+                            error_detail = f": {error_data['detail']}"
+                    except:
+                        pass
+                        
+                    logger.error(f"Voice API error: {response.status_code}{error_detail}")
                 
                 # If we get here, the request failed
                 if attempt < self.retries - 1:
@@ -556,8 +602,12 @@ class VoiceAPIClient:
         """
         try:
             # Determine file extension based on first few bytes if not specified
-            if not is_mp3 and len(audio_data) > 2:
-                is_mp3 = audio_data[0:2] == b'\xFF\xFB'
+            if not is_mp3 and len(audio_data) > 4:
+                # Check WAV header (RIFF)
+                is_wav = audio_data[0:4] == b'RIFF'
+                is_mp3 = audio_data[0:2] == b'\xFF\xFB' or audio_data[0:3] == b'ID3'
+            else:
+                is_wav = not is_mp3
             
             # Create a temporary file with appropriate extension
             suffix = '.mp3' if is_mp3 else '.wav'
@@ -706,16 +756,15 @@ class VoiceAPIClient:
                     continue
                 
             elif key == "emotion":
-                # Must be a string from the allowed emotions
+                # Must be a string from the allowed emotions (limited in Piper)
                 if not isinstance(value, str):
                     logger.warning(f"Invalid value for {key}: {value} (must be a string)")
                     continue
                 
-                # Edge TTS emotions
+                # Piper has limited emotion support - this is more for compatibility
                 allowed_emotions = ["normal", "happy", "sad", "angry", "excited", "calm"]
                 if value.lower() not in allowed_emotions:
-                    logger.warning(f"Invalid emotion: {value} (must be one of {allowed_emotions})")
-                    continue
+                    logger.warning(f"Limited emotion support in Piper TTS: {value} (defaulting to normal)")
                 
                 value = value.lower()
                 
@@ -725,21 +774,9 @@ class VoiceAPIClient:
                     logger.warning(f"Invalid value for {key}: {value} (must be a string)")
                     continue
                 
-                # Support for simple voice names (server will map them)
-                value = value.strip()
-                
-                # Common simple names to valid Edge TTS voices
-                voice_aliases = {
-                    "jenny": "en-US-JennyNeural",
-                    "guy": "en-US-GuyNeural",
-                    "aria": "en-US-AriaNeural"
-                }
-                
-                # If using an alias but want to use the full name in settings
-                if value.lower() in voice_aliases and '-' not in value:
-                    logger.info(f"Using simple voice name: '{value}' (server will map it)")
-                elif '-' not in value and 'Neural' not in value:
-                    logger.warning(f"Voice '{value}' may not be a valid Edge TTS voice ID, but will try it anyway")
+                # Check if voice exists (if we have fetched voices)
+                if self.available_voices and value not in self.available_voices:
+                    logger.warning(f"Voice '{value}' not found in available voices, but will try it anyway")
                 
             elif key == "volume":
                 # Must be a float between 0.0 and 1.0
@@ -806,7 +843,7 @@ class VoiceAPIClient:
     
     def set_pitch(self, pitch: float) -> bool:
         """
-        Set voice pitch
+        Set voice pitch (limited support in Piper)
         
         Args:
             pitch: Pitch multiplier (0.5 to 2.0)
@@ -814,11 +851,12 @@ class VoiceAPIClient:
         Returns:
             bool: True if successful, False otherwise
         """
+        logger.warning("Pitch adjustment has limited support in Piper TTS")
         return self.update_settings({"pitch": pitch})
     
     def set_emotion(self, emotion: str) -> bool:
         """
-        Set voice emotion
+        Set voice emotion (limited support in Piper)
         
         Args:
             emotion: Emotion name (normal, happy, sad, angry, excited, calm)
@@ -826,14 +864,15 @@ class VoiceAPIClient:
         Returns:
             bool: True if successful, False otherwise
         """
+        logger.warning("Emotion settings have limited support in Piper TTS")
         return self.update_settings({"emotion": emotion})
     
     def set_voice(self, voice: str) -> bool:
         """
-        Set voice
+        Set voice model
         
         Args:
-            voice: Voice name
+            voice: Voice model name
             
         Returns:
             bool: True if successful, False otherwise
@@ -851,6 +890,19 @@ class VoiceAPIClient:
             bool: True if successful, False otherwise
         """
         return self.update_settings({"volume": volume})
+    
+    def get_available_voices(self) -> List[str]:
+        """
+        Get list of available voice models
+        
+        Returns:
+            List of available voice model names
+        """
+        # Try to refresh the list if it's empty
+        if not self.available_voices and self.connected:
+            self._fetch_available_voices()
+            
+        return self.available_voices
     
     def get_last_audio_file(self) -> Optional[str]:
         """

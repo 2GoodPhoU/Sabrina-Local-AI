@@ -1,14 +1,20 @@
 """
-Docker-Ready Voice API Service for Sabrina AI
-============================================
-Provides a FastAPI-based voice synthesis service that works well in Docker.
+Docker-Ready Voice API Service for Sabrina AI with Piper TTS Support
+=================================================================
+Provides a FastAPI-based voice synthesis service that uses Piper TTS for offline,
+high-quality voice synthesis.
 """
 
 import os
 import time
 import logging
 import json
-from fastapi import FastAPI, Query, Response
+import asyncio
+import subprocess
+from pathlib import Path
+from typing import Dict, Any, List, Optional
+
+from fastapi import FastAPI, Query, Response, HTTPException
 from fastapi.responses import FileResponse
 import uvicorn
 import tempfile
@@ -24,11 +30,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger("voice_api")
 
-app = FastAPI(title="Sabrina Voice API")
+app = FastAPI(title="Sabrina Voice API with Piper TTS")
 
-# Global TTS engine
-tts_engine = None
-tts_type = "edge-tts"  # Options: "edge-tts", "coqui-tts", "pyttsx3"
+# Global settings
+PIPER_INSTALLED = False
+PIPER_BINARY_PATH = None
+PIPER_MODELS_DIR = "models/piper"
+DEFAULT_VOICE = "en_US-amy-medium"
+AVAILABLE_VOICES = []
 
 # Load settings
 def load_settings():
@@ -46,274 +55,249 @@ def load_settings():
         "pitch": 1.0,
         "emotion": "normal",
         "volume": 0.8,
-        "voice": "en-US-JennyNeural"  # Default Edge TTS voice
+        "voice": DEFAULT_VOICE
     }
 
 # Initialize settings
 SETTINGS = load_settings()
 
-def init_tts_engine():
-    """Initialize the TTS engine based on configuration"""
-    global tts_engine, tts_type
+def check_piper_installation():
+    """Check if Piper is installed and locate the binary"""
+    global PIPER_INSTALLED, PIPER_BINARY_PATH
     
-    # Try Edge TTS first (Microsoft's TTS service, works offline)
-    if tts_type == "edge-tts" or tts_engine is None:
+    # Try to find piper binary in common locations
+    possible_locations = [
+        "/usr/bin/piper",
+        "/usr/local/bin/piper",
+        "piper",  # If it's in PATH
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "piper"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "piper/piper")
+    ]
+    
+    for location in possible_locations:
         try:
-            logger.info("Initializing Edge TTS engine...")
-            import edge_tts
-            tts_engine = edge_tts
-            tts_type = "edge-tts"
-            logger.info("Edge TTS engine initialized successfully")
-            return True
-        except ImportError:
-            logger.warning("Edge TTS not available, trying Coqui TTS...")
-    
-    # Try Coqui TTS if Edge TTS fails
-    if tts_type == "coqui-tts" or tts_engine is None:
-        try:
-            logger.info("Initializing Coqui TTS engine...")
-            from TTS.api import TTS
-            tts_engine = TTS("tts_models/en/ljspeech/tacotron2-DDC")
-            tts_type = "coqui-tts"
-            logger.info("Coqui TTS engine initialized successfully")
-            return True
-        except Exception as e:
-            logger.warning(f"Coqui TTS not available: {str(e)}, trying pyttsx3...")
-    
-    # Use pyttsx3 as last resort (works on almost all platforms)
-    if tts_type == "pyttsx3" or tts_engine is None:
-        try:
-            logger.info("Initializing pyttsx3 engine...")
-            import pyttsx3
-            tts_engine = pyttsx3.init()
-            tts_type = "pyttsx3"
-            logger.info("pyttsx3 engine initialized successfully")
-            return True
-        except Exception as e:
-            logger.error(f"All TTS engines failed to initialize: {str(e)}")
-            return False
-
-def map_voice_name(voice):
-    """Map simple voice names to full Edge TTS voice IDs"""
-    voice_map = {
-        "jenny": "en-US-JennyNeural",
-        "guy": "en-US-GuyNeural",
-        "aria": "en-US-AriaNeural",
-        "davis": "en-US-DavisNeural",
-        "tony": "en-US-TonyNeural",
-        "sonia": "en-GB-SoniaNeural",
-        "ryan": "en-GB-RyanNeural",
-        "natasha": "en-AU-NatashaNeural"
-    }
-    
-    # If it's already a full voice ID, return it
-    if '-' in voice and 'Neural' in voice:
-        return voice
-        
-    # If it's a short name in our map, return the full ID
-    if voice.lower() in voice_map:
-        logger.info(f"Mapped voice name '{voice}' to '{voice_map[voice.lower()]}'")
-        return voice_map[voice.lower()]
-        
-    # Default to Jenny if we don't recognize the voice
-    logger.warning(f"Unknown voice name '{voice}', defaulting to en-US-JennyNeural")
-    return "en-US-JennyNeural"
-
-async def generate_speech_edge_tts(text, voice, speed, volume):
-    """Generate speech using Edge TTS"""
-    # Create a temporary file for the audio
-    fd, temp_path = tempfile.mkstemp(suffix='.mp3')
-    os.close(fd)
-    
-    try:
-        # Map voice name to full Edge TTS voice ID
-        full_voice_id = map_voice_name(voice)
-        
-        # Volume must be integer percentage string for Edge TTS
-        # Convert from 0.0-1.0 to Integer percentage for Edge TTS
-        volume_percent = str(int(float(volume) * 100))
-        
-        # Configure Edge TTS
-        communicate = tts_engine.Communicate(
-            text, 
-            voice=full_voice_id,
-            rate=f"{int((speed-1)*50):+d}%",  # Convert speed to rate format
-            volume=f"{volume_percent}%"  # Format as percentage string
-        )
-        
-        # Generate speech
-        await communicate.save(temp_path)
-        logger.info(f"Speech generated with Edge TTS: {temp_path}")
-        return temp_path
-    except Exception as e:
-        logger.error(f"Error generating speech with Edge TTS: {str(e)}")
-        return None
-
-def generate_speech_coqui(text, speed):
-    """Generate speech using Coqui TTS"""
-    # Create a temporary file for the audio
-    fd, temp_path = tempfile.mkstemp(suffix='.wav')
-    os.close(fd)
-    
-    try:
-        # Generate speech
-        tts_engine.tts_to_file(text=text, file_path=temp_path, speed=speed)
-        logger.info(f"Speech generated with Coqui TTS: {temp_path}")
-        return temp_path
-    except Exception as e:
-        logger.error(f"Error generating speech with Coqui TTS: {str(e)}")
-        return None
-
-def generate_speech_pyttsx3(text, speed, volume):
-    """Generate speech using pyttsx3"""
-    # Create a temporary file for the audio
-    fd, temp_path = tempfile.mkstemp(suffix='.wav')
-    os.close(fd)
-    
-    try:
-        # Configure pyttsx3
-        tts_engine.setProperty('rate', int(175 * speed))
-        tts_engine.setProperty('volume', volume)
-        
-        # Generate speech
-        tts_engine.save_to_file(text, temp_path)
-        tts_engine.runAndWait()
-        
-        # Ensure audio file is complete by verifying its size
-        # Wait up to 2 seconds for file to be written
-        max_wait = 2  # seconds
-        start_time = time.time()
-        while time.time() - start_time < max_wait:
-            if os.path.getsize(temp_path) > 100:  # File should be larger than 100 bytes
-                break
-            time.sleep(0.1)
-        
-        logger.info(f"Speech generated with pyttsx3: {temp_path}")
-        return temp_path
-    except Exception as e:
-        logger.error(f"Error generating speech with pyttsx3: {str(e)}")
-        return None
-
-def ensure_valid_wav(file_path):
-    """
-    Ensure the WAV file has valid headers for Windows compatibility
-    Returns path to a fixed file if needed
-    """
-    if not file_path.endswith('.wav'):
-        return file_path
-        
-    try:
-        import wave
-        # Try to open with wave module to check validity
-        try:
-            with wave.open(file_path, 'rb') as wav_file:
-                # If we can read these properties, the file is valid
-                channels = wav_file.getnchannels()
-                sample_width = wav_file.getsampwidth()
-                framerate = wav_file.getframerate()
-                # File is valid
-                return file_path
-        except Exception:
-            logger.warning(f"Invalid WAV file detected: {file_path}, attempting repair")
+            result = subprocess.run([location, "--help"], 
+                                  stdout=subprocess.PIPE, 
+                                  stderr=subprocess.PIPE, 
+                                  text=True,
+                                  timeout=2)
             
-            # We need to fix the file - use ffmpeg if available
-            try:
-                import subprocess
-                fixed_path = file_path + ".fixed.wav"
-                
-                # Use ffmpeg to convert/repair the WAV file
-                subprocess.run([
-                    "ffmpeg", "-y", "-i", file_path, 
-                    "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
-                    fixed_path
-                ], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                
-                logger.info(f"Successfully repaired WAV file: {fixed_path}")
-                return fixed_path
-            except Exception as e:
-                logger.error(f"Failed to repair WAV file: {str(e)}")
-                return file_path
-    except ImportError:
-        # If wave module is not available, just return the original
-        return file_path
+            if result.returncode == 0 or "piper" in result.stdout or "piper" in result.stderr:
+                PIPER_BINARY_PATH = location
+                PIPER_INSTALLED = True
+                logger.info(f"Found Piper binary at: {location}")
+                return True
+        except (subprocess.SubprocessError, FileNotFoundError):
+            continue
+    
+    logger.warning("Piper binary not found in standard locations")
+    return False
 
-async def generate_speech(text, voice="en-US-JennyNeural", speed=1.0, pitch=1.0, 
-                    emotion="normal", volume=0.8):
+def find_piper_models():
+    """Find available Piper voice models"""
+    global AVAILABLE_VOICES, DEFAULT_VOICE
+    
+    voices = []
+    models_dir = Path(PIPER_MODELS_DIR)
+    
+    # Create models directory if it doesn't exist
+    models_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Check for model files (*.onnx)
+    for file in models_dir.glob("**/*.onnx"):
+        # Get voice name from filename (removing extension)
+        voice_name = file.stem
+        voices.append(voice_name)
+        
+        # Also check for associated JSON config
+        config_file = file.with_suffix('.json')
+        if config_file.exists():
+            logger.info(f"Found Piper voice with config: {voice_name}")
+    
+    if voices:
+        AVAILABLE_VOICES = voices
+        # Set default voice to first available if current default not available
+        if DEFAULT_VOICE not in voices:
+            DEFAULT_VOICE = voices[0]
+            logger.info(f"Set default voice to: {DEFAULT_VOICE}")
+    else:
+        logger.warning(f"No voice models found in {models_dir}")
+        # Add placeholder for default voice
+        AVAILABLE_VOICES = [DEFAULT_VOICE]
+    
+    return voices
+
+def download_default_model():
+    """Download a default model if no models are available"""
+    # Create models directory
+    os.makedirs(PIPER_MODELS_DIR, exist_ok=True)
+    
+    # Default model URL
+    model_url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx"
+    config_url = "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json"
+    
+    model_path = os.path.join(PIPER_MODELS_DIR, "en_US-amy-medium.onnx")
+    config_path = os.path.join(PIPER_MODELS_DIR, "en_US-amy-medium.onnx.json")
+    
+    try:
+        logger.info(f"Downloading default voice model from {model_url}")
+        
+        # Use curl or wget if available (better progress indicators)
+        if os.system("which curl > /dev/null 2>&1") == 0:
+            os.system(f"curl -L '{model_url}' -o '{model_path}'")
+            os.system(f"curl -L '{config_url}' -o '{config_path}'")
+        elif os.system("which wget > /dev/null 2>&1") == 0:
+            os.system(f"wget '{model_url}' -O '{model_path}'")
+            os.system(f"wget '{config_url}' -O '{config_path}'")
+        else:
+            # Fall back to Python's urllib
+            import urllib.request
+            urllib.request.urlretrieve(model_url, model_path)
+            urllib.request.urlretrieve(config_url, config_path)
+            
+        logger.info(f"Default model downloaded to {model_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Error downloading default model: {str(e)}")
+        return False
+
+def generate_speech_piper(text, voice=DEFAULT_VOICE, speed=1.0, pitch=1.0, volume=0.8):
     """
-    Generate speech from text using the available TTS engine
+    Generate speech using Piper TTS
     
     Args:
-        text: Text to convert to speech
-        voice: Voice to use
-        speed: Speech speed (0.5-2.0)
-        pitch: Speech pitch (0.5-2.0) - not all engines support this
-        emotion: Speech emotion - not all engines support this
-        volume: Volume level (0.0-1.0)
-    
-    Returns:
-        Path to the generated audio file
-    """
-    logger.info(f"Generating speech: {text[:50]}{'...' if len(text) > 50 else ''}")
-    
-    # Use appropriate speech generator based on available engine
-    if tts_type == "edge-tts":
-        # Apply emotion to voice selection for Edge TTS
-        if emotion == "happy" or emotion == "excited":
-            # Add cheerful style to text if using JennyNeural
-            if "Jenny" in voice:
-                text = f'<mstts:express-as style="cheerful">{text}</mstts:express-as>'
-        elif emotion == "sad":
-            if "Jenny" in voice:
-                text = f'<mstts:express-as style="sad">{text}</mstts:express-as>'
+        text: Text to synthesize
+        voice: Voice model to use
+        speed: Speed factor (0.5-2.0)
+        pitch: Pitch factor (not fully supported in Piper)
+        volume: Volume factor (0.0-1.0)
         
-        file_path = await generate_speech_edge_tts(text, voice, speed, volume)
-    
-    elif tts_type == "coqui-tts":
-        file_path = generate_speech_coqui(text, speed)
-    
-    elif tts_type == "pyttsx3":
-        file_path = generate_speech_pyttsx3(text, speed, volume)
-    
-    else:
-        logger.error("No TTS engine available")
+    Returns:
+        Path to the output audio file
+    """
+    if not PIPER_INSTALLED or not PIPER_BINARY_PATH:
+        logger.error("Piper TTS not available")
         return None
-    
-    # Validate and ensure proper format for WAV files
-    if file_path and file_path.endswith('.wav'):
-        file_path = ensure_valid_wav(file_path)
-    
-    return file_path
+        
+    try:
+        # Create a temporary file for the output
+        fd, output_path = tempfile.mkstemp(suffix='.wav')
+        os.close(fd)
+        
+        # Create a temporary file for the input text
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as text_file:
+            text_file.write(text)
+            text_file_path = text_file.name
+        
+        # Prepare command
+        # Piper uses --rate for speed control (default 16000)
+        # We convert speed factor to rate by multiplying default rate by speed
+        rate = int(16000 * speed)
+        
+        # Build the command
+        model_path = os.path.join(PIPER_MODELS_DIR, f"{voice}.onnx")
+        
+        # Check if voice file exists
+        if not os.path.exists(model_path):
+            logger.error(f"Voice model file not found: {model_path}")
+            # Try to use default voice as fallback
+            if voice != DEFAULT_VOICE:
+                logger.info(f"Trying default voice: {DEFAULT_VOICE}")
+                model_path = os.path.join(PIPER_MODELS_DIR, f"{DEFAULT_VOICE}.onnx")
+                if not os.path.exists(model_path):
+                    logger.error(f"Default voice model not found: {model_path}")
+                    return None
+            else:
+                return None
+                
+        command = [
+            PIPER_BINARY_PATH,
+            "--model", model_path,
+            "--output_file", output_path,
+            "--rate", str(rate)
+        ]
+        
+        # Run piper with the text file as input
+        with open(text_file_path, 'r') as f:
+            process = subprocess.Popen(
+                command,
+                stdin=f,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            stdout, stderr = process.communicate()
+            
+        # Clean up the text file
+        os.unlink(text_file_path)
+            
+        if process.returncode != 0:
+            logger.error(f"Piper TTS error: {stderr}")
+            return None
+            
+        logger.info(f"Speech generated with Piper TTS: {output_path}")
+        return output_path
+            
+    except Exception as e:
+        logger.error(f"Error generating speech with Piper TTS: {str(e)}")
+        return None
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize on startup"""
+    global PIPER_INSTALLED, DEFAULT_VOICE, AVAILABLE_VOICES
+    
     # Create logs directory
     os.makedirs("logs", exist_ok=True)
     
-    # Initialize TTS engine
-    init_tts_engine()
+    # Check for Piper installation
+    PIPER_INSTALLED = check_piper_installation()
+    
+    if not PIPER_INSTALLED:
+        logger.warning("Piper not found - voice synthesis will be limited")
+    
+    # Find available voice models
+    voices = find_piper_models()
+    
+    # If no models found, try to download a default one
+    if not voices:
+        logger.info("No voice models found, downloading default model...")
+        download_success = download_default_model()
+        if download_success:
+            voices = find_piper_models()
+    
+    logger.info(f"Available voices: {', '.join(AVAILABLE_VOICES)}")
+    logger.info(f"Default voice: {DEFAULT_VOICE}")
 
 @app.get("/status")
 def status():
-    """Check if the Voice API is running"""
-    # Define available voices for Edge TTS
-    available_voices = {
-        "English (US)": [
-            "en-US-JennyNeural", "en-US-GuyNeural", "en-US-AriaNeural", 
-            "en-US-DavisNeural", "en-US-TonyNeural"
-        ],
-        "English (UK)": ["en-GB-SoniaNeural", "en-GB-RyanNeural"],
-        "English (AU)": ["en-AU-NatashaNeural", "en-AU-WilliamNeural"],
-        "Simple Names": ["jenny", "guy", "aria", "davis", "tony", "sonia", "ryan", "natasha"]
-    }
+    """Check if the Voice API is running and return status information"""
+    # Group voices by language prefix
+    voice_by_language = {}
+    for voice in AVAILABLE_VOICES:
+        # Split on underscore or hyphen
+        parts = voice.replace('-', '_').split('_')
+        if len(parts) >= 2:
+            lang_code = f"{parts[0]}_{parts[1]}"
+            if lang_code not in voice_by_language:
+                voice_by_language[lang_code] = []
+            voice_by_language[lang_code].append(voice)
+        else:
+            # Fallback for voices without clear language code
+            if "Other" not in voice_by_language:
+                voice_by_language["Other"] = []
+            voice_by_language["Other"].append(voice)
     
     return {
         "status": "ok",
-        "service": "Sabrina Voice API",
-        "tts_engine": tts_type,
-        "tts_engine_loaded": tts_engine is not None,
-        "default_voice": SETTINGS.get("voice", "en-US-JennyNeural"),
-        "available_voices": available_voices
+        "service": "Sabrina Voice API with Piper TTS",
+        "tts_engine": "piper",
+        "tts_engine_installed": PIPER_INSTALLED,
+        "piper_binary": PIPER_BINARY_PATH,
+        "default_voice": DEFAULT_VOICE,
+        "voice_count": len(AVAILABLE_VOICES),
+        "available_voices": voice_by_language,
+        "models_directory": PIPER_MODELS_DIR
     }
 
 @app.get("/speak")
@@ -321,15 +305,18 @@ async def speak(
     text: str = Query(..., description="Text to convert to speech"),
     speed: float = Query(1.0, description="Speech speed (0.5-2.0)"),
     pitch: float = Query(1.0, description="Speech pitch (0.5-2.0)"),
-    emotion: str = Query("normal", description="Speech emotion"),
-    voice: str = Query(None, description="Voice to use"),
+    emotion: str = Query("normal", description="Speech emotion (limited support)"),
+    voice: str = Query(None, description="Voice model to use"),
     volume: float = Query(0.8, description="Volume level (0.0-1.0)")
 ):
     """Convert text to speech and return audio file"""
+    if not PIPER_INSTALLED:
+        raise HTTPException(status_code=503, detail="Piper TTS not installed or configured")
+        
     try:
         # Use default voice if not specified
-        if voice is None:
-            voice = SETTINGS.get("voice", "en-US-JennyNeural")
+        if voice is None or voice not in AVAILABLE_VOICES:
+            voice = DEFAULT_VOICE
             
         # Validate parameters
         speed = max(0.5, min(2.0, speed))
@@ -340,23 +327,18 @@ async def speak(
         logger.info(f"Using voice: {voice}")
         
         # Generate speech
-        file_path = await generate_speech(
+        file_path = generate_speech_piper(
             text=text, 
             voice=voice,
             speed=speed, 
             pitch=pitch, 
-            emotion=emotion,
             volume=volume
         )
         
         if file_path and os.path.exists(file_path):
-            # Determine correct media type
-            if file_path.endswith('.mp3'):
-                media_type = "audio/mpeg"
-                filename = "speech.mp3"
-            else:
-                media_type = "audio/wav"
-                filename = "speech.wav"
+            # Determine correct media type (wav for Piper)
+            media_type = "audio/wav"
+            filename = "speech.wav"
             
             # Log the file size
             file_size = os.path.getsize(file_path)
@@ -369,10 +351,20 @@ async def speak(
                 filename=filename
             )
         else:
-            return {"error": "Failed to generate speech"}
+            raise HTTPException(status_code=500, detail="Failed to generate speech")
     except Exception as e:
         logger.error(f"Error generating speech: {str(e)}")
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/voices")
+def list_voices():
+    """List all available voices"""
+    return {
+        "default_voice": DEFAULT_VOICE,
+        "voices": AVAILABLE_VOICES,
+        "count": len(AVAILABLE_VOICES),
+        "models_directory": PIPER_MODELS_DIR
+    }
 
 def main():
     """Run the Voice API server"""

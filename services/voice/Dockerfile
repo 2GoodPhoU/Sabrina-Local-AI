@@ -8,14 +8,16 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-# Install system dependencies 
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libsndfile1 \
     ffmpeg \
-    espeak-ng \
     libespeak-ng1 \
     git \
+    wget \
+    curl \
+    cmake \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -26,7 +28,25 @@ COPY voice_docker_requirements.txt .
 RUN pip install --no-cache-dir -r voice_docker_requirements.txt
 
 # Create necessary directories
-RUN mkdir -p /app/logs /app/models
+RUN mkdir -p /app/logs /app/models/piper
+
+# Install Piper TTS
+RUN cd /tmp && \
+    git clone https://github.com/rhasspy/piper.git && \
+    cd piper && \
+    git submodule update --init && \
+    mkdir build && \
+    cd build && \
+    cmake -DBUILD_SHARED_LIBS=ON .. && \
+    make -j4 && \
+    cp ./piper /app/piper && \
+    rm -rf /tmp/piper
+
+# Download default Amy model
+RUN mkdir -p /app/models/piper && \
+    cd /app/models/piper && \
+    curl -LO "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx" && \
+    curl -LO "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json"
 
 # Copy voice module code
 COPY voice_api.py .
