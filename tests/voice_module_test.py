@@ -89,54 +89,59 @@ def test_tts_with_client(client, text):
         return False
 
 def test_voice_settings(client):
-    """Test different voice settings"""
+    """Test different voice settings with Jenny voice"""
     if not client:
         logger.error("No valid VoiceAPIClient provided")
         return False
     
     try:
-        logger.info("Testing voice settings...")
+        logger.info("Testing Jenny voice settings...")
         
         # Save original settings
         original_settings = client.get_settings()
         
+        # First, make sure we're using Jenny voice
+        client.update_settings({"voice": "jenny"})
+        client.speak("Hello, I am Jenny, the voice of Sabrina AI.")
+        time.sleep(2)
+        
         # Test different speeds
-        logger.info("Testing different speeds...")
+        logger.info("Testing different speeds with Jenny voice...")
         client.set_speed(1.5)
-        client.speak("This is fast speech at 1.5x speed.")
+        client.speak("This is Jenny speaking at 1.5x speed.")
         time.sleep(2)
         
         client.set_speed(0.8)
-        client.speak("This is slow speech at 0.8x speed.")
+        client.speak("This is Jenny speaking at 0.8x speed.")
         time.sleep(2)
         
         # Test different pitch
-        logger.info("Testing different pitch settings...")
+        logger.info("Testing different pitch settings with Jenny voice...")
         client.set_pitch(1.3)
-        client.speak("This is speech with a higher pitch.")
+        client.speak("This is Jenny with a higher pitch.")
         time.sleep(2)
         
         client.set_pitch(0.7)
-        client.speak("This is speech with a lower pitch.")
+        client.speak("This is Jenny with a lower pitch.")
         time.sleep(2)
         
-        # Test different emotions if supported
-        if "emotion" in original_settings:
-            logger.info("Testing different emotions...")
-            emotions = ["happy", "sad", "excited", "calm"]
-            for emotion in emotions:
-                client.set_emotion(emotion)
-                client.speak(f"This is speech with {emotion} emotion.")
-                time.sleep(2)
+        # Test different emotions with Jenny voice
+        logger.info("Testing different emotions with Jenny voice...")
+        emotions = ["happy", "sad", "angry", "excited", "calm"]
+        for emotion in emotions:
+            logger.info(f"Testing Jenny voice with {emotion} emotion...")
+            client.set_emotion(emotion)
+            client.speak(f"This is Jenny speaking with {emotion} emotion. How does it sound?")
+            time.sleep(3)  # Give a bit more time to hear the emotions
         
         # Restore original settings
         logger.info("Restoring original voice settings...")
         client.update_settings(original_settings)
-        client.speak("Returning to original voice settings.")
+        client.speak("This is Jenny again with the original voice settings.")
         
         return True
     except Exception as e:
-        logger.error(f"✗ Error testing voice settings: {str(e)}")
+        logger.error(f"✗ Error testing Jenny voice settings: {str(e)}")
         # Try to restore original settings
         if 'original_settings' in locals():
             try:

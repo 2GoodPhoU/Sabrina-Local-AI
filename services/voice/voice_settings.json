@@ -1,1 +1,7 @@
-{ "speed": 1.0, "emotion": "normal", "pitch": 1.0 }
+{
+    "speed": 1.0,
+    "pitch": 1.0,
+    "emotion": "normal",
+    "volume": 0.8,
+    "voice": "jenny"
+  }

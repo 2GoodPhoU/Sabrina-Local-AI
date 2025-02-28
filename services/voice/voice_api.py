@@ -1,7 +1,7 @@
 """
 Enhanced Voice API Service for Sabrina AI
 =========================================
-Provides a FastAPI-based voice synthesis service using a real TTS engine.
+Provides a FastAPI-based voice synthesis service using Jenny TTS.
 """
 
 import os
@@ -31,30 +31,31 @@ def load_tts_model():
         from TTS.api import TTS
         
         # Initialize the TTS model (Jenny TTS model)
-        # For other models, see: https://github.com/coqui-ai/TTS
         tts_model = TTS("tts_models/en/jenny/jenny")
         
-        logger.info("TTS model loaded successfully")
+        logger.info("Jenny TTS model loaded successfully")
         return True
     except Exception as e:
-        logger.error(f"Error loading TTS model: {str(e)}")
+        logger.error(f"Error loading Jenny TTS model: {str(e)}")
         logger.info("Using fallback text-to-speech method")
         return False
 
-def generate_speech(text, speed=1.0, pitch=1.0, emotion="normal"):
+def generate_speech(text, speed=1.0, pitch=1.0, emotion="normal", voice="jenny", volume=0.8):
     """
-    Generate speech from text using the TTS model
+    Generate speech from text using the TTS model with Jenny voice
     
     Args:
         text: Text to convert to speech
         speed: Speech speed (0.5-2.0)
         pitch: Speech pitch (0.5-2.0)
         emotion: Speech emotion
+        voice: Voice model to use (default: jenny)
+        volume: Volume level (0.0-1.0)
     
     Returns:
         Path to the generated audio file
     """
-    logger.info(f"Generating speech: {text[:50]}{'...' if len(text) > 50 else ''}")
+    logger.info(f"Generating speech with Jenny voice: {text[:50]}{'...' if len(text) > 50 else ''}")
     
     # Create a temporary file for the audio
     fd, temp_path = tempfile.mkstemp(suffix='.wav')
@@ -63,7 +64,7 @@ def generate_speech(text, speed=1.0, pitch=1.0, emotion="normal"):
     global tts_model
     if tts_model is not None:
         try:
-            # Generate speech with the TTS model
+            # Generate speech with the Jenny TTS model
             tts_model.tts_to_file(
                 text=text,
                 file_path=temp_path,
@@ -71,10 +72,10 @@ def generate_speech(text, speed=1.0, pitch=1.0, emotion="normal"):
                 speaker=emotion if emotion != "normal" else None,
                 speed=speed
             )
-            logger.info(f"Speech generated with TTS model: {temp_path}")
+            logger.info(f"Speech generated with Jenny TTS model: {temp_path}")
             return temp_path
         except Exception as e:
-            logger.error(f"Error generating speech with TTS model: {str(e)}")
+            logger.error(f"Error generating speech with Jenny TTS model: {str(e)}")
     
     # Fallback method if TTS model fails or is not available
     logger.info("Using fallback method for speech generation")
@@ -84,6 +85,7 @@ def generate_speech(text, speed=1.0, pitch=1.0, emotion="normal"):
             import pyttsx3
             engine = pyttsx3.init()
             engine.setProperty('rate', int(175 * speed))
+            engine.setProperty('volume', volume)
             engine.save_to_file(text, temp_path)
             engine.runAndWait()
         else:  # Linux/Mac
@@ -104,7 +106,7 @@ def generate_speech(text, speed=1.0, pitch=1.0, emotion="normal"):
             else:
                 freq = 330  # E4 note
             
-            audio = np.sin(2 * np.pi * freq * t) * 0.5
+            audio = np.sin(2 * np.pi * freq * t) * 0.5 * volume
             wavfile.write(temp_path, sample_rate, audio.astype(np.float32))
         
         logger.info(f"Speech generated with fallback method: {temp_path}")
@@ -129,7 +131,8 @@ def status():
     return {
         "status": "ok",
         "service": "Sabrina Voice API",
-        "tts_model_loaded": tts_model is not None
+        "tts_model_loaded": tts_model is not None,
+        "voice": "jenny"
     }
 
 @app.get("/speak")
@@ -137,16 +140,26 @@ def speak(
     text: str = Query(..., description="Text to convert to speech"),
     speed: float = Query(1.0, description="Speech speed (0.5-2.0)"),
     pitch: float = Query(1.0, description="Speech pitch (0.5-2.0)"),
-    emotion: str = Query("normal", description="Speech emotion")
+    emotion: str = Query("normal", description="Speech emotion (normal, happy, sad, angry, excited, calm)"),
+    voice: str = Query("jenny", description="Voice to use (currently only jenny is supported)"),
+    volume: float = Query(0.8, description="Volume level (0.0-1.0)")
 ):
-    """Convert text to speech and return audio file"""
+    """Convert text to speech using Jenny TTS and return audio file"""
     try:
         # Validate parameters
         speed = max(0.5, min(2.0, speed))
         pitch = max(0.5, min(2.0, pitch))
+        volume = max(0.0, min(1.0, volume))
         
         # Generate speech
-        file_path = generate_speech(text, speed, pitch, emotion)
+        file_path = generate_speech(
+            text=text, 
+            speed=speed, 
+            pitch=pitch, 
+            emotion=emotion,
+            voice=voice,
+            volume=volume
+        )
         
         # Return the audio file
         return FileResponse(

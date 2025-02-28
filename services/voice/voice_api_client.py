@@ -57,7 +57,8 @@ class VoiceAPIClient:
             "speed": 1.0,
             "pitch": 1.0,
             "emotion": "normal",
-            "volume": 0.8
+            "volume": 0.8,
+            "voice": "jenny"  # Explicitly set Jenny as default voice
         }
         
         # Find project root directory
