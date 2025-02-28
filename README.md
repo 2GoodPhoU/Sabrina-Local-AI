@@ -2,6 +2,28 @@
 
 An integrated AI assistant that combines voice interaction, screen awareness, and PC automation into a cohesive, privacy-focused local AI system.
 
+# TODO
+- integration
+   - add LLM 
+   - add standardized formats and framework for LLM input/output to communicate to core.py
+   - LLM short term memory storage
+   - training feedback loop
+- voice
+   - make it so the voice api auto starts on testing
+   - hide the sound player while playing
+- vision
+   - implement yolov8 again
+- presence
+   - fix clickthrough, implement position saving
+   - implement acutal animations
+- improve automation
+   - add click and drag fuctionality
+   - add scroll functionality
+   - add shortcuts for common PC actions
+- general
+   - auto download requirements
+   - startup via .exe
+
 ## 🚀 New Architecture Overview
 
 This repository contains the enhanced version of Sabrina AI with a new, more robust architecture featuring:
