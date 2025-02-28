@@ -8,9 +8,7 @@ An integrated AI assistant that combines voice interaction, screen awareness, an
    - add standardized formats and framework for LLM input/output to communicate to core.py
    - LLM short term memory storage
    - training feedback loop
-- voice
-   - make it so the voice api auto starts on testing
-   - hide the sound player while playing
+   - presence+task integration
 - vision
    - implement yolov8 again
 - presence

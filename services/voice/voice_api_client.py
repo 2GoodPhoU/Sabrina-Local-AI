@@ -2,16 +2,19 @@
 Enhanced Voice API Client for Sabrina AI
 =======================================
 This module provides an improved client for interacting with the Voice API service,
-with better event system integration and error handling.
+with auto-start capability and hidden audio playback.
 """
 
 import os
+import sys
 import json
 import time
 import logging
 import requests
 import tempfile
 import subprocess
+import threading
+from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 # Setup logger
@@ -20,26 +23,28 @@ logger = logging.getLogger("voice_api_client")
 
 class VoiceAPIClient:
     """
-    Enhanced client for the Voice API service with robust error handling, retries,
-    and event system integration.
+    Enhanced client for the Voice API service with auto-start capability and hidden playback.
     
     This client handles:
+    - Automatic Voice API startup if needed
     - Text-to-speech requests with event notifications
-    - Audio playback
+    - Hidden audio playback
     - Voice configuration settings management
     - Integration with the Sabrina event system
     """
     
-    def __init__(self, api_url: str = "http://localhost:8100", event_bus=None):
+    def __init__(self, api_url: str = "http://localhost:8100", event_bus=None, auto_start=True):
         """
         Initialize the Voice API client
         
         Args:
             api_url: Base URL for the Voice API service
             event_bus: Event bus instance for sending/receiving events
+            auto_start: Whether to automatically start the Voice API if not running
         """
         self.api_url = api_url.rstrip('/')
         self.event_bus = event_bus
+        self.auto_start = auto_start
         self.last_request_time = 0
         self.last_audio_file = None
         self.connected = False
@@ -55,17 +60,40 @@ class VoiceAPIClient:
             "volume": 0.8
         }
         
+        # Find project root directory
+        self.project_dir = self._find_project_root()
+        
         # Load settings from file if available
         self._load_settings()
         
         logger.info(f"Enhanced Voice API client initialized with API URL: {api_url}")
         
-        # Test connection on initialization
+        # Check connection and auto-start if needed
         self.test_connection()
         
         # Register for voice events if event bus is provided
         if self.event_bus:
             self._register_event_handlers()
+    
+    def _find_project_root(self):
+        """Find the project root directory"""
+        # Start with the directory of this file
+        current_dir = Path(os.path.abspath(__file__)).parent
+        
+        # Go up until we find a recognizable project structure
+        for _ in range(5):  # Don't go up more than 5 levels
+            # Check if this looks like the project root
+            if (current_dir / "services").exists() and (current_dir / "tests").exists():
+                return current_dir
+            
+            # Go up one level
+            parent_dir = current_dir.parent
+            if parent_dir == current_dir:  # We've reached the filesystem root
+                break
+            current_dir = parent_dir
+        
+        # Fallback to the current working directory
+        return Path(os.getcwd())
     
     def _register_event_handlers(self):
         """Register handlers for voice-related events"""
@@ -136,7 +164,7 @@ class VoiceAPIClient:
     
     def _load_settings(self):
         """Load voice settings from file"""
-        settings_file = "config/voice_settings.json"
+        settings_file = os.path.join(self.project_dir, "config/voice_settings.json")
         if os.path.exists(settings_file):
             try:
                 with open(settings_file, 'r') as f:
@@ -155,19 +183,105 @@ class VoiceAPIClient:
         """Save current voice settings to file"""
         try:
             # Ensure config directory exists
-            os.makedirs("config", exist_ok=True)
+            config_dir = os.path.join(self.project_dir, "config")
+            os.makedirs(config_dir, exist_ok=True)
             
             # Save settings to file
-            with open("config/voice_settings.json", 'w') as f:
+            settings_file = os.path.join(config_dir, "voice_settings.json")
+            with open(settings_file, 'w') as f:
                 json.dump(self.settings, f, indent=2)
             
             logger.info("Saved voice settings to file")
         except Exception as e:
             logger.error(f"Failed to save voice settings: {str(e)}")
     
+    def start_voice_service(self, timeout=30, check_interval=1.0):
+        """
+        Start the Voice API service if it's not already running
+        
+        Args:
+            timeout: Maximum time to wait for service (seconds)
+            check_interval: Interval between status checks (seconds)
+            
+        Returns:
+            bool: True if service is running, False otherwise
+        """
+        # Try to import the service starter first
+        try:
+            from utilities.service_starter import start_voice_api
+            return start_voice_api(self.project_dir, timeout)
+        except ImportError:
+            logger.info("Service starter not available, using built-in starter")
+            
+        # Find the voice API script
+        voice_api_path = os.path.join(self.project_dir, "services/voice/voice_api.py")
+        
+        if not os.path.exists(voice_api_path):
+            logger.error(f"Voice API script not found at: {voice_api_path}")
+            return False
+        
+        try:
+            # Check if service is already running
+            logger.info("Checking if Voice API is already running...")
+            try:
+                response = requests.get(f"{self.api_url}/status", timeout=3.0)
+                if response.status_code == 200:
+                    logger.info("Voice API is already running")
+                    return True
+            except requests.RequestException:
+                logger.info("Voice API is not running, starting it now")
+            
+            # Start the service
+            logger.info("Starting Voice API service...")
+            
+            if sys.platform == "win32":
+                # Windows - use start command to run in background
+                process = subprocess.Popen(
+                    ["start", "/min", "python", voice_api_path],
+                    shell=True
+                )
+            else:
+                # Linux/Mac - use subprocess with PIPE
+                process = subprocess.Popen(
+                    ["python", voice_api_path],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    preexec_fn=os.setpgrp  # Run in a new process group
+                )
+            
+            # Wait for service to start with progress indicator
+            logger.info(f"Waiting for Voice API to start (timeout: {timeout}s)...")
+            start_time = time.time()
+            
+            print("Starting Voice API", end="", flush=True)
+            
+            while time.time() - start_time < timeout:
+                print(".", end="", flush=True)
+                
+                # Check if service is running
+                try:
+                    response = requests.get(f"{self.api_url}/status", timeout=2.0)
+                    if response.status_code == 200:
+                        print()  # New line after dots
+                        logger.info("Voice API started successfully")
+                        return True
+                except requests.RequestException:
+                    # Service not ready yet, continue waiting
+                    pass
+                
+                time.sleep(check_interval)
+            
+            print()  # New line after dots
+            logger.warning(f"Voice API did not start within the timeout period ({timeout}s)")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Failed to start Voice API: {str(e)}")
+            return False
+    
     def test_connection(self) -> bool:
         """
-        Test the connection to the Voice API service
+        Test the connection to the Voice API service, and start it if needed
         
         Returns:
             bool: True if connected, False otherwise
@@ -203,6 +317,15 @@ class VoiceAPIClient:
             else:
                 logger.warning(f"Voice API connection test failed: {response.status_code}")
                 
+                # Try to start the service if auto-start is enabled
+                if self.auto_start:
+                    logger.info("Auto-starting Voice API service...")
+                    service_started = self.start_voice_service()
+                    
+                    if service_started:
+                        self.connected = True
+                        return True
+                
                 # If not connected and event bus is available, post status event
                 if self.event_bus and hasattr(self.event_bus, 'post_event'):
                     try:
@@ -230,6 +353,20 @@ class VoiceAPIClient:
         except requests.RequestException as e:
             logger.error(f"Failed to connect to Voice API: {str(e)}")
             self.connected = False
+            
+            # Try to start the service if auto-start is enabled
+            if self.auto_start:
+                logger.info("Auto-starting Voice API service...")
+                service_started = self.start_voice_service()
+                
+                if service_started:
+                    # Retry connection
+                    try:
+                        response = requests.get(f"{self.api_url}/status", timeout=self.timeout)
+                        self.connected = response.status_code == 200
+                        return self.connected
+                    except:
+                        pass
             
             # If not connected and event bus is available, post status event
             if self.event_bus and hasattr(self.event_bus, 'post_event'):
@@ -271,6 +408,14 @@ class VoiceAPIClient:
         
         # Log the request
         logger.info(f"Sending TTS request: {text[:50]}{'...' if len(text) > 50 else ''}")
+        
+        # Check if we're connected, try to connect if not
+        if not self.connected:
+            logger.info("Not connected to Voice API, attempting to connect")
+            connected = self.test_connection()
+            if not connected:
+                logger.error("Failed to connect to Voice API")
+                return None
         
         # Post event about starting speech if event bus is available
         if self.event_bus and hasattr(self.event_bus, 'post_event'):
@@ -319,8 +464,12 @@ class VoiceAPIClient:
                     # Save audio to temporary file
                     audio_file = self._save_audio(response.content)
                     if audio_file:
-                        # Play audio
-                        self._play_audio(audio_file)
+                        # Play audio in a separate thread to avoid blocking
+                        threading.Thread(
+                            target=self._play_audio_hidden, 
+                            args=(audio_file,),
+                            daemon=True
+                        ).start()
                         
                         # Store last audio file
                         self.last_audio_file = audio_file
@@ -414,9 +563,9 @@ class VoiceAPIClient:
             logger.error(f"Error saving audio file: {str(e)}")
             return None
     
-    def _play_audio(self, audio_file: str) -> bool:
+    def _play_audio_hidden(self, audio_file: str) -> bool:
         """
-        Play an audio file using an appropriate player for the platform
+        Play an audio file using an appropriate player, hidden from view
         
         Args:
             audio_file: Path to the audio file
@@ -429,16 +578,31 @@ class VoiceAPIClient:
             return False
         
         try:
-            # Play audio based on platform
-            if os.name == 'nt':  # Windows
-                subprocess.Popen(['start', '', audio_file], shell=True)
-            elif os.name == 'posix':  # Linux/Mac
-                if os.uname().sysname == 'Darwin':  # Mac
-                    subprocess.Popen(['afplay', audio_file])
-                else:  # Linux
-                    subprocess.Popen(['aplay', audio_file])
+            # Play audio based on platform with hidden window
+            if sys.platform == 'win32':  # Windows
+                # On Windows, use PowerShell to play audio without showing player
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0  # SW_HIDE
+                
+                subprocess.Popen(
+                    ["powershell", "-c", f"(New-Object Media.SoundPlayer '{audio_file}').PlaySync()"],
+                    startupinfo=startupinfo
+                )
+                
+            elif sys.platform == 'darwin':  # macOS
+                # On macOS, use afplay which runs in terminal without UI
+                subprocess.Popen(['afplay', audio_file], 
+                                stdout=subprocess.DEVNULL, 
+                                stderr=subprocess.DEVNULL)
+                
+            else:  # Linux and others
+                # On Linux, use aplay with as little UI as possible
+                subprocess.Popen(['aplay', '-q', audio_file], 
+                                stdout=subprocess.DEVNULL, 
+                                stderr=subprocess.DEVNULL)
             
-            logger.debug(f"Playing audio file: {audio_file}")
+            logger.debug(f"Playing audio file (hidden): {audio_file}")
             return True
             
         except Exception as e:
@@ -600,21 +764,3 @@ class VoiceAPIClient:
             str: Path to the last audio file, or None if none exists
         """
         return self.last_audio_file
-    
-    def get_voices(self) -> List[Dict[str, Any]]:
-        """
-        Get available voices from the Voice API
-        
-        Returns:
-            List of available voices with their properties
-        """
-        try:
-            response = requests.get(f"{self.api_url}/voices", timeout=self.timeout)
-            if response.status_code == 200:
-                return response.json()
-            else:
-                logger.error(f"Failed to get voices: {response.status_code}")
-                return []
-        except Exception as e:
-            logger.error(f"Error getting voices: {str(e)}")
-            return []

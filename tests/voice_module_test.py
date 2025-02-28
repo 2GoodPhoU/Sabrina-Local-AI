@@ -2,17 +2,14 @@
 """
 Enhanced Voice Module Test Script for Sabrina AI
 =======================================
-This script tests the voice module components independently with improved service startup.
+This script tests the voice module components with auto-start and hidden playback.
 """
 
 import os
 import sys
 import time
-import json
 import logging
 import argparse
-import requests
-import subprocess
 from pathlib import Path
 
 # Set up logging
@@ -27,134 +24,31 @@ script_dir = Path(__file__).parent.absolute()
 project_dir = script_dir.parent
 sys.path.insert(0, str(project_dir))
 
-# Import the service starter if available
-try:
-    from utilities.service_starter import start_voice_api
-    service_starter_available = True
-except ImportError:
-    service_starter_available = False
-
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description="Sabrina AI Voice Module Test")
-    parser.add_argument("--start-service", action="store_true", 
-                      help="Start the voice service if not running")
-    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
-    parser.add_argument("--text", type=str, default="Hello, this is a test of the Sabrina voice system.",
+    parser.add_argument("--no-auto-start", action="store_true", 
+                      help="Disable auto-starting the voice service")
+    parser.add_argument("--debug", action="store_true", 
+                      help="Enable debug logging")
+    parser.add_argument("--text", type=str, 
+                      default="Hello, this is a test of the Sabrina voice system with auto-start and hidden playback.",
                       help="Text to speak for TTS test")
     parser.add_argument("--timeout", type=int, default=30,
                       help="Maximum time to wait for service to start (seconds)")
+    parser.add_argument("--voices", action="store_true",
+                      help="Show available voice settings")
     return parser.parse_args()
 
-def start_voice_service_with_verification(timeout=30, check_interval=1.0):
-    """
-    Start the voice service and verify it's running properly
-    
-    Args:
-        timeout: Maximum time to wait for service (seconds)
-        check_interval: Time between status checks (seconds)
-        
-    Returns:
-        bool: True if service started successfully, False otherwise
-    """
-    # Use the imported service starter if available
-    if service_starter_available:
-        return start_voice_api(project_dir, timeout)
-    
-    voice_api_path = project_dir / "services" / "voice" / "voice_api.py"
-    
-    if not voice_api_path.exists():
-        logger.error(f"Voice API script not found at {voice_api_path}")
-        return False
-    
-    try:
-        # Check if service is already running
-        logger.info("Checking if Voice API is already running...")
-        try:
-            response = requests.get("http://localhost:8100/status", timeout=3.0)
-            if response.status_code == 200:
-                logger.info("Voice API is already running")
-                return True
-        except requests.RequestException:
-            logger.info("Voice API is not running, will start it")
-        
-        # Start the service
-        logger.info("Starting voice service...")
-        
-        if sys.platform == "win32":
-            # Windows
-            process = subprocess.Popen(
-                ["start", "python", str(voice_api_path)],
-                shell=True
-            )
-        else:
-            # Linux/Mac
-            process = subprocess.Popen(
-                ["python", str(voice_api_path)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                preexec_fn=os.setpgrp  # Run in a new process group
-            )
-        
-        # Wait for service to start with progress indicator
-        logger.info(f"Waiting for Voice API to start (timeout: {timeout}s)...")
-        start_time = time.time()
-        
-        print("Starting Voice API", end="", flush=True)
-        
-        while time.time() - start_time < timeout:
-            print(".", end="", flush=True)
-            
-            # Check if service is running
-            try:
-                response = requests.get("http://localhost:8100/status", timeout=2.0)
-                if response.status_code == 200:
-                    print()  # New line after dots
-                    logger.info("Voice API started successfully")
-                    return True
-            except requests.RequestException:
-                # Service not ready yet, continue waiting
-                pass
-            
-            time.sleep(check_interval)
-        
-        print()  # New line after dots
-        logger.warning(f"Voice API did not start within the timeout period ({timeout}s)")
-        return False
-        
-    except Exception as e:
-        logger.error(f"Failed to start voice service: {str(e)}")
-        return False
-
-def check_voice_service():
-    """Check if the voice service is running"""
-    try:
-        response = requests.get("http://localhost:8100/status", timeout=1.0)
-        if response.status_code == 200:
-            logger.info("✓ Voice service is running")
-            try:
-                info = response.json()
-                logger.info(f"Service info: {info}")
-                return True
-            except json.JSONDecodeError:
-                logger.warning("Voice service response is not valid JSON")
-                return True
-        else:
-            logger.warning(f"✗ Voice service returned status code {response.status_code}")
-            return False
-    except requests.RequestException as e:
-        logger.error(f"✗ Voice service is not running: {str(e)}")
-        return False
-
-def test_voice_client():
-    """Test the VoiceAPIClient"""
+def test_voice_client(auto_start=True):
+    """Test the enhanced VoiceAPIClient with auto-start"""
     try:
         from services.voice.voice_api_client import VoiceAPIClient
         
         logger.info("Creating VoiceAPIClient...")
-        client = VoiceAPIClient()
+        client = VoiceAPIClient(auto_start=auto_start)
         
-        # Test connection
+        # Test connection (this will auto-start if needed and auto_start=True)
         logger.info("Testing connection...")
         connected = client.test_connection()
         
@@ -162,25 +56,24 @@ def test_voice_client():
             logger.info("✓ VoiceAPIClient connected successfully")
         else:
             logger.error("✗ VoiceAPIClient connection test failed")
-            return False
+            return None
         
-        return True
+        return client
     except ImportError as e:
         logger.error(f"✗ Failed to import VoiceAPIClient: {str(e)}")
-        return False
+        return None
     except Exception as e:
         logger.error(f"✗ Error in VoiceAPIClient test: {str(e)}")
-        return False
+        return None
 
-def test_tts_with_client(text):
+def test_tts_with_client(client, text):
     """Test TTS using the VoiceAPIClient"""
+    if not client:
+        logger.error("No valid VoiceAPIClient provided")
+        return False
+    
     try:
-        from services.voice.voice_api_client import VoiceAPIClient
-        
         logger.info(f"Testing TTS with client using text: '{text}'")
-        
-        # Create client
-        client = VoiceAPIClient()
         
         # Test speech
         result = client.speak(text)
@@ -195,6 +88,63 @@ def test_tts_with_client(text):
         logger.error(f"✗ Error in TTS client test: {str(e)}")
         return False
 
+def test_voice_settings(client):
+    """Test different voice settings"""
+    if not client:
+        logger.error("No valid VoiceAPIClient provided")
+        return False
+    
+    try:
+        logger.info("Testing voice settings...")
+        
+        # Save original settings
+        original_settings = client.get_settings()
+        
+        # Test different speeds
+        logger.info("Testing different speeds...")
+        client.set_speed(1.5)
+        client.speak("This is fast speech at 1.5x speed.")
+        time.sleep(2)
+        
+        client.set_speed(0.8)
+        client.speak("This is slow speech at 0.8x speed.")
+        time.sleep(2)
+        
+        # Test different pitch
+        logger.info("Testing different pitch settings...")
+        client.set_pitch(1.3)
+        client.speak("This is speech with a higher pitch.")
+        time.sleep(2)
+        
+        client.set_pitch(0.7)
+        client.speak("This is speech with a lower pitch.")
+        time.sleep(2)
+        
+        # Test different emotions if supported
+        if "emotion" in original_settings:
+            logger.info("Testing different emotions...")
+            emotions = ["happy", "sad", "excited", "calm"]
+            for emotion in emotions:
+                client.set_emotion(emotion)
+                client.speak(f"This is speech with {emotion} emotion.")
+                time.sleep(2)
+        
+        # Restore original settings
+        logger.info("Restoring original voice settings...")
+        client.update_settings(original_settings)
+        client.speak("Returning to original voice settings.")
+        
+        return True
+    except Exception as e:
+        logger.error(f"✗ Error testing voice settings: {str(e)}")
+        # Try to restore original settings
+        if 'original_settings' in locals():
+            try:
+                client.update_settings(original_settings)
+            except:
+                pass
+        return False
+
 def main():
     """Main function"""
     args = parse_arguments()
@@ -204,57 +154,57 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
     
     print("\n===== Sabrina AI Voice Module Test =====\n")
+    print("Testing enhanced voice module with auto-start and hidden playback")
     
-    # Check if voice service is running
-    print("Step 1: Checking if voice service is running...")
-    service_running = check_voice_service()
+    # Create voice client with auto-start (unless disabled)
+    print("\nStep 1: Initializing Voice API Client (will auto-start if needed)...")
+    client = test_voice_client(auto_start=not args.no_auto_start)
     
-    # Start the service if requested and not already running
-    if not service_running and args.start_service:
-        print("\nStep 2: Starting voice service...")
-        service_running = start_voice_service_with_verification(timeout=args.timeout)
-    elif not service_running and not args.start_service:
-        print("\nVoice service not running. Run with --start-service to attempt to start it.")
-        print("Alternatively, run the following command in another terminal:")
-        print(f"python {project_dir}/services/voice/voice_api.py")
-        return 1
-    
-    # Only continue with tests if service is running
-    if service_running:
-        print("\nStep 3: Testing VoiceAPIClient...")
-        client_ok = test_voice_client()
+    if client:
+        # Display current voice settings
+        if args.voices:
+            print("\nCurrent voice settings:")
+            settings = client.get_settings()
+            for key, value in settings.items():
+                print(f"  {key}: {value}")
+                
+        # Test basic TTS
+        print("\nStep 2: Testing text-to-speech...")
+        tts_ok = test_tts_with_client(client, args.text)
         
-        print("\nStep 4: Testing TTS with client...")
-        tts_ok = test_tts_with_client(args.text)
+        # Test voice settings variations if requested
+        if args.voices and tts_ok:
+            print("\nStep 3: Testing voice setting variations...")
+            test_voice_settings(client)
         
         # Print summary
         print("\n===== Test Results =====")
-        print(f"Voice Service: {'✓ Running' if service_running else '✗ Not Running'}")
-        print(f"VoiceAPIClient: {'✓ OK' if client_ok else '✗ Issues Found'}")
+        print(f"Voice API: {'✓ Running' if client.connected else '✗ Not Running'}")
         print(f"TTS Client Test: {'✓ OK' if tts_ok else '✗ Issues Found'}")
         
         # Final result
-        if all([service_running, client_ok, tts_ok]):
-            print("\n✓ Voice module is working correctly!")
+        if client.connected and tts_ok:
+            print("\n✓ Voice module is working correctly with auto-start and hidden playback!")
             return 0
         else:
             print("\n✗ Issues were found with the voice module.")
             
             # Provide troubleshooting tips
             print("\nTroubleshooting Tips:")
-            if not service_running:
-                print("- Start the voice service with: python services/voice/voice_api.py")
-                print("- Check logs for errors in the service startup")
-            if not client_ok:
-                print("- Check voice_api_client.py for errors")
-                print("- Verify network connectivity to the service")
+            if not client.connected:
+                print("- Check if the Voice API is running on: http://localhost:8100")
+                print("- Look for errors in the Voice API logs")
             if not tts_ok:
                 print("- Verify TTS engine installation")
-                print("- Check if audio playback is working")
+                print("- Check if audio playback is working on your system")
             
             return 1
     else:
-        print("\n✗ Cannot proceed with tests because voice service is not running.")
+        print("\n✗ Cannot proceed with tests because Voice API client initialization failed.")
+        print("\nTroubleshooting Tips:")
+        print("- Make sure the voice_api_client.py module is present in services/voice/")
+        print("- Try running the Voice API manually: python services/voice/voice_api.py")
+        print("- Check for any Python import errors or missing dependencies")
         return 1
 
 if __name__ == "__main__":
