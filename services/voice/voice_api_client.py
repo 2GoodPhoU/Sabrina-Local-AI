@@ -1,8 +1,8 @@
 """
-Enhanced Voice API Client for Sabrina AI
+Enhanced Voice API Client for Sabrina AI (Docker Compatible)
 =======================================
-This module provides an improved client for interacting with the Voice API service,
-with auto-start capability and hidden audio playback.
+This module provides an improved client for interacting with the Voice API service
+running in Docker, with auto-start and hidden audio playback.
 """
 
 import os
@@ -23,10 +23,10 @@ logger = logging.getLogger("voice_api_client")
 
 class VoiceAPIClient:
     """
-    Enhanced client for the Voice API service with auto-start capability and hidden playback.
+    Enhanced client for the Voice API service with Docker compatibility.
     
     This client handles:
-    - Automatic Voice API startup if needed
+    - Communication with the containerized Voice API
     - Text-to-speech requests with event notifications
     - Hidden audio playback
     - Voice configuration settings management
@@ -58,7 +58,7 @@ class VoiceAPIClient:
             "pitch": 1.0,
             "emotion": "normal",
             "volume": 0.8,
-            "voice": "jenny"  # Explicitly set Jenny as default voice
+            "voice": "en-US-JennyNeural"  # Edge TTS Jenny voice
         }
         
         # Find project root directory
@@ -84,7 +84,7 @@ class VoiceAPIClient:
         # Go up until we find a recognizable project structure
         for _ in range(5):  # Don't go up more than 5 levels
             # Check if this looks like the project root
-            if (current_dir / "services").exists() and (current_dir / "tests").exists():
+            if (current_dir / "services").exists() and (current_dir / "scripts").exists():
                 return current_dir
             
             # Go up one level
@@ -196,9 +196,9 @@ class VoiceAPIClient:
         except Exception as e:
             logger.error(f"Failed to save voice settings: {str(e)}")
     
-    def start_voice_service(self, timeout=30, check_interval=1.0):
+    def start_voice_service(self, timeout=60, check_interval=1.0):
         """
-        Start the Voice API service if it's not already running
+        Start the Voice API service in Docker if it's not already running
         
         Args:
             timeout: Maximum time to wait for service (seconds)
@@ -207,18 +207,11 @@ class VoiceAPIClient:
         Returns:
             bool: True if service is running, False otherwise
         """
-        # Try to import the service starter first
-        try:
-            from utilities.service_starter import start_voice_api
-            return start_voice_api(self.project_dir, timeout)
-        except ImportError:
-            logger.info("Service starter not available, using built-in starter")
-            
-        # Find the voice API script
-        voice_api_path = os.path.join(self.project_dir, "services/voice/voice_api.py")
+        # Find the voice service docker directory
+        voice_docker_dir = os.path.join(self.project_dir, "services/voice")
         
-        if not os.path.exists(voice_api_path):
-            logger.error(f"Voice API script not found at: {voice_api_path}")
+        if not os.path.exists(voice_docker_dir):
+            logger.error(f"Voice service docker directory not found: {voice_docker_dir}")
             return False
         
         try:
@@ -232,29 +225,36 @@ class VoiceAPIClient:
             except requests.RequestException:
                 logger.info("Voice API is not running, starting it now")
             
-            # Start the service
-            logger.info("Starting Voice API service...")
+            # Start the service using docker-compose
+            logger.info("Starting Voice API service with Docker Compose...")
             
-            if sys.platform == "win32":
-                # Windows - use start command to run in background
+            # Change to the voice service directory
+            original_dir = os.getcwd()
+            os.chdir(voice_docker_dir)
+            
+            try:
+                # Run docker-compose up
                 process = subprocess.Popen(
-                    ["start", "/min", "python", voice_api_path],
-                    shell=True
-                )
-            else:
-                # Linux/Mac - use subprocess with PIPE
-                process = subprocess.Popen(
-                    ["python", voice_api_path],
+                    ["docker-compose", "up", "-d"],
                     stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    preexec_fn=os.setpgrp  # Run in a new process group
+                    stderr=subprocess.PIPE
                 )
+                stdout, stderr = process.communicate()
+                
+                if process.returncode != 0:
+                    logger.error(f"Failed to start Voice API with Docker Compose: {stderr.decode()}")
+                    return False
+                
+                logger.info("Docker Compose started successfully")
+            finally:
+                # Restore original directory
+                os.chdir(original_dir)
             
             # Wait for service to start with progress indicator
             logger.info(f"Waiting for Voice API to start (timeout: {timeout}s)...")
             start_time = time.time()
             
-            print("Starting Voice API", end="", flush=True)
+            print("Starting Voice API in Docker", end="", flush=True)
             
             while time.time() - start_time < timeout:
                 print(".", end="", flush=True)
@@ -264,7 +264,7 @@ class VoiceAPIClient:
                     response = requests.get(f"{self.api_url}/status", timeout=2.0)
                     if response.status_code == 200:
                         print()  # New line after dots
-                        logger.info("Voice API started successfully")
+                        logger.info("Voice API started successfully in Docker")
                         return True
                 except requests.RequestException:
                     # Service not ready yet, continue waiting
@@ -320,7 +320,7 @@ class VoiceAPIClient:
                 
                 # Try to start the service if auto-start is enabled
                 if self.auto_start:
-                    logger.info("Auto-starting Voice API service...")
+                    logger.info("Auto-starting Voice API service in Docker...")
                     service_started = self.start_voice_service()
                     
                     if service_started:
@@ -357,7 +357,7 @@ class VoiceAPIClient:
             
             # Try to start the service if auto-start is enabled
             if self.auto_start:
-                logger.info("Auto-starting Voice API service...")
+                logger.info("Auto-starting Voice API service in Docker...")
                 service_started = self.start_voice_service()
                 
                 if service_started:
@@ -550,8 +550,14 @@ class VoiceAPIClient:
             str: Path to the saved audio file, or None if failed
         """
         try:
-            # Create a temporary file with .wav extension
-            fd, temp_path = tempfile.mkstemp(suffix='.wav')
+            # Determine file extension based on first few bytes
+            is_mp3 = False
+            if len(audio_data) > 2 and audio_data[0:2] == b'\xFF\xFB':
+                is_mp3 = True
+            
+            # Create a temporary file with appropriate extension
+            suffix = '.mp3' if is_mp3 else '.wav'
+            fd, temp_path = tempfile.mkstemp(suffix=suffix)
             os.close(fd)
             
             with open(temp_path, 'wb') as f:
@@ -586,10 +592,18 @@ class VoiceAPIClient:
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 startupinfo.wShowWindow = 0  # SW_HIDE
                 
-                subprocess.Popen(
-                    ["powershell", "-c", f"(New-Object Media.SoundPlayer '{audio_file}').PlaySync()"],
-                    startupinfo=startupinfo
-                )
+                if audio_file.endswith('.mp3'):
+                    # Use MediaPlayer for MP3
+                    subprocess.Popen(
+                        ["powershell", "-c", f"(New-Object Media.MediaPlayer).OpenUriAsync('{audio_file}')"],
+                        startupinfo=startupinfo
+                    )
+                else:
+                    # Use SoundPlayer for WAV
+                    subprocess.Popen(
+                        ["powershell", "-c", f"(New-Object Media.SoundPlayer '{audio_file}').PlaySync()"],
+                        startupinfo=startupinfo
+                    )
                 
             elif sys.platform == 'darwin':  # macOS
                 # On macOS, use afplay which runs in terminal without UI
@@ -598,10 +612,16 @@ class VoiceAPIClient:
                                 stderr=subprocess.DEVNULL)
                 
             else:  # Linux and others
-                # On Linux, use aplay with as little UI as possible
-                subprocess.Popen(['aplay', '-q', audio_file], 
-                                stdout=subprocess.DEVNULL, 
-                                stderr=subprocess.DEVNULL)
+                # On Linux, try different players, starting with the most lightweight
+                players = ['aplay', 'paplay', 'ffplay']
+                for player in players:
+                    try:
+                        subprocess.Popen([player, '-q', audio_file], 
+                                        stdout=subprocess.DEVNULL, 
+                                        stderr=subprocess.DEVNULL)
+                        break
+                    except FileNotFoundError:
+                        continue
             
             logger.debug(f"Playing audio file (hidden): {audio_file}")
             return True
@@ -651,12 +671,22 @@ class VoiceAPIClient:
                     logger.warning(f"Invalid value for {key}: {value} (must be a string)")
                     continue
                 
+                # Edge TTS emotions
                 allowed_emotions = ["normal", "happy", "sad", "angry", "excited", "calm"]
                 if value.lower() not in allowed_emotions:
                     logger.warning(f"Invalid emotion: {value} (must be one of {allowed_emotions})")
                     continue
                 
                 value = value.lower()
+                
+            elif key == "voice":
+                # Must be a string
+                if not isinstance(value, str):
+                    logger.warning(f"Invalid value for {key}: {value} (must be a string)")
+                    continue
+                
+                # Edge TTS voices
+                value = value.strip()
                 
             elif key == "volume":
                 # Must be a float between 0.0 and 1.0
@@ -744,6 +774,18 @@ class VoiceAPIClient:
             bool: True if successful, False otherwise
         """
         return self.update_settings({"emotion": emotion})
+    
+    def set_voice(self, voice: str) -> bool:
+        """
+        Set voice
+        
+        Args:
+            voice: Voice name
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        return self.update_settings({"voice": voice})
     
     def set_volume(self, volume: float) -> bool:
         """

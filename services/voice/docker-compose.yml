@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  voice-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sabrina-voice-api
+    ports:
+      - "8100:8100"
+    volumes:
+      # Mount models and logs directories for persistence
+      - ./models:/app/models
+      - ./logs:/app/logs
+      # Mount audio devices for sound playback (if needed)
+      - /dev/snd:/dev/snd
+    environment:
+      - TZ=UTC
+      # Add any other environment variables needed
+    restart: unless-stopped
+    # Add these lines for audio support on Linux
+    devices:
+      - /dev/snd:/dev/snd
