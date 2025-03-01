@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Query, Response, HTTPException, Depends
 from fastapi.responses import FileResponse
@@ -32,26 +33,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("voice_api")
 
-# Create FastAPI app
-app = FastAPI(
-    title="Sabrina Voice API",
-    description="High-quality voice synthesis for Sabrina AI",
-    version="2.0.0"
-)
-
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # Global settings
 PIPER_INSTALLED = False
 PIPER_BINARY_PATH = None
-PIPER_MODELS_DIR = "models/piper"
+PIPER_MODELS_DIR = "/app/models/piper"  # Use absolute path in container
 DEFAULT_VOICE = "en_US-amy-medium"  # Use a female voice as default
 AVAILABLE_VOICES = []
 PREFERRED_VOICES = [
@@ -71,6 +56,50 @@ class Settings:
 
 # Initialize settings
 SETTINGS = Settings()
+
+# Application startup and shutdown handler (lifespan)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize the API on startup
+    global PIPER_INSTALLED, DEFAULT_VOICE
+    
+    logger.info("Starting Sabrina Voice API")
+    
+    # Check for Piper installation
+    PIPER_INSTALLED = check_piper_installation()
+    
+    if not PIPER_INSTALLED:
+        logger.warning("Piper not installed - voice synthesis will be limited")
+    
+    # Find voice models
+    voices = find_voice_models()
+    logger.info(f"Found {len(voices)} voice models: {', '.join(voices)}")
+    
+    # Load saved settings
+    load_settings()
+    logger.info(f"Using voice: {SETTINGS.voice}")
+    
+    yield
+    
+    # Cleanup on shutdown
+    logger.info("Shutting down Voice API")
+
+# Create FastAPI app with lifespan
+app = FastAPI(
+    title="Sabrina Voice API",
+    description="High-quality voice synthesis for Sabrina AI",
+    version="2.0.0",
+    lifespan=lifespan
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def find_best_voice() -> str:
     """Find the best available voice from our preferred list"""
@@ -93,7 +122,7 @@ def check_piper_installation() -> bool:
     """Check if Piper is installed and locate the binary"""
     global PIPER_INSTALLED, PIPER_BINARY_PATH
     
-    # Try to find piper binary in common locations
+    # Check for the exact path where piper is installed in the container
     possible_locations = [
         "/usr/local/bin/piper",
         "/usr/bin/piper",
@@ -147,6 +176,20 @@ def find_voice_models() -> List[str]:
     # Create models directory if it doesn't exist
     models_dir.mkdir(parents=True, exist_ok=True)
     
+    # First get a directory listing to see what's there
+    try:
+        logger.info(f"Listing the models directory: {models_dir}")
+        if models_dir.exists():
+            dir_list = list(models_dir.iterdir())
+            logger.info(f"Directory contents: {[str(f.name) for f in dir_list]}")
+            
+            # Check if any .onnx files actually exist
+            for file_path in models_dir.glob("*.onnx"):
+                file_size = file_path.stat().st_size
+                logger.info(f"Found model file: {file_path.name} (size: {file_size} bytes)")
+    except Exception as e:
+        logger.error(f"Error listing models directory: {str(e)}")
+    
     # Check for model files (*.onnx)
     try:
         logger.info(f"Searching for model files in {models_dir}")
@@ -185,13 +228,19 @@ def find_voice_models() -> List[str]:
         except Exception as e:
             logger.error(f"Error with direct directory listing: {str(e)}")
     
-    # Manual check for preferred voices by looking for the actual files
+    # If we still don't have voices, check if there are broken symbolic links
     if not voices:
-        for voice in PREFERRED_VOICES:
-            model_path = os.path.join(models_dir, f"{voice}.onnx")
-            if os.path.exists(model_path):
-                logger.info(f"Found voice via direct path check: {voice}")
-                voices.append(voice)
+        try:
+            result = subprocess.run(
+                ["find", str(models_dir), "-type", "l"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            if result.stdout:
+                logger.warning(f"Found symbolic links in models directory: {result.stdout}")
+        except Exception as e:
+            logger.error(f"Error checking for symbolic links: {str(e)}")
     
     # Add hardcoded fallback options if still empty
     if not voices:
@@ -294,32 +343,73 @@ def generate_speech(
             text_file.write(text)
             text_file_path = text_file.name
         
-        # Prepare the model path
+        # Prepare the model path and check if it exists
         model_path = os.path.join(PIPER_MODELS_DIR, f"{voice}.onnx")
-        if not os.path.exists(model_path):
-            logger.warning(f"Voice model not found: {model_path}, using fallback")
-            voice = find_best_voice()
-            model_path = os.path.join(PIPER_MODELS_DIR, f"{voice}.onnx")
-            
-            # If still not found, try a comprehensive search
-            if not os.path.exists(model_path):
-                found = False
-                for root, dirs, files in os.walk("."):
-                    for file in files:
-                        if file == f"{voice}.onnx":
-                            model_path = os.path.join(root, file)
-                            logger.info(f"Found model at: {model_path}")
-                            found = True
-                            break
-                    if found:
-                        break
-            
-            if not os.path.exists(model_path):
-                logger.error("No usable voice models found")
-                return None
         
+        # Check if model file exists and has content
+        if os.path.exists(model_path) and os.path.getsize(model_path) > 0:
+            logger.info(f"Using voice model: {model_path} ({os.path.getsize(model_path)} bytes)")
+        else:
+            logger.warning(f"Voice model not found or empty: {model_path}, using fallback")
+            
+            # Try a more comprehensive search with subprocess (works better in container)
+            try:
+                result = subprocess.run(
+                    ["find", "/app", "-name", f"{voice}.onnx"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                if result.stdout.strip():
+                    found_path = result.stdout.strip()
+                    logger.info(f"Found model with find command: {found_path}")
+                    model_path = found_path
+                else:
+                    # Try each preferred voice
+                    for fallback_voice in PREFERRED_VOICES:
+                        fallback_path = os.path.join(PIPER_MODELS_DIR, f"{fallback_voice}.onnx")
+                        if os.path.exists(fallback_path) and os.path.getsize(fallback_path) > 0:
+                            logger.info(f"Using fallback voice: {fallback_voice}")
+                            voice = fallback_voice
+                            model_path = fallback_path
+                            break
+                    else:
+                        # If no preferred voice works, try any .onnx file
+                        result = subprocess.run(
+                            ["find", PIPER_MODELS_DIR, "-name", "*.onnx"],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True
+                        )
+                        if result.stdout.strip():
+                            first_model = result.stdout.strip().split('\n')[0]
+                            logger.info(f"Using first available model: {first_model}")
+                            model_path = first_model
+                            voice = os.path.basename(first_model)[:-5]  # Remove .onnx extension
+                        else:
+                            logger.error("No usable voice models found")
+                            return None
+            except Exception as e:
+                logger.error(f"Error searching for models: {str(e)}")
+                return None
+            
         # Check for config file
         config_path = os.path.join(PIPER_MODELS_DIR, f"{voice}.onnx.json")
+        if not os.path.exists(config_path):
+            # Try to find the config file
+            try:
+                result = subprocess.run(
+                    ["find", "/app", "-name", f"{voice}.onnx.json"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                if result.stdout.strip():
+                    config_path = result.stdout.strip()
+                    logger.info(f"Found config file: {config_path}")
+            except Exception:
+                pass
+                
         config_param = ["--config", config_path] if os.path.exists(config_path) else []
         
         # Piper uses length-scale for speed (inverse of speed)
@@ -378,30 +468,24 @@ def generate_speech(
         logger.error(f"Error generating speech: {str(e)}")
         return None
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize the API on startup"""
-    global PIPER_INSTALLED, DEFAULT_VOICE
-    
-    logger.info("Starting Sabrina Voice API")
-    
-    # Check for Piper installation
-    PIPER_INSTALLED = check_piper_installation()
-    
-    if not PIPER_INSTALLED:
-        logger.warning("Piper not installed - voice synthesis will be limited")
-    
-    # Find voice models
-    voices = find_voice_models()
-    logger.info(f"Found {len(voices)} voice models: {', '.join(voices)}")
-    
-    # Load saved settings
-    load_settings()
-    logger.info(f"Using voice: {SETTINGS.voice}")
-
 @app.get("/status")
 def status():
     """Check if the Voice API is running"""
+    # Run a quick check to see if models are really available
+    model_files = []
+    try:
+        # Try direct subprocess approach that works better in containers
+        result = subprocess.run(
+            ["find", PIPER_MODELS_DIR, "-name", "*.onnx"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        if result.stdout.strip():
+            model_files = result.stdout.strip().split('\n')
+    except Exception:
+        pass
+        
     return {
         "status": "ok",
         "service": "Sabrina Voice API",
@@ -410,10 +494,13 @@ def status():
         "default_voice": SETTINGS.voice,
         "available_voices": AVAILABLE_VOICES,
         "voice_count": len(AVAILABLE_VOICES),
+        "models_directory": PIPER_MODELS_DIR,
         "debug_info": {
             "models_dir": PIPER_MODELS_DIR,
             "piper_path": PIPER_BINARY_PATH,
             "preferred_voices": PREFERRED_VOICES,
+            "model_files": model_files,
+            "model_exists": os.path.exists(os.path.join(PIPER_MODELS_DIR, f"{SETTINGS.voice}.onnx")),
             "voice_files_exist": [os.path.exists(os.path.join(PIPER_MODELS_DIR, f"{v}.onnx")) for v in PREFERRED_VOICES]
         }
     }
@@ -447,10 +534,19 @@ async def speak(
         
     if volume is not None:
         volume = max(0.0, min(1.0, volume))
-        
-    if voice is not None and voice not in AVAILABLE_VOICES:
-        logger.warning(f"Requested voice {voice} not available, using {SETTINGS.voice}")
-        voice = None  # Use the default
+    
+    # Make sure voice exists if specified
+    if voice is not None:
+        voice_found = False
+        for v in AVAILABLE_VOICES:
+            if v.lower() == voice.lower():
+                voice = v  # Use correct case
+                voice_found = True
+                break
+                
+        if not voice_found:
+            logger.warning(f"Requested voice {voice} not available, using {SETTINGS.voice}")
+            voice = SETTINGS.voice
     
     # Generate speech
     file_path = generate_speech(text, voice, speed, pitch, volume)
@@ -529,6 +625,60 @@ def get_settings():
         "voice": SETTINGS.voice,
         "emotion": SETTINGS.emotion,
         "available_voices": AVAILABLE_VOICES
+    }
+
+@app.get("/debug")
+def debug_info():
+    """Get detailed debug information about the system"""
+    model_info = []
+    try:
+        for voice in AVAILABLE_VOICES:
+            model_path = os.path.join(PIPER_MODELS_DIR, f"{voice}.onnx")
+            model_info.append({
+                "voice": voice,
+                "exists": os.path.exists(model_path),
+                "size": os.path.getsize(model_path) if os.path.exists(model_path) else 0,
+                "path": model_path
+            })
+    except Exception as e:
+        logger.error(f"Error in debug view: {str(e)}")
+    
+    # Run find command to locate actual model files
+    found_files = []
+    try:
+        result = subprocess.run(
+            ["find", "/app", "-name", "*.onnx"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
+        )
+        if result.stdout.strip():
+            found_files = result.stdout.strip().split('\n')
+    except Exception:
+        pass
+    
+    # Return detailed debug info
+    return {
+        "settings": {
+            "speed": SETTINGS.speed,
+            "pitch": SETTINGS.pitch,
+            "volume": SETTINGS.volume,
+            "voice": SETTINGS.voice,
+            "emotion": SETTINGS.emotion
+        },
+        "system": {
+            "piper_installed": PIPER_INSTALLED,
+            "piper_path": PIPER_BINARY_PATH,
+            "models_dir": PIPER_MODELS_DIR,
+            "available_voices": AVAILABLE_VOICES,
+            "preferred_voices": PREFERRED_VOICES
+        },
+        "files": {
+            "model_info": model_info,
+            "found_files": found_files,
+            "directory_exists": os.path.exists(PIPER_MODELS_DIR),
+            "directory_contents": os.listdir(PIPER_MODELS_DIR) if os.path.exists(PIPER_MODELS_DIR) else []
+        }
     }
 
 def main():
