@@ -157,13 +157,4 @@ def test_speak_endpoint():
 ✔️ **Scalability & future-proofing for AI assistant integration**
 
 ---
-
-### **📌 Prompt Execution Example**
-You can run this prompt in an **AI coding assistant** like GPT-4, Claude, or Gemini:
-
-📌 **Example Usage:**
-> "Generate an **end-to-end voice module** with **text-to-speech, speech recognition, API client, and voice settings management**, using **Jenny TTS** as the speech model. It must include a **FastAPI service**, a **Dockerized deployment**, a **secure settings storage system**, and **comprehensive testing scripts**. Follow this **specific project structure** and include API endpoint definitions."
-
----
-
 This **highly detailed prompt** will ensure an AI assistant generates a **full-fledged Voice Module** for **Sabrina AI** with **proper architecture, documentation, API, security, testing, and deployment**. 🚀
