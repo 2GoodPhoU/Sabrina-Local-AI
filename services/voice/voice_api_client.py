@@ -59,7 +59,7 @@ class VoiceAPIClient:
             "pitch": 1.0,
             "emotion": "normal",
             "volume": 0.8,
-            "voice": "en_US-amy-medium"  # Default Piper TTS voice
+            "voice": None  # Will be set after querying available voices
         }
         
         # Find project root directory
@@ -204,11 +204,22 @@ class VoiceAPIClient:
             if response.status_code == 200:
                 data = response.json()
                 self.available_voices = data.get("voices", [])
+                
                 # Update default voice if needed
-                if not self.settings["voice"] in self.available_voices and self.available_voices:
-                    self.settings["voice"] = data.get("default_voice", self.available_voices[0])
+                default_voice = data.get("default_voice")
+                
+                if not self.settings["voice"] or self.settings["voice"] not in self.available_voices:
+                    if default_voice and default_voice in self.available_voices:
+                        self.settings["voice"] = default_voice
+                    elif self.available_voices:
+                        self.settings["voice"] = self.available_voices[0]
+                        
                 logger.info(f"Fetched {len(self.available_voices)} available voices")
+                logger.info(f"Using voice: {self.settings['voice']}")
                 return self.available_voices
+                
+            else:
+                logger.error(f"Failed to fetch voices: HTTP {response.status_code}")
         except Exception as e:
             logger.error(f"Failed to fetch available voices: {str(e)}")
         
@@ -251,6 +262,14 @@ class VoiceAPIClient:
             os.chdir(voice_docker_dir)
             
             try:
+                # First try to build the container to ensure it's up to date
+                subprocess.run(
+                    ["docker-compose", "build", "--no-cache"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=True
+                )
+                
                 # Run docker-compose up
                 process = subprocess.Popen(
                     ["docker-compose", "up", "-d"],
@@ -446,6 +465,11 @@ class VoiceAPIClient:
                 logger.error("Failed to connect to Voice API")
                 return None
         
+        # Ensure we have a voice selected
+        if not self.settings.get("voice") and self.available_voices:
+            logger.info(f"No voice selected, using first available: {self.available_voices[0]}")
+            self.settings["voice"] = self.available_voices[0]
+            
         # Post event about starting speech if event bus is available
         if self.event_bus and hasattr(self.event_bus, 'post_event'):
             try:

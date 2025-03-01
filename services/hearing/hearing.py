@@ -12,7 +12,7 @@ import json
 import queue
 import pyaudio
 import keyboard
-import wave
+import playsound
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -127,20 +127,35 @@ class Hearing:
         except Exception as e:
             logger.error(f"Error downloading Vosk model: {str(e)}")
     
+    def play_wake_sound(sound_path="assets/wake_sound.mp3"):
+        """Plays a wake-up sound (MP3) when the wake word is detected."""
+        if not os.path.exists(sound_path):
+            logger.warning(f"Wake sound file not found: {sound_path}")
+            return
+        
+        try:
+            playsound.playsound(sound_path)
+            logger.info("Wake sound played successfully.")
+        
+        except Exception as e:
+            logger.error(f"Error playing wake sound: {str(e)}")
+
+    # Modify the `listen_for_wake_word` function to play MP3 sound
     def listen_for_wake_word(self):
         """
-        Listen for the wake word or hotkey activation
-        
+        Listen for the wake word or hotkey activation.
+
         Returns:
-            True if wake word detected, False otherwise
+            True if wake word detected, False otherwise.
         """
         logger.info(f"Listening for wake word '{self.wake_word}' or hotkey {self.hotkey}")
-        
+
         if not self.vosk_model:
             logger.warning("Vosk model not available - using console input for testing")
             user_input = input("Say the wake word or press Enter to simulate it: ")
+            play_wake_sound()  # Play MP3 sound for simulation
             return True
-        
+
         # Start audio stream if not already running
         if not self.stream:
             self.stream = self.audio.open(
@@ -150,7 +165,7 @@ class Hearing:
                 input=True,
                 frames_per_buffer=self.chunk
             )
-        
+
         # Listen for wake word
         self.active = True
         while self.active:
@@ -158,28 +173,30 @@ class Hearing:
                 # Check for hotkey
                 if keyboard.is_pressed(self.hotkey):
                     logger.info(f"Hotkey {self.hotkey} activated")
+                    play_wake_sound()
                     return True
-                
+
                 # Get audio data
                 data = self.stream.read(self.chunk, exception_on_overflow=False)
-                
+
                 # Process with Vosk
                 if self.vosk_model.AcceptWaveform(data):
                     result = json.loads(self.vosk_model.Result())
                     text = result.get("text", "").lower()
-                    
+
                     # Check for wake word
                     if self.wake_word in text:
                         logger.info(f"Wake word detected: {self.wake_word}")
+                        play_wake_sound()  # Play sound when wake word is detected
                         return True
-                
+
                 # Pause briefly to reduce CPU usage
                 time.sleep(0.01)
-                
+
             except Exception as e:
                 logger.error(f"Error in wake word detection: {str(e)}")
                 time.sleep(1)  # Pause longer on error
-    
+        
     def listen(self, timeout=10.0):
         """
         Listen for user input with timeout

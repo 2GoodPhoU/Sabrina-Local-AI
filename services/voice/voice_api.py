@@ -76,6 +76,7 @@ def check_piper_installation():
     
     for location in possible_locations:
         try:
+            logger.info(f"Checking for Piper at: {location}")
             result = subprocess.run([location, "--help"], 
                                   stdout=subprocess.PIPE, 
                                   stderr=subprocess.PIPE, 
@@ -87,7 +88,8 @@ def check_piper_installation():
                 PIPER_INSTALLED = True
                 logger.info(f"Found Piper binary at: {location}")
                 return True
-        except (subprocess.SubprocessError, FileNotFoundError):
+        except (subprocess.SubprocessError, FileNotFoundError) as e:
+            logger.debug(f"Piper not found at {location}: {str(e)}")
             continue
     
     logger.warning("Piper binary not found in standard locations")
@@ -103,16 +105,30 @@ def find_piper_models():
     # Create models directory if it doesn't exist
     models_dir.mkdir(parents=True, exist_ok=True)
     
+    logger.info(f"Looking for voice models in: {models_dir.absolute()}")
+    
+    # List all files in the models directory for debugging
+    try:
+        all_files = list(models_dir.glob("**/*"))
+        logger.info(f"Files in models directory: {[str(f) for f in all_files]}")
+    except Exception as e:
+        logger.error(f"Error listing model directory contents: {str(e)}")
+    
     # Check for model files (*.onnx)
-    for file in models_dir.glob("**/*.onnx"):
-        # Get voice name from filename (removing extension)
-        voice_name = file.stem
-        voices.append(voice_name)
-        
-        # Also check for associated JSON config
-        config_file = file.with_suffix('.json')
-        if config_file.exists():
-            logger.info(f"Found Piper voice with config: {voice_name}")
+    try:
+        for file in models_dir.glob("**/*.onnx"):
+            # Get voice name from filename (removing extension)
+            voice_name = file.stem
+            voices.append(voice_name)
+            
+            # Also check for associated JSON config
+            config_file = file.with_suffix('.json')
+            if config_file.exists():
+                logger.info(f"Found Piper voice with config: {voice_name}")
+            else:
+                logger.warning(f"Found voice model without config: {voice_name}")
+    except Exception as e:
+        logger.error(f"Error searching for model files: {str(e)}")
     
     if voices:
         AVAILABLE_VOICES = voices
@@ -155,8 +171,19 @@ def download_default_model():
             urllib.request.urlretrieve(model_url, model_path)
             urllib.request.urlretrieve(config_url, config_path)
             
-        logger.info(f"Default model downloaded to {model_path}")
-        return True
+        # Verify the download was successful
+        if os.path.exists(model_path) and os.path.getsize(model_path) > 1000000:  # File should be several MB
+            logger.info(f"Default model downloaded to {model_path}")
+            return True
+        else:
+            logger.error(f"Model file exists but seems too small or corrupted: {model_path}")
+            # Try to display its size
+            try:
+                size = os.path.getsize(model_path)
+                logger.error(f"File size: {size} bytes")
+            except:
+                pass
+            return False
     except Exception as e:
         logger.error(f"Error downloading default model: {str(e)}")
         return False
@@ -200,6 +227,14 @@ def generate_speech_piper(text, voice=DEFAULT_VOICE, speed=1.0, pitch=1.0, volum
         # Check if voice file exists
         if not os.path.exists(model_path):
             logger.error(f"Voice model file not found: {model_path}")
+            # List all available models for debugging
+            try:
+                models_dir = Path(PIPER_MODELS_DIR)
+                all_files = list(models_dir.glob("**/*"))
+                logger.error(f"Available files in models directory: {[str(f) for f in all_files]}")
+            except Exception as e:
+                logger.error(f"Error listing model directory contents: {str(e)}")
+                
             # Try to use default voice as fallback
             if voice != DEFAULT_VOICE:
                 logger.info(f"Trying default voice: {DEFAULT_VOICE}")
@@ -217,6 +252,8 @@ def generate_speech_piper(text, voice=DEFAULT_VOICE, speed=1.0, pitch=1.0, volum
             "--rate", str(rate)
         ]
         
+        logger.info(f"Running Piper command: {' '.join(command)}")
+        
         # Run piper with the text file as input
         with open(text_file_path, 'r') as f:
             process = subprocess.Popen(
@@ -232,7 +269,9 @@ def generate_speech_piper(text, voice=DEFAULT_VOICE, speed=1.0, pitch=1.0, volum
         os.unlink(text_file_path)
             
         if process.returncode != 0:
-            logger.error(f"Piper TTS error: {stderr}")
+            logger.error(f"Piper TTS error (code {process.returncode}): {stderr}")
+            if stdout:
+                logger.error(f"Piper stdout: {stdout}")
             return None
             
         logger.info(f"Speech generated with Piper TTS: {output_path}")
@@ -265,6 +304,8 @@ async def startup_event():
         download_success = download_default_model()
         if download_success:
             voices = find_piper_models()
+        else:
+            logger.error("Failed to download default model - voice synthesis may not work")
     
     logger.info(f"Available voices: {', '.join(AVAILABLE_VOICES)}")
     logger.info(f"Default voice: {DEFAULT_VOICE}")
@@ -288,6 +329,23 @@ def status():
                 voice_by_language["Other"] = []
             voice_by_language["Other"].append(voice)
     
+    # Add detailed debug info
+    debug_info = {
+        "piper_models_dir_absolute": str(Path(PIPER_MODELS_DIR).absolute()),
+        "piper_binary_path": PIPER_BINARY_PATH,
+        "current_directory": os.getcwd(),
+        "voices_found": len(AVAILABLE_VOICES),
+        "default_voice_file_exists": os.path.exists(os.path.join(PIPER_MODELS_DIR, f"{DEFAULT_VOICE}.onnx"))
+    }
+    
+    try:
+        # Try to list files in the models directory
+        models_dir = Path(PIPER_MODELS_DIR)
+        all_files = list(models_dir.glob("**/*"))
+        debug_info["files_in_models_dir"] = [str(f) for f in all_files]
+    except Exception as e:
+        debug_info["files_list_error"] = str(e)
+    
     return {
         "status": "ok",
         "service": "Sabrina Voice API with Piper TTS",
@@ -297,7 +355,8 @@ def status():
         "default_voice": DEFAULT_VOICE,
         "voice_count": len(AVAILABLE_VOICES),
         "available_voices": voice_by_language,
-        "models_directory": PIPER_MODELS_DIR
+        "models_directory": PIPER_MODELS_DIR,
+        "debug_info": debug_info
     }
 
 @app.get("/speak")

@@ -42,11 +42,14 @@ RUN cd /tmp && \
     cp ./piper /app/piper && \
     rm -rf /tmp/piper
 
-# Download default Amy model
+# Download Amy TTS model and explicitly verify it exists
 RUN mkdir -p /app/models/piper && \
     cd /app/models/piper && \
+    echo "Downloading Amy voice model..." && \
     curl -LO "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx" && \
-    curl -LO "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json"
+    curl -LO "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json" && \
+    ls -la && \
+    test -f "en_US-amy-medium.onnx" || (echo "ERROR: Amy model failed to download" && exit 1)
 
 # Copy voice module code
 COPY voice_api.py .
