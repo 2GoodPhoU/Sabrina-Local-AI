@@ -216,10 +216,10 @@ def generate_speech_piper(text, voice=DEFAULT_VOICE, speed=1.0, pitch=1.0, volum
             text_file.write(text)
             text_file_path = text_file.name
         
-        # Prepare command
-        # Piper uses --rate for speed control (default 16000)
-        # We convert speed factor to rate by multiplying default rate by speed
-        rate = int(16000 * speed)
+        # Piper doesn't support --rate directly for speed control
+        # Instead, we use --length-scale which is the inverse of speed
+        # (i.e., length_scale = 1.0/speed)
+        length_scale = 1.0/speed
         
         # Build the command
         model_path = os.path.join(PIPER_MODELS_DIR, f"{voice}.onnx")
@@ -245,11 +245,18 @@ def generate_speech_piper(text, voice=DEFAULT_VOICE, speed=1.0, pitch=1.0, volum
             else:
                 return None
                 
+        # Check for config file
+        config_path = os.path.join(PIPER_MODELS_DIR, f"{voice}.onnx.json")
+        config_param = []
+        if os.path.exists(config_path):
+            config_param = ["--config", config_path]
+                
         command = [
             PIPER_BINARY_PATH,
             "--model", model_path,
+            *config_param,
             "--output_file", output_path,
-            "--rate", str(rate)
+            "--length-scale", str(length_scale)
         ]
         
         logger.info(f"Running Piper command: {' '.join(command)}")
