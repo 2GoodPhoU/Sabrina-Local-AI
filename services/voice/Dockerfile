@@ -38,17 +38,20 @@ RUN pip install --no-cache-dir piper-tts
 # Update certificate authorities to avoid download issues
 RUN update-ca-certificates
 
-# Download voice models - improved with retry mechanism and verification
-RUN mkdir -p /app/models/piper && \
-    # Download Amy voice (primary)
-    (wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 5 -O /app/models/piper/en_US-amy-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx" && \
-    wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 5 -O /app/models/piper/en_US-amy-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx.json") || echo "Amy voice download failed" && \
-    # Download Kathleen voice (alternative)
-    (wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 5 -O /app/models/piper/en_US-kathleen-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/kathleen/medium/en_US-kathleen-medium.onnx" && \
-    wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 5 -O /app/models/piper/en_US-kathleen-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/kathleen/medium/en_US-kathleen-medium.onnx.json") || echo "Kathleen voice download failed" && \
-    # Download Jenny voice (alternative)
-    (wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 5 -O /app/models/piper/en_US-jenny-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/jenny/medium/en_US-jenny-medium.onnx" && \
-    wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 5 -O /app/models/piper/en_US-jenny-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/jenny/medium/en_US-jenny-medium.onnx.json") || echo "Jenny voice download failed"
+# Download a default model (change URL to the preferred model)
+RUN curl -L -o /app/models/piper/en_US-amy-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US-amy-medium.onnx"
+# Download a default model (change URL to the preferred model)
+RUN curl -L -o /app/models/piper/en_US-amy-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx.json"
+
+# Download a default model (change URL to the preferred model)
+RUN curl -L -o /app/models/piper/en_US-kathleen-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/kathleen/medium/en_US-kathleen-medium.onnx"
+# Download a default model (change URL to the preferred model)
+RUN curl -L -o /app/models/piper/en_US-kathleen-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/kathleen/medium/en_US-kathleen-medium.onnx.json"
+
+RUN curl -L -o /app/models/piper/en_US-jenny-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/jenny/medium/en_US-jenny-medium.onnx"
+# Download a default model (change URL to the preferred model)
+RUN curl -L -o /app/models/piper/en_US-jenny-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/jenny/medium/en_US-jenny-medium.onnx.json"
+# Download a default model (change URL to the preferred model)
 
 # Add fallback voices if the preferred ones fail to download
 RUN ls -la /app/models/piper/ && \

@@ -10,7 +10,7 @@ services:
       - "8100:8100"
     restart: unless-stopped
     volumes:
-      - ./models:/app/models
+      - ./models/piper:/app/models/piper
       - ./logs:/app/logs
       # For Linux systems with PulseAudio
       # - ${XDG_RUNTIME_DIR}/pulse:/run/pulse:ro

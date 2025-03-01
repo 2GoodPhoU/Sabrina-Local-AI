@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from contextlib import asynccontextmanager
-
+import requests
 from fastapi import FastAPI, Query, Response, HTTPException, Depends
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -57,6 +57,10 @@ class Settings:
 # Initialize settings
 SETTINGS = Settings()
 
+PIPER_MODELS_DIR = "/app/models/piper"
+MODEL_URLS = {
+    "en_US-amy-medium": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US-amy-medium.onnx",
+}
 # Application startup and shutdown handler (lifespan)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -166,96 +170,36 @@ def check_piper_installation() -> bool:
     logger.warning("Piper binary not found in standard locations")
     return False
 
-def find_voice_models() -> List[str]:
-    """Find available Piper voice models"""
-    global AVAILABLE_VOICES, DEFAULT_VOICE
+def download_model(model_name):
+    """Download a model if it's missing"""
+    model_path = os.path.join(PIPER_MODELS_DIR, f"{model_name}.onnx")
     
-    voices = []
-    models_dir = Path(PIPER_MODELS_DIR)
-    
-    # Create models directory if it doesn't exist
-    models_dir.mkdir(parents=True, exist_ok=True)
-    
-    # First get a directory listing to see what's there
-    try:
-        logger.info(f"Listing the models directory: {models_dir}")
-        if models_dir.exists():
-            dir_list = list(models_dir.iterdir())
-            logger.info(f"Directory contents: {[str(f.name) for f in dir_list]}")
-            
-            # Check if any .onnx files actually exist
-            for file_path in models_dir.glob("*.onnx"):
-                file_size = file_path.stat().st_size
-                logger.info(f"Found model file: {file_path.name} (size: {file_size} bytes)")
-    except Exception as e:
-        logger.error(f"Error listing models directory: {str(e)}")
-    
-    # Check for model files (*.onnx)
-    try:
-        logger.info(f"Searching for model files in {models_dir}")
-        
-        # Look for .onnx files directly
-        for file_path in models_dir.glob("*.onnx"):
-            voice_name = file_path.stem
-            if voice_name.endswith(".onnx"):
-                voice_name = voice_name[:-5]  # Remove the .onnx part if it's in the stem
-            
-            logger.info(f"Found voice model: {voice_name}")
-            voices.append(voice_name)
-        
-        # Also search in subdirectories if any
-        for file_path in models_dir.glob("**/*.onnx"):
-            voice_name = file_path.stem
-            if voice_name.endswith(".onnx"):
-                voice_name = voice_name[:-5]  # Remove the .onnx part if it's in the stem
-            
-            if voice_name not in voices:  # Avoid duplicates
-                logger.info(f"Found voice model in subdirectory: {voice_name}")
-                voices.append(voice_name)
-    except Exception as e:
-        logger.error(f"Error searching for model files: {str(e)}")
-    
-    # If we didn't find any voices with the .onnx search, try listing the directory directly
-    if not voices:
-        try:
-            logger.info(f"No voices found with glob, trying direct directory listing")
-            if models_dir.exists():
-                for item in os.listdir(models_dir):
-                    if item.endswith(".onnx"):
-                        voice_name = item[:-5]  # Remove .onnx extension
-                        logger.info(f"Found voice model via listing: {voice_name}")
-                        voices.append(voice_name)
-        except Exception as e:
-            logger.error(f"Error with direct directory listing: {str(e)}")
-    
-    # If we still don't have voices, check if there are broken symbolic links
-    if not voices:
-        try:
-            result = subprocess.run(
-                ["find", str(models_dir), "-type", "l"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            if result.stdout:
-                logger.warning(f"Found symbolic links in models directory: {result.stdout}")
-        except Exception as e:
-            logger.error(f"Error checking for symbolic links: {str(e)}")
-    
-    # Add hardcoded fallback options if still empty
-    if not voices:
-        logger.warning("No models found, adding fallback options")
-        voices = ["en_GB-alan-medium", "en_US-ryan-medium"] + PREFERRED_VOICES
-    
-    AVAILABLE_VOICES = voices
-    logger.info(f"Available voices: {AVAILABLE_VOICES}")
-    
-    # Set default voice to best available
-    DEFAULT_VOICE = find_best_voice()
-    SETTINGS.voice = DEFAULT_VOICE
-    logger.info(f"Set default voice to: {DEFAULT_VOICE}")
-    
-    return voices
+    if not os.path.exists(model_path):
+        url = MODEL_URLS.get(model_name)
+        if url:
+            logger.info(f"Downloading model: {model_name} from {url}")
+            response = requests.get(url, stream=True)
+            if response.status_code == 200:
+                with open(model_path, "wb") as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                logger.info(f"Model {model_name} downloaded successfully.")
+            else:
+                logger.error(f"Failed to download model {model_name}. HTTP {response.status_code}")
+
+def find_voice_models():
+    """Find available models, downloading if necessary"""
+    os.makedirs(PIPER_MODELS_DIR, exist_ok=True)
+
+    available_models = []
+    for model_name in MODEL_URLS.keys():
+        model_path = os.path.join(PIPER_MODELS_DIR, f"{model_name}.onnx")
+        if not os.path.exists(model_path):
+            download_model(model_name)
+        if os.path.exists(model_path):
+            available_models.append(model_name)
+
+    return available_models
 
 def load_settings():
     """Load voice settings from file"""
