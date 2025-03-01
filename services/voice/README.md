@@ -44,8 +44,6 @@ The Voice Module must include:
 The project must follow this structured design:
 
 ```
-/models/piper/                    # Contains Jenny TTS models
-│-- voice_model.onnx         # Pre-trained TTS voice models
 /services/voice/
 │-- voice_api.py                  # FastAPI-based Voice API server
 │-- voice_api_client.py           # API client for voice interactions
@@ -184,45 +182,7 @@ The Sabrina AI Voice Module provides advanced Text-to-Speech (TTS) capabilities 
 - PyTorch
 - Coqui TTS
 - FastAPI
-- Docker (optional)
-
-### Local Setup
-```bash
-# Install dependencies
-pip install -r voice_docker_requirements.txt
-
-# Run the Voice API
-uvicorn voice_api:app --host 0.0.0.0 --port 8100
-```
-
-### Docker Deployment
-```bash
-# Build Docker image
-docker build -t sabrina-voice-api -f voice.Dockerfile .
-
-# Run Docker container
-docker-compose up voice-service
-```
-
-## 🚀 API Endpoints
-
-### Voice Generation
-- `POST /speak`: Generate speech from text
-  ```json
-  {
-    "text": "Hello, I'm Sabrina!",
-    "voice": "en_US-amy-medium",
-    "volume": 0.8,
-    "speed": 1.0,
-    "pitch": 1.0,
-    "emotion": "neutral"
-  }
-  ```
-
-### Settings Management
-- `GET /settings`: Retrieve current voice settings
-- `POST /settings`: Update voice settings
-- `GET /voices`: List available voice models
+- Docker
 
 ## 🔧 Voice Configuration
 Configurable parameters:
@@ -232,12 +192,6 @@ Configurable parameters:
 - `pitch`: Voice pitch (0.5-2.0)
 - `emotion`: Speech emotion style
 - `cache_enabled`: Enable speech audio caching
-
-## 🧪 Testing
-```bash
-# Run tests
-pytest tests/voice_module_test.py
-```
 
 ## 🔒 Security
 - API key authentication
