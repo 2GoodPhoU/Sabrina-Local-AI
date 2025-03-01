@@ -6,7 +6,8 @@ WORKDIR /app
 
 # Environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    LD_LIBRARY_PATH=/usr/local/lib:/app/lib
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -29,9 +30,9 @@ COPY voice_docker_requirements.txt .
 RUN pip install --no-cache-dir -r voice_docker_requirements.txt
 
 # Create necessary directories
-RUN mkdir -p /app/logs /app/models/piper
+RUN mkdir -p /app/logs /app/models/piper /app/lib
 
-# Build and install Piper from source with specific path handling
+# Build Piper from source - using a simpler build approach
 RUN cd /tmp && \
     git clone https://github.com/rhasspy/piper.git && \
     cd piper && \
@@ -40,15 +41,21 @@ RUN cd /tmp && \
     cd build && \
     cmake -DCMAKE_BUILD_TYPE=Release .. && \
     make -j$(nproc) && \
-    find . -name "piper" -type f -executable -exec cp {} /app/piper \; && \
-    chmod +x /app/piper && \
+    # Copy executables and libraries
+    cp bin/piper /app/ && \
+    # Find and copy all shared libraries to app/lib
+    find . -name "*.so*" -exec cp -P {} /app/lib/ \; && \
+    # Create symbolic links for library compatibility
+    ln -sf /app/lib/libpiper_phonemize.so /app/lib/libpiper_phonemize.so.1 && \
     cd / && \
     rm -rf /tmp/piper
 
-# Download Amy TTS model
-RUN wget -O /app/models/piper/en_US-amy-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx" && \
-    wget -O /app/models/piper/en_US-amy-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json" && \
-    # Verify files were downloaded correctly
+# Download voice models
+RUN wget -O /app/models/piper/en_GB-alan-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium/en_GB-alan-medium.onnx" && \
+    wget -O /app/models/piper/en_GB-alan-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_GB/alan/medium/en_GB-alan-medium.onnx.json" && \
+    wget -O /app/models/piper/en_US-ryan-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/medium/en_US-ryan-medium.onnx" && \
+    wget -O /app/models/piper/en_US-ryan-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/ryan/medium/en_US-ryan-medium.onnx.json" && \
+    # Verify files were downloaded
     ls -la /app/models/piper/
 
 # Copy voice module code
