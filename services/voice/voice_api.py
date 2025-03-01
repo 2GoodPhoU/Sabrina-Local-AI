@@ -52,12 +52,12 @@ app.add_middleware(
 PIPER_INSTALLED = False
 PIPER_BINARY_PATH = None
 PIPER_MODELS_DIR = "models/piper"
-DEFAULT_VOICE = "en_US-ryan-medium"  # Use a more confident male voice as default
+DEFAULT_VOICE = "en_US-amy-medium"  # Use a female voice as default
 AVAILABLE_VOICES = []
 PREFERRED_VOICES = [
-    "en_US-amy-medium",      # Confident female voice
-    "en_US-kathleen-medium", # Alternative female voice
-    "en_US-jenny-medium",    # Another female voice option
+    "en_US-amy-medium",       # Confident female voice
+    "en_US-kathleen-medium",  # Alternative female voice
+    "en_US-jenny-medium",     # Another female voice option
 ]
 
 # Global settings container
@@ -74,15 +74,18 @@ SETTINGS = Settings()
 
 def find_best_voice() -> str:
     """Find the best available voice from our preferred list"""
+    global AVAILABLE_VOICES
+    
+    # Debug what's available
+    logger.info(f"Looking for best voice among: {AVAILABLE_VOICES}")
+    
     for voice in PREFERRED_VOICES:
-        model_path = os.path.join(PIPER_MODELS_DIR, f"{voice}.onnx")
-        if os.path.exists(model_path):
+        if voice in AVAILABLE_VOICES:
             return voice
     
     # If no preferred voice is found, return any available voice
-    for file in os.listdir(PIPER_MODELS_DIR):
-        if file.endswith(".onnx"):
-            return os.path.splitext(file)[0]
+    if AVAILABLE_VOICES:
+        return AVAILABLE_VOICES[0]
     
     return DEFAULT_VOICE
 
@@ -113,6 +116,24 @@ def check_piper_installation() -> bool:
         except (subprocess.SubprocessError, FileNotFoundError):
             continue
     
+    # If we didn't find piper binary, try using python -m piper approach
+    try:
+        result = subprocess.run(
+            ["python", "-m", "piper", "--help"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=2
+        )
+        
+        if "piper" in result.stdout or "piper" in result.stderr:
+            PIPER_BINARY_PATH = "python -m piper"
+            PIPER_INSTALLED = True
+            logger.info("Found Piper installed as Python module")
+            return True
+    except:
+        pass
+        
     logger.warning("Piper binary not found in standard locations")
     return False
 
@@ -128,44 +149,94 @@ def find_voice_models() -> List[str]:
     
     # Check for model files (*.onnx)
     try:
-        for file in models_dir.glob("**/*.onnx"):
-            # Get voice name from filename (removing extension)
-            voice_name = file.stem
-            if file.stem.endswith(".onnx"):
-                voice_name = file.stem[:-5]  # Remove the .onnx part if it's in the stem
+        logger.info(f"Searching for model files in {models_dir}")
+        
+        # Look for .onnx files directly
+        for file_path in models_dir.glob("*.onnx"):
+            voice_name = file_path.stem
+            if voice_name.endswith(".onnx"):
+                voice_name = voice_name[:-5]  # Remove the .onnx part if it's in the stem
+            
+            logger.info(f"Found voice model: {voice_name}")
             voices.append(voice_name)
+        
+        # Also search in subdirectories if any
+        for file_path in models_dir.glob("**/*.onnx"):
+            voice_name = file_path.stem
+            if voice_name.endswith(".onnx"):
+                voice_name = voice_name[:-5]  # Remove the .onnx part if it's in the stem
+            
+            if voice_name not in voices:  # Avoid duplicates
+                logger.info(f"Found voice model in subdirectory: {voice_name}")
+                voices.append(voice_name)
     except Exception as e:
         logger.error(f"Error searching for model files: {str(e)}")
     
-    if voices:
-        AVAILABLE_VOICES = voices
-        # Set default voice to best available
-        DEFAULT_VOICE = find_best_voice()
-        SETTINGS.voice = DEFAULT_VOICE
-        logger.info(f"Set default voice to: {DEFAULT_VOICE}")
-    else:
-        logger.warning(f"No voice models found in {models_dir}")
+    # If we didn't find any voices with the .onnx search, try listing the directory directly
+    if not voices:
+        try:
+            logger.info(f"No voices found with glob, trying direct directory listing")
+            if models_dir.exists():
+                for item in os.listdir(models_dir):
+                    if item.endswith(".onnx"):
+                        voice_name = item[:-5]  # Remove .onnx extension
+                        logger.info(f"Found voice model via listing: {voice_name}")
+                        voices.append(voice_name)
+        except Exception as e:
+            logger.error(f"Error with direct directory listing: {str(e)}")
+    
+    # Manual check for preferred voices by looking for the actual files
+    if not voices:
+        for voice in PREFERRED_VOICES:
+            model_path = os.path.join(models_dir, f"{voice}.onnx")
+            if os.path.exists(model_path):
+                logger.info(f"Found voice via direct path check: {voice}")
+                voices.append(voice)
+    
+    # Add hardcoded fallback options if still empty
+    if not voices:
+        logger.warning("No models found, adding fallback options")
+        voices = ["en_GB-alan-medium", "en_US-ryan-medium"] + PREFERRED_VOICES
+    
+    AVAILABLE_VOICES = voices
+    logger.info(f"Available voices: {AVAILABLE_VOICES}")
+    
+    # Set default voice to best available
+    DEFAULT_VOICE = find_best_voice()
+    SETTINGS.voice = DEFAULT_VOICE
+    logger.info(f"Set default voice to: {DEFAULT_VOICE}")
     
     return voices
 
 def load_settings():
     """Load voice settings from file"""
     try:
-        if os.path.exists("voice_settings.json"):
-            with open("voice_settings.json", "r") as f:
-                data = json.load(f)
-                SETTINGS.speed = data.get("speed", 1.0)
-                SETTINGS.pitch = data.get("pitch", 1.0)
-                SETTINGS.emotion = data.get("emotion", "normal")
-                SETTINGS.volume = data.get("volume", 0.8)
-                
-                # Only use the voice if it exists
-                voice = data.get("voice", DEFAULT_VOICE)
-                if voice in AVAILABLE_VOICES:
-                    SETTINGS.voice = voice
-                else:
-                    # Use best available voice
-                    SETTINGS.voice = find_best_voice()
+        settings_paths = [
+            "voice_settings.json",
+            "./config/voice_settings.json"
+        ]
+        
+        for path in settings_paths:
+            if os.path.exists(path):
+                logger.info(f"Loading settings from {path}")
+                with open(path, "r") as f:
+                    data = json.load(f)
+                    SETTINGS.speed = data.get("speed", 1.0)
+                    SETTINGS.pitch = data.get("pitch", 1.0)
+                    SETTINGS.emotion = data.get("emotion", "normal")
+                    SETTINGS.volume = data.get("volume", 0.8)
+                    
+                    # Only use the voice if it exists
+                    voice = data.get("voice")
+                    if voice:
+                        if voice in AVAILABLE_VOICES:
+                            SETTINGS.voice = voice
+                            logger.info(f"Using configured voice: {voice}")
+                        else:
+                            logger.warning(f"Configured voice {voice} not found in available voices")
+                            # Use best available voice
+                            SETTINGS.voice = find_best_voice()
+                    break
     except Exception as e:
         logger.error(f"Error loading settings: {str(e)}")
 
@@ -229,6 +300,20 @@ def generate_speech(
             logger.warning(f"Voice model not found: {model_path}, using fallback")
             voice = find_best_voice()
             model_path = os.path.join(PIPER_MODELS_DIR, f"{voice}.onnx")
+            
+            # If still not found, try a comprehensive search
+            if not os.path.exists(model_path):
+                found = False
+                for root, dirs, files in os.walk("."):
+                    for file in files:
+                        if file == f"{voice}.onnx":
+                            model_path = os.path.join(root, file)
+                            logger.info(f"Found model at: {model_path}")
+                            found = True
+                            break
+                    if found:
+                        break
+            
             if not os.path.exists(model_path):
                 logger.error("No usable voice models found")
                 return None
@@ -241,13 +326,24 @@ def generate_speech(
         length_scale = 1.0 / float(speed)
         
         # Build the command
-        command = [
-            PIPER_BINARY_PATH,
-            "--model", model_path,
-            *config_param,
-            "--output_file", output_path,
-            "--length-scale", str(length_scale)
-        ]
+        if PIPER_BINARY_PATH == "python -m piper":
+            command = [
+                "python", "-m", "piper",
+                "--model", model_path,
+                "--output_file", output_path,
+                "--length-scale", str(length_scale)
+            ]
+            if config_param:
+                command.extend(config_param)
+        else:
+            command = [
+                PIPER_BINARY_PATH,
+                "--model", model_path,
+                "--output_file", output_path,
+                "--length-scale", str(length_scale)
+            ]
+            if config_param:
+                command.extend(config_param)
         
         logger.info(f"Running Piper command: {' '.join(command)}")
         
@@ -313,12 +409,21 @@ def status():
         "tts_engine_installed": PIPER_INSTALLED,
         "default_voice": SETTINGS.voice,
         "available_voices": AVAILABLE_VOICES,
-        "voice_count": len(AVAILABLE_VOICES)
+        "voice_count": len(AVAILABLE_VOICES),
+        "debug_info": {
+            "models_dir": PIPER_MODELS_DIR,
+            "piper_path": PIPER_BINARY_PATH,
+            "preferred_voices": PREFERRED_VOICES,
+            "voice_files_exist": [os.path.exists(os.path.join(PIPER_MODELS_DIR, f"{v}.onnx")) for v in PREFERRED_VOICES]
+        }
     }
 
 @app.get("/voices")
 def list_voices():
     """List all available voices"""
+    # Refresh the voice list to ensure it's up to date
+    find_voice_models()
+    
     return {
         "default_voice": SETTINGS.voice,
         "voices": AVAILABLE_VOICES
@@ -372,6 +477,9 @@ async def update_settings(
     emotion: Optional[str] = None
 ):
     """Update voice settings"""
+    # Refresh voice list to make sure we have the latest
+    find_voice_models()
+    
     if speed is not None:
         SETTINGS.speed = max(0.5, min(2.0, speed))
         
@@ -381,8 +489,18 @@ async def update_settings(
     if volume is not None:
         SETTINGS.volume = max(0.0, min(1.0, volume))
         
-    if voice is not None and voice in AVAILABLE_VOICES:
-        SETTINGS.voice = voice
+    if voice is not None:
+        if voice in AVAILABLE_VOICES:
+            SETTINGS.voice = voice
+        else:
+            # Try to find a close match
+            for available in AVAILABLE_VOICES:
+                if voice.lower() in available.lower():
+                    SETTINGS.voice = available
+                    logger.info(f"Using similar voice: {available} instead of {voice}")
+                    break
+            else:
+                logger.warning(f"Voice {voice} not available and no similar match found")
         
     if emotion is not None:
         SETTINGS.emotion = emotion
@@ -409,7 +527,8 @@ def get_settings():
         "pitch": SETTINGS.pitch,
         "volume": SETTINGS.volume,
         "voice": SETTINGS.voice,
-        "emotion": SETTINGS.emotion
+        "emotion": SETTINGS.emotion,
+        "available_voices": AVAILABLE_VOICES
     }
 
 def main():

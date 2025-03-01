@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-dev \
     wget \
     curl \
+    ca-certificates \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -34,36 +35,52 @@ RUN pip install --no-cache-dir -r voice_docker_requirements.txt
 # Install Piper TTS from pip instead of using the binary
 RUN pip install --no-cache-dir piper-tts
 
-# Download voice models from the preferred voices list in the API script
-RUN mkdir -p /app/models/piper && \
-    wget -O /app/models/piper/en_US-amy-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx" || echo "Amy model download failed" && \
-    wget -O /app/models/piper/en_US-amy-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx.json" || echo "Amy config download failed" && \
-    wget -O /app/models/piper/en_US-kathleen-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/kathleen/medium/en_US-kathleen-medium.onnx" || echo "Kathleen model download failed" && \
-    wget -O /app/models/piper/en_US-kathleen-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/kathleen/medium/en_US-kathleen-medium.onnx.json" || echo "Kathleen config download failed" && \
-    wget -O /app/models/piper/en_US-jenny-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/jenny/medium/en_US-jenny-medium.onnx" || echo "Jenny model download failed" && \
-    wget -O /app/models/piper/en_US-jenny-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/jenny/medium/en_US-jenny-medium.onnx.json" || echo "Jenny config download failed"
+# Update certificate authorities to avoid download issues
+RUN update-ca-certificates
 
-# Add a fallback voice if the preferred ones fail to download
+# Download voice models - improved with retry mechanism and verification
+RUN mkdir -p /app/models/piper && \
+    # Download Amy voice (primary)
+    (wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 5 -O /app/models/piper/en_US-amy-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx" && \
+    wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 5 -O /app/models/piper/en_US-amy-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/amy/medium/en_US-amy-medium.onnx.json") || echo "Amy voice download failed" && \
+    # Download Kathleen voice (alternative)
+    (wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 5 -O /app/models/piper/en_US-kathleen-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/kathleen/medium/en_US-kathleen-medium.onnx" && \
+    wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 5 -O /app/models/piper/en_US-kathleen-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/kathleen/medium/en_US-kathleen-medium.onnx.json") || echo "Kathleen voice download failed" && \
+    # Download Jenny voice (alternative)
+    (wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 5 -O /app/models/piper/en_US-jenny-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/jenny/medium/en_US-jenny-medium.onnx" && \
+    wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 5 -O /app/models/piper/en_US-jenny-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/jenny/medium/en_US-jenny-medium.onnx.json") || echo "Jenny voice download failed"
+
+# Add fallback voices if the preferred ones fail to download
 RUN ls -la /app/models/piper/ && \
     if [ ! -s /app/models/piper/en_US-amy-medium.onnx ] && [ ! -s /app/models/piper/en_US-kathleen-medium.onnx ] && [ ! -s /app/models/piper/en_US-jenny-medium.onnx ]; then \
-        echo "Downloading fallback voice model..." && \
-        wget -O /app/models/piper/en_US-lessac-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx" && \
-        wget -O /app/models/piper/en_US-lessac-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"; \
+        echo "Downloading fallback voice models..." && \
+        wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 5 -O /app/models/piper/en_US-lessac-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx" && \
+        wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 5 -O /app/models/piper/en_US-lessac-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json" && \
+        wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 5 -O /app/models/piper/en_GB-alan-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_GB/alan/medium/en_GB-alan-medium.onnx" && \
+        wget --retry-connrefused --waitretry=1 --read-timeout=20 --timeout=15 -t 5 -O /app/models/piper/en_GB-alan-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_GB/alan/medium/en_GB-alan-medium.onnx.json"; \
     fi
+
+# Verify downloaded models and print results
+RUN echo "Verifying downloaded models:" && \
+    ls -la /app/models/piper/ && \
+    echo "Model sizes:" && \
+    du -h /app/models/piper/*.onnx || echo "No models found"
 
 # Copy voice module code
 COPY voice_api.py .
 COPY voice_settings.json .
 
 # Update voice_settings.json with the best available voice
-RUN if [ -f /app/models/piper/en_US-amy-medium.onnx ]; then \
+RUN if [ -s /app/models/piper/en_US-amy-medium.onnx ]; then \
         sed -i 's/"voice": ".*"/"voice": "en_US-amy-medium"/' voice_settings.json; \
-    elif [ -f /app/models/piper/en_US-kathleen-medium.onnx ]; then \
+    elif [ -s /app/models/piper/en_US-kathleen-medium.onnx ]; then \
         sed -i 's/"voice": ".*"/"voice": "en_US-kathleen-medium"/' voice_settings.json; \
-    elif [ -f /app/models/piper/en_US-jenny-medium.onnx ]; then \
+    elif [ -s /app/models/piper/en_US-jenny-medium.onnx ]; then \
         sed -i 's/"voice": ".*"/"voice": "en_US-jenny-medium"/' voice_settings.json; \
-    elif [ -f /app/models/piper/en_US-lessac-medium.onnx ]; then \
+    elif [ -s /app/models/piper/en_US-lessac-medium.onnx ]; then \
         sed -i 's/"voice": ".*"/"voice": "en_US-lessac-medium"/' voice_settings.json; \
+    elif [ -s /app/models/piper/en_GB-alan-medium.onnx ]; then \
+        sed -i 's/"voice": ".*"/"voice": "en_GB-alan-medium"/' voice_settings.json; \
     fi
 
 # Expose API port
