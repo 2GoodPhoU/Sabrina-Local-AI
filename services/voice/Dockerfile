@@ -31,17 +31,16 @@ RUN pip install --no-cache-dir -r voice_docker_requirements.txt
 # Create necessary directories
 RUN mkdir -p /app/logs /app/models/piper
 
-# Build and install Piper from source
+# Build and install Piper from source with specific path handling
 RUN cd /tmp && \
     git clone https://github.com/rhasspy/piper.git && \
     cd piper && \
     git submodule update --init --recursive && \
-    mkdir build && \
+    mkdir -p build && \
     cd build && \
     cmake -DCMAKE_BUILD_TYPE=Release .. && \
     make -j$(nproc) && \
-    # Copy the binary directly to /app instead of /usr/local/bin
-    cp bin/piper /app/piper && \
+    find . -name "piper" -type f -executable -exec cp {} /app/piper \; && \
     chmod +x /app/piper && \
     cd / && \
     rm -rf /tmp/piper
