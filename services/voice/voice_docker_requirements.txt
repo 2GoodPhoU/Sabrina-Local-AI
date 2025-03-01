@@ -1,0 +1,21 @@
+# Core Dependencies
+fastapi
+uvicorn
+python-dotenv
+pydantic
+
+# Text-to-Speech
+TTS
+sounddevice
+soundfile
+
+# Audio Processing
+ffmpeg-python
+SpeechRecognition
+
+# Error Handling & Logging
+structlog
+
+# Testing
+pytest
+httpx

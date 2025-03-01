@@ -158,3 +158,108 @@ def test_speak_endpoint():
 
 ---
 This **highly detailed prompt** will ensure an AI assistant generates a **full-fledged Voice Module** for **Sabrina AI** with **proper architecture, documentation, API, security, testing, and deployment**. 🚀
+
+# Sabrina AI Voice Module
+
+## 🎙️ Overview
+The Sabrina AI Voice Module provides advanced Text-to-Speech (TTS) capabilities with a comprehensive API for voice generation, settings management, and audio processing.
+
+## 🌟 Key Features
+- 🔊 High-quality TTS using Coqui TTS
+- 🎛️ Configurable voice settings
+- 🚀 FastAPI-based microservice
+- 💾 Intelligent audio caching
+- 🔒 Secure settings management
+
+## 🛠️ Core Components
+1. **Voice Settings Manager**: Handles voice configuration persistence
+2. **TTS Engine**: Generates high-quality speech audio
+3. **Voice API**: RESTful endpoints for TTS and configuration
+4. **Voice API Client**: Programmatic interface for voice interactions
+
+## 📦 Installation
+
+### Prerequisites
+- Python 3.10+
+- PyTorch
+- Coqui TTS
+- FastAPI
+- Docker (optional)
+
+### Local Setup
+```bash
+# Install dependencies
+pip install -r voice_docker_requirements.txt
+
+# Run the Voice API
+uvicorn voice_api:app --host 0.0.0.0 --port 8100
+```
+
+### Docker Deployment
+```bash
+# Build Docker image
+docker build -t sabrina-voice-api -f voice.Dockerfile .
+
+# Run Docker container
+docker-compose up voice-service
+```
+
+## 🚀 API Endpoints
+
+### Voice Generation
+- `POST /speak`: Generate speech from text
+  ```json
+  {
+    "text": "Hello, I'm Sabrina!",
+    "voice": "en_US-amy-medium",
+    "volume": 0.8,
+    "speed": 1.0,
+    "pitch": 1.0,
+    "emotion": "neutral"
+  }
+  ```
+
+### Settings Management
+- `GET /settings`: Retrieve current voice settings
+- `POST /settings`: Update voice settings
+- `GET /voices`: List available voice models
+
+## 🔧 Voice Configuration
+Configurable parameters:
+- `voice`: Selected TTS voice model
+- `volume`: Audio volume (0.0-1.0)
+- `speed`: Speech speed (0.5-2.0)
+- `pitch`: Voice pitch (0.5-2.0)
+- `emotion`: Speech emotion style
+- `cache_enabled`: Enable speech audio caching
+
+## 🧪 Testing
+```bash
+# Run tests
+pytest tests/voice_module_test.py
+```
+
+## 🔒 Security
+- API key authentication
+- Encrypted settings storage
+- Input validation
+- Error handling
+
+## 📋 Roadmap
+- [ ] Multi-language support
+- [ ] More emotion styles
+- [ ] Advanced voice cloning
+- [ ] Machine learning-based voice adaptation
+
+## 🤝 Contributing
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## 📄 License
+MIT License
+
+## 🌐 Contact
+Sabrina AI Development Team
