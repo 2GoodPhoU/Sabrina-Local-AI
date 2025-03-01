@@ -1,165 +1,131 @@
-# Sabrina Voice API Docker Setup
+# Sabrina Voice API Service
 
-This directory contains a Docker-based voice synthesis service for Sabrina AI.
+## 🎙️ Overview
+A robust, containerized voice synthesis service for Sabrina AI, providing high-quality text-to-speech capabilities with advanced configuration and integration.
 
-## Features
-
-- REST API for text-to-speech conversion
-- Multiple TTS engines support (Edge TTS, Coqui TTS, pyttsx3)
-- Support for various emotions and voice styles
-- Dockerized for consistent deployment
-- Auto-start capability in the client
-
-## Setup Instructions
-
-### Prerequisites
-
-- Docker and Docker Compose installed
-- Python 3.7+ (for client)
-- Network connectivity for Docker container
-
-### Files
-
-The Docker setup consists of the following files:
-
-1. `Dockerfile` - Container definition
-2. `docker-compose.yml` - Service configuration
-3. `voice_docker_requirements.txt` - Python dependencies
-4. `voice_api.py` - The Voice API service
-5. `voice_settings.json` - Default voice settings
-
-### Installation
-
-1. Place all files in the `services/voice` directory
-2. Build and start the Docker container:
-
-```bash
-cd services/voice
-docker-compose up -d
+## 📂 Service Structure
+```
+/services/voice/
+│-- voice_api.py        # Main FastAPI service
+│-- voice_api_client.py # Client for voice interactions
+│-- Dockerfile          # Docker container configuration
+│-- docker-compose.yml  # Service orchestration
+│-- voice_settings.json # Default voice configuration
+│-- models/             # Voice model storage
+│   │-- piper/          # Piper TTS models
+│-- logs/               # Service log files
+│-- tests/              # Voice service tests
 ```
 
-3. Verify the service is running:
+## ✨ Features
 
-```bash
-curl http://localhost:8100/status
-```
+### 🔊 Voice Synthesis
+- Multiple TTS engines support
+- Configurable voice parameters
+- High-quality speech generation
+- Multi-voice selection
 
-## Using the Voice API
+### 🛠️ Technical Capabilities
+- REST API for voice interactions
+- Docker-based deployment
+- Piper TTS integration
+- Extensive voice model support
 
-### Direct API Calls
-
-```bash
-# Basic speech synthesis
-curl "http://localhost:8100/speak?text=Hello%20World"
-
-# With custom parameters
-curl "http://localhost:8100/speak?text=Hello%20World&speed=1.2&emotion=happy"
-```
-
-### Using the Python Client
-
-```python
-from services.voice.voice_api_client import VoiceAPIClient
-
-# Create client (will auto-start Docker container if needed)
-client = VoiceAPIClient()
-
-# Speak text
-client.speak("Hello, this is a test")
-
-# Change voice settings
-client.set_speed(1.5)
-client.set_emotion("happy")
-client.speak("This is faster and happier speech")
-```
-
-## Voice Settings
-
-The following settings can be configured:
-
-- `speed` (0.5-2.0): Speech rate
-- `pitch` (0.5-2.0): Voice pitch
-- `emotion` ("normal", "happy", "sad", "angry", "excited", "calm"): Emotional style
-- `voice`: Voice model/name (e.g., "en-US-JennyNeural" for Edge TTS)
-- `volume` (0.0-1.0): Audio volume
-
-## Troubleshooting
-
-### Container Won't Start
-
-Check Docker logs:
-```bash
-docker-compose logs voice-api
-```
-
-### API Not Responding
-
-Ensure ports are properly mapped:
-```bash
-docker-compose ps
-```
-
-### Audio Not Playing
-
-Ensure audio devices are properly mapped in docker-compose.yml:
-```yaml
-devices:
-  - /dev/snd:/dev/snd
-```
-
-On Windows, you may need to install additional audio drivers for Docker.
-
-### Client Can't Connect to Container
-
-Make sure port 8100 is exposed and not blocked by a firewall:
-```bash
-docker-compose ps
-netstat -tuln | grep 8100
-```
-
-## Advanced Configuration
-
-### Changing the Default Voice
-
-Edit `voice_settings.json`:
+### 🔧 Configuration Options
 ```json
 {
   "speed": 1.0,
   "pitch": 1.0,
   "emotion": "normal",
   "volume": 0.8,
-  "voice": "en-US-JennyNeural"
+  "voice": "en_US-amy-medium"
 }
 ```
 
-### Available Voices (Edge TTS)
+## 🚀 Installation & Setup
 
-Some popular Edge TTS voices:
-- `en-US-JennyNeural` - Female American English
-- `en-US-GuyNeural` - Male American English
-- `en-GB-SoniaNeural` - Female British English
-- `en-AU-NatashaNeural` - Female Australian English
+### Prerequisites
+- Docker
+- Docker Compose
+- Python 3.10+
 
-### Custom TTS Engine Selection
-
-You can modify the `tts_type` variable in `voice_api.py` to prefer a specific TTS engine:
-```python
-tts_type = "edge-tts"  # Options: "edge-tts", "coqui-tts", "pyttsx3"
-```
-
-## Updating the Service
-
-To update the service with new code:
-
-1. Copy the updated files to the service directory
-2. Rebuild and restart the container:
-
+### Docker Deployment
 ```bash
-docker-compose down
-docker-compose build --no-cache
+# Build and start the service
+docker-compose build
 docker-compose up -d
 ```
 
-## License
+### Manual Setup
+```bash
+# Install dependencies
+pip install -r requirements.txt
 
-This Voice API service is part of the Sabrina AI project and is available under the same license as the main project.
+# Start the voice API
+python voice_api.py
+```
+
+## 📡 API Endpoints
+
+### Status Check
+```bash
+GET /status
+```
+- Returns service health and configuration
+
+### List Voices
+```bash
+GET /voices
+```
+- Retrieves available voice models
+
+### Generate Speech
+```bash
+GET /speak?text=Hello%20World&voice=en_US-amy-medium&speed=1.0
+```
+- Synthesizes speech with optional parameters
+
+### Update Settings
+```bash
+POST /update_settings
+{
+  "speed": 1.2,
+  "pitch": 1.0,
+  "voice": "en_US-jenny-medium"
+}
+```
+- Dynamically update voice synthesis settings
+
+## 🎙️ Available Voices
+- `en_US-amy-medium`
+- `en_US-kathleen-medium`
+- `en_US-jenny-medium`
+
+## 🐞 Troubleshooting
+- Check Docker logs: `docker-compose logs voice-api`
+- Verify port mapping
+- Ensure audio devices are configured
+
+## 🤝 Contributing
+1. Fork the repository
+2. Create a feature branch
+3. Implement changes
+4. Submit a pull request
+
+## 📋 Testing
+```bash
+# Run voice module tests
+python -m pytest tests/voice_module_test.py
+
+# Debug voice models
+python services/voice/voice_debug.py
+```
+
+## 🔬 Future Improvements
+- Multi-language support
+- Enhanced emotion detection
+- Advanced voice cloning
+- Improved audio processing
+
+## 📄 License
+MIT License
