@@ -10,7 +10,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpiper1 \
     build-essential \
     libsndfile1 \
     ffmpeg \
@@ -19,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     curl \
     cmake \
+    pkg-config \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -31,26 +31,26 @@ RUN pip install --no-cache-dir -r voice_docker_requirements.txt
 # Create necessary directories
 RUN mkdir -p /app/logs /app/models/piper
 
-# Install Piper TTS
+# Build and install Piper from source
 RUN cd /tmp && \
     git clone https://github.com/rhasspy/piper.git && \
     cd piper && \
-    git submodule update --init && \
+    git submodule update --init --recursive && \
     mkdir build && \
     cd build && \
-    cmake -DBUILD_SHARED_LIBS=ON .. && \
-    make -j4 && \
-    cp ./piper /app/piper && \
+    cmake -DCMAKE_BUILD_TYPE=Release .. && \
+    make -j$(nproc) && \
+    # Copy the binary directly to /app instead of /usr/local/bin
+    cp bin/piper /app/piper && \
+    chmod +x /app/piper && \
+    cd / && \
     rm -rf /tmp/piper
 
-# Download Amy TTS model and explicitly verify it exists
-RUN mkdir -p /app/models/piper && \
-    cd /app/models/piper && \
-    echo "Downloading Amy voice model..." && \
-    curl -LO "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx" && \
-    curl -LO "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json" && \
-    ls -la && \
-    test -f "en_US-amy-medium.onnx" || (echo "ERROR: Amy model failed to download" && exit 1)
+# Download Amy TTS model
+RUN wget -O /app/models/piper/en_US-amy-medium.onnx "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx" && \
+    wget -O /app/models/piper/en_US-amy-medium.onnx.json "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json" && \
+    # Verify files were downloaded correctly
+    ls -la /app/models/piper/
 
 # Copy voice module code
 COPY voice_api.py .
