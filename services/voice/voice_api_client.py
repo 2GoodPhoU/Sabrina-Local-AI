@@ -1,8 +1,8 @@
 """
-Enhanced Voice API Client for Sabrina AI with Piper TTS Support
+Enhanced Voice API Client for Sabrina AI
 =======================================
-This module provides an improved client for interacting with the Voice API service
-using Piper TTS for high-quality, offline text-to-speech.
+A more efficient client for voice synthesis with better error handling,
+caching, and improved voice model selection.
 """
 
 import os
@@ -15,43 +15,30 @@ import tempfile
 import subprocess
 import threading
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
 
 # Setup logger
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("voice_api_client")
+logger = logging.getLogger("voice_client")
 
 class VoiceAPIClient:
     """
-    Enhanced client for the Voice API service with Piper TTS support.
-    
-    This client handles:
-    - Communication with the Voice API using Piper TTS
-    - Text-to-speech requests with event notifications
-    - Hidden audio playback
-    - Voice configuration settings management
-    - Integration with the Sabrina event system
+    Enhanced client for the Voice API with improved reliability and performance.
     """
     
     def __init__(self, api_url: str = "http://localhost:8100", event_bus=None, auto_start=True):
-        """
-        Initialize the Voice API client
-        
-        Args:
-            api_url: Base URL for the Voice API service
-            event_bus: Event bus instance for sending/receiving events
-            auto_start: Whether to automatically start the Voice API if not running
-        """
+        """Initialize the Voice API client"""
         self.api_url = api_url.rstrip('/')
         self.event_bus = event_bus
         self.auto_start = auto_start
-        self.last_request_time = 0
-        self.last_audio_file = None
         self.connected = False
         self.retries = 3
-        self.retry_delay = 1.0  # seconds
-        self.timeout = 10.0  # seconds
+        self.retry_delay = 1.0
+        self.timeout = 10.0
         self.available_voices = []
+        self.last_audio_file = None
+        self.audio_cache = {}  # Simple cache for repeated phrases
+        self.max_cache_size = 10
         
         # Voice settings
         self.settings = {
@@ -65,37 +52,65 @@ class VoiceAPIClient:
         # Find project root directory
         self.project_dir = self._find_project_root()
         
-        # Load settings from file if available
+        # Load settings
         self._load_settings()
         
-        logger.info(f"Enhanced Voice API client initialized with API URL: {api_url}")
-        
-        # Check connection and auto-start if needed
+        # Check connection
         self.test_connection()
         
-        # Register for voice events if event bus is provided
+        # Register event handlers if event bus is provided
         if self.event_bus:
             self._register_event_handlers()
     
-    def _find_project_root(self):
+    def _find_project_root(self) -> Path:
         """Find the project root directory"""
         # Start with the directory of this file
         current_dir = Path(os.path.abspath(__file__)).parent
         
         # Go up until we find a recognizable project structure
-        for _ in range(5):  # Don't go up more than 5 levels
-            # Check if this looks like the project root
-            if (current_dir / "services").exists() and (current_dir / "scripts").exists():
+        for _ in range(4):  # Limit the search to 4 levels up
+            if (current_dir / "services").exists() or (current_dir / "scripts").exists():
                 return current_dir
-            
-            # Go up one level
             parent_dir = current_dir.parent
-            if parent_dir == current_dir:  # We've reached the filesystem root
+            if parent_dir == current_dir:  # Reached filesystem root
                 break
             current_dir = parent_dir
         
-        # Fallback to the current working directory
+        # Fallback to current directory
         return Path(os.getcwd())
+    
+    def _load_settings(self):
+        """Load voice settings from file"""
+        settings_file = os.path.join(self.project_dir, "config/voice_settings.json")
+        if os.path.exists(settings_file):
+            try:
+                with open(settings_file, 'r') as f:
+                    saved_settings = json.load(f)
+                
+                # Update settings with saved values
+                for key, value in saved_settings.items():
+                    if key in self.settings:
+                        self.settings[key] = value
+                
+                logger.debug("Loaded voice settings from file")
+            except Exception as e:
+                logger.error(f"Failed to load voice settings: {str(e)}")
+    
+    def _save_settings(self):
+        """Save current voice settings to file"""
+        try:
+            # Ensure config directory exists
+            config_dir = os.path.join(self.project_dir, "config")
+            os.makedirs(config_dir, exist_ok=True)
+            
+            # Save settings to file
+            settings_file = os.path.join(config_dir, "voice_settings.json")
+            with open(settings_file, 'w') as f:
+                json.dump(self.settings, f, indent=2)
+            
+            logger.debug("Saved voice settings to file")
+        except Exception as e:
+            logger.error(f"Failed to save voice settings: {str(e)}")
     
     def _register_event_handlers(self):
         """Register handlers for voice-related events"""
@@ -116,12 +131,7 @@ class VoiceAPIClient:
             logger.error(f"Failed to register event handlers: {str(e)}")
     
     def _handle_voice_event(self, event):
-        """
-        Handle voice events from the event system
-        
-        Args:
-            event: Voice event with text to speak
-        """
+        """Handle voice events from the event system"""
         # Extract text from event data
         text = event.data.get("text", "")
         if not text:
@@ -164,41 +174,65 @@ class VoiceAPIClient:
             except Exception as e:
                 logger.error(f"Failed to post voice result event: {str(e)}")
     
-    def _load_settings(self):
-        """Load voice settings from file"""
-        settings_file = os.path.join(self.project_dir, "config/voice_settings.json")
-        if os.path.exists(settings_file):
-            try:
-                with open(settings_file, 'r') as f:
-                    saved_settings = json.load(f)
-                
-                # Update settings with saved values
-                for key, value in saved_settings.items():
-                    if key in self.settings:
-                        self.settings[key] = value
-                
-                logger.info("Loaded voice settings from file")
-            except Exception as e:
-                logger.error(f"Failed to load voice settings: {str(e)}")
-    
-    def _save_settings(self):
-        """Save current voice settings to file"""
+    def test_connection(self) -> bool:
+        """Test the connection to the Voice API service"""
         try:
-            # Ensure config directory exists
-            config_dir = os.path.join(self.project_dir, "config")
-            os.makedirs(config_dir, exist_ok=True)
+            response = requests.get(f"{self.api_url}/status", timeout=self.timeout)
+            self.connected = response.status_code == 200
             
-            # Save settings to file
-            settings_file = os.path.join(config_dir, "voice_settings.json")
-            with open(settings_file, 'w') as f:
-                json.dump(self.settings, f, indent=2)
+            if self.connected:
+                logger.info("Successfully connected to Voice API service")
+                
+                # Fetch available voices
+                self._fetch_available_voices()
+                return True
             
-            logger.info("Saved voice settings to file")
-        except Exception as e:
-            logger.error(f"Failed to save voice settings: {str(e)}")
+            # Try to start the service if auto-start is enabled
+            if self.auto_start and not self.connected:
+                logger.info("Attempting to start Voice API service...")
+                self.start_voice_service()
+                
+                # Retry connection
+                time.sleep(3)  # Wait for service to start
+                response = requests.get(f"{self.api_url}/status", timeout=self.timeout)
+                self.connected = response.status_code == 200
+                
+                if self.connected:
+                    logger.info("Successfully connected to Voice API service after auto-start")
+                    self._fetch_available_voices()
+                    return True
+            
+            logger.warning("Failed to connect to Voice API service")
+            return False
+            
+        except requests.RequestException as e:
+            logger.error(f"Error connecting to Voice API: {str(e)}")
+            
+            if self.auto_start:
+                logger.info("Attempting to start Voice API service...")
+                self.start_voice_service()
+                
+                # Retry connection
+                try:
+                    time.sleep(3)  # Wait for service to start
+                    response = requests.get(f"{self.api_url}/status", timeout=self.timeout)
+                    self.connected = response.status_code == 200
+                    
+                    if self.connected:
+                        logger.info("Successfully connected to Voice API service after auto-start")
+                        self._fetch_available_voices()
+                        return True
+                except:
+                    pass
+            
+            self.connected = False
+            return False
     
-    def _fetch_available_voices(self):
+    def _fetch_available_voices(self) -> List[str]:
         """Fetch available voices from the API"""
+        if not self.connected:
+            return []
+            
         try:
             response = requests.get(f"{self.api_url}/voices", timeout=self.timeout)
             if response.status_code == 200:
@@ -214,262 +248,128 @@ class VoiceAPIClient:
                     elif self.available_voices:
                         self.settings["voice"] = self.available_voices[0]
                         
-                logger.info(f"Fetched {len(self.available_voices)} available voices")
                 logger.info(f"Using voice: {self.settings['voice']}")
                 return self.available_voices
-                
-            else:
-                logger.error(f"Failed to fetch voices: HTTP {response.status_code}")
         except Exception as e:
             logger.error(f"Failed to fetch available voices: {str(e)}")
         
         return []
     
-    def start_voice_service(self, timeout=60, check_interval=1.0):
-        """
-        Start the Voice API service in Docker if it's not already running
-        
-        Args:
-            timeout: Maximum time to wait for service (seconds)
-            check_interval: Interval between status checks (seconds)
-            
-        Returns:
-            bool: True if service is running, False otherwise
-        """
-        # Find the voice service docker directory
-        voice_docker_dir = os.path.join(self.project_dir, "services/voice")
-        
-        if not os.path.exists(voice_docker_dir):
-            logger.error(f"Voice service docker directory not found: {voice_docker_dir}")
+    def start_voice_service(self, timeout=30) -> bool:
+        """Start the Voice API service using Docker or direct run"""
+        # Try to find and start the voice service
+        voice_service_path = self._find_voice_service()
+        if not voice_service_path:
+            logger.error("Voice service not found")
             return False
-        
+            
         try:
-            # Check if service is already running
-            logger.info("Checking if Voice API is already running...")
-            try:
-                response = requests.get(f"{self.api_url}/status", timeout=3.0)
-                if response.status_code == 200:
-                    logger.info("Voice API is already running")
-                    return True
-            except requests.RequestException:
-                logger.info("Voice API is not running, starting it now")
-            
-            # Start the service using docker-compose
-            logger.info("Starting Voice API service with Docker Compose...")
-            
-            # Change to the voice service directory
-            original_dir = os.getcwd()
-            os.chdir(voice_docker_dir)
-            
-            try:
-                # First try to build the container to ensure it's up to date
-                subprocess.run(
-                    ["docker-compose", "build", "--no-cache"],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    check=True
-                )
+            # Try running with Docker first
+            if self._start_with_docker(voice_service_path):
+                return True
                 
-                # Run docker-compose up
-                process = subprocess.Popen(
-                    ["docker-compose", "up", "-d"],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
-                )
-                stdout, stderr = process.communicate()
+            # If Docker fails, try direct Python run
+            if self._start_direct(voice_service_path):
+                return True
                 
-                if process.returncode != 0:
-                    logger.error(f"Failed to start Voice API with Docker Compose: {stderr.decode()}")
-                    return False
-                
-                logger.info("Docker Compose started successfully")
-            finally:
-                # Restore original directory
-                os.chdir(original_dir)
+            logger.error("Failed to start voice service")
+            return False
+        except Exception as e:
+            logger.error(f"Error starting voice service: {str(e)}")
+            return False
+    
+    def _find_voice_service(self) -> Optional[str]:
+        """Find the voice service directory"""
+        # Check common locations
+        possible_paths = [
+            os.path.join(self.project_dir, "services/voice"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)))
+        ]
+        
+        for path in possible_paths:
+            if os.path.exists(os.path.join(path, "voice_api.py")):
+                return path
+        
+        return None
+    
+    def _start_with_docker(self, service_path: str) -> bool:
+        """Try to start the service with Docker"""
+        if not os.path.exists(os.path.join(service_path, "docker-compose.yml")):
+            return False
             
-            # Wait for service to start with progress indicator
-            logger.info(f"Waiting for Voice API to start (timeout: {timeout}s)...")
-            start_time = time.time()
+        try:
+            # Run docker-compose up
+            subprocess.run(
+                ["docker-compose", "up", "-d"],
+                cwd=service_path,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
             
-            print("Starting Voice API in Docker", end="", flush=True)
-            
-            while time.time() - start_time < timeout:
-                print(".", end="", flush=True)
-                
-                # Check if service is running
+            # Check if it started
+            for _ in range(10):
+                time.sleep(1)
                 try:
                     response = requests.get(f"{self.api_url}/status", timeout=2.0)
                     if response.status_code == 200:
-                        print()  # New line after dots
-                        logger.info("Voice API started successfully in Docker")
+                        logger.info("Voice API started successfully with Docker")
                         return True
-                except requests.RequestException:
-                    # Service not ready yet, continue waiting
+                except:
                     pass
-                
-                time.sleep(check_interval)
+        except:
+            pass
             
-            print()  # New line after dots
-            logger.warning(f"Voice API did not start within the timeout period ({timeout}s)")
-            return False
-            
-        except Exception as e:
-            logger.error(f"Failed to start Voice API: {str(e)}")
-            return False
+        return False
     
-    def test_connection(self) -> bool:
-        """
-        Test the connection to the Voice API service, and start it if needed
-        
-        Returns:
-            bool: True if connected, False otherwise
-        """
-        try:
-            response = requests.get(f"{self.api_url}/status", timeout=self.timeout)
-            self.connected = response.status_code == 200
-            
-            if self.connected:
-                logger.info("Successfully connected to Voice API service")
-                
-                # Fetch available voices
-                self._fetch_available_voices()
-                
-                # If connected and event bus is available, post status event
-                if self.event_bus and hasattr(self.event_bus, 'post_event'):
-                    try:
-                        from utilities.event_system import Event, EventType, EventPriority
-                        
-                        # Post status event
-                        self.event_bus.post_event(
-                            Event(
-                                event_type=EventType.COMPONENT_STATUS,
-                                data={
-                                    "component": "voice",
-                                    "status": "connected",
-                                    "url": self.api_url,
-                                    "tts_engine": "piper",
-                                    "available_voices": len(self.available_voices)
-                                },
-                                source="voice_client"
-                            )
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to post status event: {str(e)}")
-                
-                return True
-            else:
-                logger.warning(f"Voice API connection test failed: {response.status_code}")
-                
-                # Try to start the service if auto-start is enabled
-                if self.auto_start:
-                    logger.info("Auto-starting Voice API service in Docker...")
-                    service_started = self.start_voice_service()
-                    
-                    if service_started:
-                        self.connected = True
-                        # Fetch available voices
-                        self._fetch_available_voices()
-                        return True
-                
-                # If not connected and event bus is available, post status event
-                if self.event_bus and hasattr(self.event_bus, 'post_event'):
-                    try:
-                        from utilities.event_system import Event, EventType, EventPriority
-                        
-                        # Post status event
-                        self.event_bus.post_event(
-                            Event(
-                                event_type=EventType.COMPONENT_STATUS,
-                                data={
-                                    "component": "voice",
-                                    "status": "disconnected",
-                                    "url": self.api_url,
-                                    "error": f"Failed to connect: {response.status_code}"
-                                },
-                                source="voice_client",
-                                priority=EventPriority.HIGH
-                            )
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to post status event: {str(e)}")
-                
-                return False
-                
-        except requests.RequestException as e:
-            logger.error(f"Failed to connect to Voice API: {str(e)}")
-            self.connected = False
-            
-            # Try to start the service if auto-start is enabled
-            if self.auto_start:
-                logger.info("Auto-starting Voice API service in Docker...")
-                service_started = self.start_voice_service()
-                
-                if service_started:
-                    # Retry connection
-                    try:
-                        response = requests.get(f"{self.api_url}/status", timeout=self.timeout)
-                        self.connected = response.status_code == 200
-                        if self.connected:
-                            # Fetch available voices
-                            self._fetch_available_voices()
-                        return self.connected
-                    except:
-                        pass
-            
-            # If not connected and event bus is available, post status event
-            if self.event_bus and hasattr(self.event_bus, 'post_event'):
-                try:
-                    from utilities.event_system import Event, EventType, EventPriority
-                    
-                    # Post status event
-                    self.event_bus.post_event(
-                        Event(
-                            event_type=EventType.COMPONENT_STATUS,
-                            data={
-                                "component": "voice",
-                                "status": "error",
-                                "url": self.api_url,
-                                "error": str(e)
-                            },
-                            source="voice_client",
-                            priority=EventPriority.HIGH
-                        )
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to post status event: {str(e)}")
-            
+    def _start_direct(self, service_path: str) -> bool:
+        """Try to start the service directly with Python"""
+        api_script = os.path.join(service_path, "voice_api.py")
+        if not os.path.exists(api_script):
             return False
+            
+        try:
+            # Start the process in the background
+            if sys.platform == 'win32':
+                subprocess.Popen(
+                    ["start", "python", api_script],
+                    shell=True
+                )
+            else:
+                subprocess.Popen(
+                    ["python", api_script],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+            
+            # Check if it started
+            for _ in range(10):
+                time.sleep(1)
+                try:
+                    response = requests.get(f"{self.api_url}/status", timeout=2.0)
+                    if response.status_code == 200:
+                        logger.info("Voice API started successfully with Python")
+                        return True
+                except:
+                    pass
+        except:
+            pass
+            
+        return False
     
     def speak(self, text: str) -> Optional[str]:
-        """
-        Send text to the Voice API for TTS processing and play the resulting audio
-        
-        Args:
-            text: Text to convert to speech
-            
-        Returns:
-            str: Path to the generated audio file, or None if failed
-        """
-        if not text or not isinstance(text, str) or not text.strip():
-            logger.warning("Empty or invalid text provided to speak function")
+        """Send text to the Voice API for TTS processing and play the audio"""
+        if not text or len(text.strip()) == 0:
             return None
-        
-        # Log the request
-        logger.info(f"Sending TTS request: {text[:50]}{'...' if len(text) > 50 else ''}")
-        
-        # Check if we're connected, try to connect if not
+            
+        # Check if connected, try to connect if not
         if not self.connected:
-            logger.info("Not connected to Voice API, attempting to connect")
             connected = self.test_connection()
             if not connected:
-                logger.error("Failed to connect to Voice API")
+                logger.error("Not connected to Voice API")
                 return None
         
-        # Ensure we have a voice selected
-        if not self.settings.get("voice") and self.available_voices:
-            logger.info(f"No voice selected, using first available: {self.available_voices[0]}")
-            self.settings["voice"] = self.available_voices[0]
-            
         # Post event about starting speech if event bus is available
         if self.event_bus and hasattr(self.event_bus, 'post_event'):
             try:
@@ -487,15 +387,23 @@ class VoiceAPIClient:
                     )
                 )
             except Exception as e:
-                logger.error(f"Failed to post speech start event: {str(e)}")
+                logger.error(f"Failed to post event: {str(e)}")
         
-        # Rate limiting - avoid sending requests too quickly
-        elapsed = time.time() - self.last_request_time
-        if elapsed < 0.1:  # Minimum 100ms between requests
-            time.sleep(0.1 - elapsed)
-        
-        # Update last request time
-        self.last_request_time = time.time()
+        # First check the cache
+        cache_key = f"{text}_{self.settings['voice']}_{self.settings['speed']}"
+        if cache_key in self.audio_cache:
+            cached_file = self.audio_cache[cache_key]
+            if os.path.exists(cached_file):
+                logger.debug(f"Using cached audio for '{text[:20]}...'")
+                self._play_audio(cached_file)
+                
+                # Update last audio file
+                self.last_audio_file = cached_file
+                
+                # Post completion event
+                self._post_completion_event(text, cached_file)
+                
+                return cached_file
         
         # Try to generate speech with retries
         for attempt in range(self.retries):
@@ -505,7 +413,6 @@ class VoiceAPIClient:
                     "text": text,
                     "speed": self.settings.get("speed", 1.0),
                     "pitch": self.settings.get("pitch", 1.0),
-                    "emotion": self.settings.get("emotion", "normal"),
                     "voice": self.settings.get("voice"),
                     "volume": self.settings.get("volume", 0.8)
                 }
@@ -518,21 +425,21 @@ class VoiceAPIClient:
                 )
                 
                 if response.status_code == 200:
-                    # Check content type
-                    content_type = response.headers.get('Content-Type', '')
-                    is_mp3 = 'audio/mpeg' in content_type
-                    is_wav = 'audio/wav' in content_type or 'audio/x-wav' in content_type
-                    
-                    # Default to WAV for Piper
-                    if not is_mp3 and not is_wav:
-                        is_wav = True  # Assume WAV for Piper
-                    
-                    # Save audio to temporary file
-                    audio_file = self._save_audio(response.content, is_mp3)
+                    # Save audio to file
+                    audio_file = self._save_audio(response.content)
                     if audio_file:
-                        # Play audio in a separate thread to avoid blocking
+                        # Cache the audio file
+                        self.audio_cache[cache_key] = audio_file
+                        
+                        # Limit cache size
+                        if len(self.audio_cache) > self.max_cache_size:
+                            # Remove oldest entry
+                            oldest_key = next(iter(self.audio_cache))
+                            del self.audio_cache[oldest_key]
+                        
+                        # Play audio in a separate thread
                         threading.Thread(
-                            target=self._play_audio_hidden, 
+                            target=self._play_audio, 
                             args=(audio_file,),
                             daemon=True
                         ).start()
@@ -540,25 +447,8 @@ class VoiceAPIClient:
                         # Store last audio file
                         self.last_audio_file = audio_file
                         
-                        # Post event about completed speech if event bus is available
-                        if self.event_bus and hasattr(self.event_bus, 'post_event'):
-                            try:
-                                from utilities.event_system import Event, EventType
-                                
-                                # Post speech completed event
-                                self.event_bus.post_event(
-                                    Event(
-                                        event_type=EventType.VOICE_STATUS,
-                                        data={
-                                            "status": "speaking_completed",
-                                            "text": text,
-                                            "audio_file": audio_file
-                                        },
-                                        source="voice_client"
-                                    )
-                                )
-                            except Exception as e:
-                                logger.error(f"Failed to post speech completed event: {str(e)}")
+                        # Post completion event
+                        self._post_completion_event(text, audio_file)
                         
                         return audio_file
                     else:
@@ -588,9 +478,100 @@ class VoiceAPIClient:
                     time.sleep(self.retry_delay)
         
         # All retries failed
-        logger.error(f"Failed to generate speech after {self.retries} attempts")
+        logger.error("Failed to generate speech after all retries")
         
-        # Post event about failed speech if event bus is available
+        # Post event about failed speech
+        self._post_failure_event(text)
+        
+        return None
+    
+    def _save_audio(self, audio_data: bytes) -> Optional[str]:
+        """Save audio data to a temporary file"""
+        try:
+            # Create temporary file with appropriate extension (WAV)
+            fd, temp_path = tempfile.mkstemp(suffix='.wav')
+            os.close(fd)
+            
+            with open(temp_path, 'wb') as f:
+                f.write(audio_data)
+            
+            logger.debug(f"Saved audio to {temp_path}")
+            return temp_path
+            
+        except Exception as e:
+            logger.error(f"Error saving audio file: {str(e)}")
+            return None
+    
+    def _play_audio(self, audio_file: str):
+        """Play an audio file using the appropriate player for the platform"""
+        if not os.path.exists(audio_file):
+            logger.error(f"Audio file not found: {audio_file}")
+            return
+        
+        try:
+            # Choose player based on platform
+            if sys.platform == 'win32':  # Windows
+                # Use PowerShell to play audio
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0  # SW_HIDE
+                
+                # PowerShell command to play WAV file
+                cmd = f'[System.Media.SoundPlayer]::new("{audio_file}").PlaySync()'
+                
+                subprocess.Popen(
+                    ["powershell", "-Command", cmd],
+                    startupinfo=startupinfo,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
+                
+            elif sys.platform == 'darwin':  # macOS
+                subprocess.Popen(['afplay', audio_file], 
+                                stdout=subprocess.DEVNULL, 
+                                stderr=subprocess.DEVNULL)
+                
+            else:  # Linux and others
+                # Try different players
+                players = ['aplay', 'paplay', 'ffplay', 'mplayer']
+                
+                for player in players:
+                    try:
+                        subprocess.Popen([player, audio_file], 
+                                        stdout=subprocess.DEVNULL, 
+                                        stderr=subprocess.DEVNULL)
+                        break
+                    except FileNotFoundError:
+                        continue
+            
+            logger.debug(f"Playing audio file: {audio_file}")
+            
+        except Exception as e:
+            logger.error(f"Error playing audio file: {str(e)}")
+    
+    def _post_completion_event(self, text: str, audio_file: str):
+        """Post event about completed speech"""
+        if self.event_bus and hasattr(self.event_bus, 'post_event'):
+            try:
+                from utilities.event_system import Event, EventType
+                
+                # Post speech completed event
+                self.event_bus.post_event(
+                    Event(
+                        event_type=EventType.VOICE_STATUS,
+                        data={
+                            "status": "speaking_completed",
+                            "text": text,
+                            "audio_file": audio_file
+                        },
+                        source="voice_client"
+                    )
+                )
+            except Exception as e:
+                logger.error(f"Failed to post completion event: {str(e)}")
+    
+    def _post_failure_event(self, text: str):
+        """Post event about failed speech"""
         if self.event_bus and hasattr(self.event_bus, 'post_event'):
             try:
                 from utilities.event_system import Event, EventType, EventPriority
@@ -609,153 +590,11 @@ class VoiceAPIClient:
                     )
                 )
             except Exception as e:
-                logger.error(f"Failed to post speech failed event: {str(e)}")
-        
-        return None
-    
-    def _save_audio(self, audio_data: bytes, is_mp3: bool = False) -> Optional[str]:
-        """
-        Save audio data to a temporary file
-        
-        Args:
-            audio_data: Raw audio data
-            is_mp3: Whether the data is in MP3 format
-            
-        Returns:
-            str: Path to the saved audio file, or None if failed
-        """
-        try:
-            # Determine file extension based on first few bytes if not specified
-            if not is_mp3 and len(audio_data) > 4:
-                # Check WAV header (RIFF)
-                is_wav = audio_data[0:4] == b'RIFF'
-                is_mp3 = audio_data[0:2] == b'\xFF\xFB' or audio_data[0:3] == b'ID3'
-            else:
-                is_wav = not is_mp3
-            
-            # Create a temporary file with appropriate extension
-            suffix = '.mp3' if is_mp3 else '.wav'
-            fd, temp_path = tempfile.mkstemp(suffix=suffix)
-            os.close(fd)
-            
-            with open(temp_path, 'wb') as f:
-                f.write(audio_data)
-            
-            logger.debug(f"Saved audio to {temp_path}")
-            return temp_path
-            
-        except Exception as e:
-            logger.error(f"Error saving audio file: {str(e)}")
-            return None
-    
-    def _play_audio_hidden(self, audio_file: str) -> bool:
-        """
-        Play an audio file using an appropriate player, hidden from view
-        
-        Args:
-            audio_file: Path to the audio file
-            
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        if not os.path.exists(audio_file):
-            logger.error(f"Audio file not found: {audio_file}")
-            return False
-        
-        try:
-            # Play audio based on platform with hidden window
-            if sys.platform == 'win32':  # Windows
-                # On Windows, use a more compatible approach
-                is_mp3 = audio_file.lower().endswith('.mp3')
-                
-                if is_mp3:
-                    # For MP3, use PowerShell's MediaPlayer
-                    file_path = audio_file.replace("\\", "/")
-                    cmd = f'Add-Type -AssemblyName PresentationCore; ' \
-                        f'$mediaPlayer = New-Object System.Windows.Media.MediaPlayer; ' \
-                        f'$mediaPlayer.Open("file:///{file_path}"); ' \
-                        f'$mediaPlayer.Play(); ' \
-                        f'Start-Sleep -s 5; '
-                else:
-                    # Escape PowerShell's curly braces by doubling them
-                    ps_audio_file = audio_file.replace("\\", "\\\\")  # Double backslashes for PowerShell
-                    cmd = f'[System.Reflection.Assembly]::LoadWithPartialName("System.Media") | Out-Null; ' \
-                        f'if (Test-Path "{ps_audio_file}") {{ ' \
-                        f'  $soundFile = New-Object System.IO.FileStream("{ps_audio_file}", [System.IO.FileMode]::Open); ' \
-                        f'  $soundPlayer = New-Object System.Media.SoundPlayer($soundFile); ' \
-                        f'  try {{ $soundPlayer.PlaySync(); }} ' \
-                        f'  finally {{ $soundFile.Close(); }} ' \
-                        f'}} else {{ ' \
-                        f'  Write-Error "File not found: {ps_audio_file}"; ' \
-                        f'}}'
-                
-                # Hide the window
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = 0  # SW_HIDE
-                
-                subprocess.Popen(
-                    ["powershell", "-Command", cmd],
-                    startupinfo=startupinfo,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
-                )
-                
-            elif sys.platform == 'darwin':  # macOS
-                # On macOS, use afplay which runs in terminal without UI
-                subprocess.Popen(['afplay', audio_file], 
-                                stdout=subprocess.DEVNULL, 
-                                stderr=subprocess.DEVNULL)
-                
-            else:  # Linux and others
-                # On Linux, try different players, starting with the most lightweight
-                players = ['aplay', 'paplay', 'ffplay', 'mpg123', 'mplayer']
-                
-                # Use appropriate player based on file type
-                is_mp3 = audio_file.lower().endswith('.mp3')
-                
-                # MP3 files need different players
-                if is_mp3:
-                    mp3_players = ['mpg123', 'mplayer', 'ffplay']
-                    for player in mp3_players:
-                        try:
-                            subprocess.Popen([player, audio_file], 
-                                            stdout=subprocess.DEVNULL, 
-                                            stderr=subprocess.DEVNULL)
-                            break
-                        except FileNotFoundError:
-                            continue
-                else:
-                    # WAV players
-                    wav_players = ['aplay', 'paplay', 'ffplay']
-                    for player in wav_players:
-                        try:
-                            subprocess.Popen([player, '-q', audio_file], 
-                                            stdout=subprocess.DEVNULL, 
-                                            stderr=subprocess.DEVNULL)
-                            break
-                        except FileNotFoundError:
-                            continue
-            
-            logger.debug(f"Playing audio file (hidden): {audio_file}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error playing audio file: {str(e)}")
-            return False
+                logger.error(f"Failed to post failure event: {str(e)}")
     
     def update_settings(self, settings: Dict[str, Any]) -> bool:
-        """
-        Update voice settings
-        
-        Args:
-            settings: Dictionary of settings to update
-            
-        Returns:
-            bool: True if successful, False otherwise
-        """
+        """Update voice settings"""
         if not isinstance(settings, dict):
-            logger.error("Invalid settings: not a dictionary")
             return False
         
         # Track if any settings were updated
@@ -769,170 +608,67 @@ class VoiceAPIClient:
             
             # Type checking and validation
             if key == "speed" or key == "pitch":
-                # Must be a float between 0.5 and 2.0
                 if not isinstance(value, (int, float)):
-                    logger.warning(f"Invalid value for {key}: {value} (must be a number)")
                     continue
                 
                 value = float(value)
                 if value < 0.5 or value > 2.0:
-                    logger.warning(f"Invalid value for {key}: {value} (must be between 0.5 and 2.0)")
                     continue
-                
-            elif key == "emotion":
-                # Must be a string from the allowed emotions (limited in Piper)
-                if not isinstance(value, str):
-                    logger.warning(f"Invalid value for {key}: {value} (must be a string)")
-                    continue
-                
-                # Piper has limited emotion support - this is more for compatibility
-                allowed_emotions = ["normal", "happy", "sad", "angry", "excited", "calm"]
-                if value.lower() not in allowed_emotions:
-                    logger.warning(f"Limited emotion support in Piper TTS: {value} (defaulting to normal)")
-                
-                value = value.lower()
                 
             elif key == "voice":
-                # Must be a string
                 if not isinstance(value, str):
-                    logger.warning(f"Invalid value for {key}: {value} (must be a string)")
                     continue
                 
-                # Check if voice exists (if we have fetched voices)
+                # Make sure the voice exists
                 if self.available_voices and value not in self.available_voices:
-                    logger.warning(f"Voice '{value}' not found in available voices, but will try it anyway")
+                    logger.warning(f"Voice not available: {value}")
+                    continue
                 
             elif key == "volume":
-                # Must be a float between 0.0 and 1.0
                 if not isinstance(value, (int, float)):
-                    logger.warning(f"Invalid value for {key}: {value} (must be a number)")
                     continue
                 
                 value = float(value)
                 if value < 0.0 or value > 1.0:
-                    logger.warning(f"Invalid value for {key}: {value} (must be between 0.0 and 1.0)")
                     continue
             
-            # Update the setting if it changed
+            # Update the setting
             if self.settings.get(key) != value:
                 self.settings[key] = value
                 updated = True
-                logger.debug(f"Updated voice setting: {key} = {value}")
         
         # Save settings if updated
         if updated:
             self._save_settings()
-            
-            # Post settings change event if event bus is available
-            if self.event_bus and hasattr(self.event_bus, 'post_event'):
-                try:
-                    from utilities.event_system import Event, EventType
-                    
-                    # Post settings change event
-                    self.event_bus.post_event(
-                        Event(
-                            event_type=EventType.SETTINGS_CHANGE,
-                            data={
-                                "component": "voice",
-                                "settings": self.settings
-                            },
-                            source="voice_client"
-                        )
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to post settings change event: {str(e)}")
         
-        return True
+        return updated
     
-    def get_settings(self) -> Dict[str, Any]:
-        """
-        Get current voice settings
-        
-        Returns:
-            Dict of current voice settings
-        """
-        return self.settings.copy()
+    def set_voice(self, voice: str) -> bool:
+        """Set the voice to use"""
+        return self.update_settings({"voice": voice})
     
     def set_speed(self, speed: float) -> bool:
-        """
-        Set voice speed
-        
-        Args:
-            speed: Speed multiplier (0.5 to 2.0)
-            
-        Returns:
-            bool: True if successful, False otherwise
-        """
+        """Set the speech speed (0.5-2.0)"""
         return self.update_settings({"speed": speed})
     
     def set_pitch(self, pitch: float) -> bool:
-        """
-        Set voice pitch (limited support in Piper)
-        
-        Args:
-            pitch: Pitch multiplier (0.5 to 2.0)
-            
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        logger.warning("Pitch adjustment has limited support in Piper TTS")
+        """Set the speech pitch (0.5-2.0)"""
         return self.update_settings({"pitch": pitch})
     
-    def set_emotion(self, emotion: str) -> bool:
-        """
-        Set voice emotion (limited support in Piper)
-        
-        Args:
-            emotion: Emotion name (normal, happy, sad, angry, excited, calm)
-            
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        logger.warning("Emotion settings have limited support in Piper TTS")
-        return self.update_settings({"emotion": emotion})
-    
-    def set_voice(self, voice: str) -> bool:
-        """
-        Set voice model
-        
-        Args:
-            voice: Voice model name
-            
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        return self.update_settings({"voice": voice})
-    
     def set_volume(self, volume: float) -> bool:
-        """
-        Set voice volume
-        
-        Args:
-            volume: Volume level (0.0 to 1.0)
-            
-        Returns:
-            bool: True if successful, False otherwise
-        """
+        """Set the speech volume (0.0-1.0)"""
         return self.update_settings({"volume": volume})
     
     def get_available_voices(self) -> List[str]:
-        """
-        Get list of available voice models
-        
-        Returns:
-            List of available voice model names
-        """
-        # Try to refresh the list if it's empty
+        """Get a list of available voices"""
         if not self.available_voices and self.connected:
             self._fetch_available_voices()
-            
         return self.available_voices
     
+    def get_settings(self) -> Dict[str, Any]:
+        """Get current voice settings"""
+        return self.settings.copy()
+    
     def get_last_audio_file(self) -> Optional[str]:
-        """
-        Get the path to the last generated audio file
-        
-        Returns:
-            str: Path to the last audio file, or None if none exists
-        """
+        """Get the path to the last generated audio file"""
         return self.last_audio_file
