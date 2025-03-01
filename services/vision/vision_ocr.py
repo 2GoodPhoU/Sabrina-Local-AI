@@ -3,6 +3,7 @@ import pytesseract
 import os
 from services.vision.constants import CAPTURE_DIRECTORY
 
+
 class VisionOCR:
     def __init__(self):
         """Initialize the VisionOCR module for text extraction using OCR."""

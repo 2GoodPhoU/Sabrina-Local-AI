@@ -1,6 +1,6 @@
 # TODO
 - integration
-   - add LLM 
+   - add LLM
    - add standardized formats and framework for LLM input/output to communicate to core.py
    - LLM short term memory storage
    - training feedback loop
@@ -98,7 +98,7 @@ Sabrina AI is a privacy-focused, locally-running AI assistant that combines adva
 
 ### Core Technologies
 - **Language**: Python 3.10+
-- **Frameworks**: 
+- **Frameworks**:
   - FastAPI
   - PyTorch
   - PyQt5

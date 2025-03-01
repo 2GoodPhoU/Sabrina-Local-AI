@@ -2,7 +2,12 @@ import torch
 import os
 from ultralytics import YOLO
 
-from services.vision.constants import MODEL_PATH, DATASETS, TRAINING_EPOCHS, TRAINING_BATCH_SIZE, TRAINING_LEARNING_RATE, MIN_CONFIDENCE
+from services.vision.constants import (
+    MODEL_PATH,
+    DATASETS,
+    MIN_CONFIDENCE,
+)
+
 
 class VisionAI:
     def __init__(self):
@@ -10,7 +15,7 @@ class VisionAI:
         self.model_path = MODEL_PATH
         self.model = None
         self.load_model()
-    
+
     def load_model(self):
         """Load or create a YOLO model."""
         print("[VisionAI] Loading YOLO model at:", self.model_path)
@@ -21,10 +26,12 @@ class VisionAI:
         else:
             print("[VisionAI] Model found. Loading existing model...")
             self.model = YOLO(self.model_path)
-    
+
     def create_model(self):
         """Load a pre-trained YOLO model."""
-        self.model = YOLO("yolov8n.pt").to('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model = YOLO("yolov8n.pt").to(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
 
     def train_model(self):
         """Train the YOLO model using provided datasets."""
@@ -32,7 +39,12 @@ class VisionAI:
         print("[VisionAI] Training has been commented out...")
         """
         for data_set in DATASETS:
-            self.model.train(data=data_set, epochs=TRAINING_EPOCHS, batch=TRAINING_BATCH_SIZE, lr0=TRAINING_LEARNING_RATE, device='cuda')
+            self.model.train(
+                data=data_set,
+                epochs=TRAINING_EPOCHS,
+                batch=TRAINING_BATCH_SIZE,
+                lr0=TRAINING_LEARNING_RATE,
+                device='cuda')
             self.model.save(self.model_name)
         """
 
@@ -42,7 +54,7 @@ class VisionAI:
         for data_set in DATASETS:
             results = self.model.evaluate(data=data_set)
             print(results)
-    
+
     def detect_objects(self, image_path):
         """Detect objects in the given image using YOLO."""
         if not self.model:
@@ -59,10 +71,21 @@ class VisionAI:
                 if confidence < MIN_CONFIDENCE:
                     continue  # Skip low-confidence detections
                 label_index = int(result.boxes.cls[i])
-                label = result.names[label_index] if label_index < len(result.names) else "Unknown"
-                detections.append({
-                    "type": label,
-                    "coordinates": [int(box[0]), int(box[1]), int(box[2]), int(box[3])],
-                    "confidence": confidence
-                })
+                label = (
+                    result.names[label_index]
+                    if label_index < len(result.names)
+                    else "Unknown"
+                )
+                detections.append(
+                    {
+                        "type": label,
+                        "coordinates": [
+                            int(box[0]),
+                            int(box[1]),
+                            int(box[2]),
+                            int(box[3]),
+                        ],
+                        "confidence": confidence,
+                    }
+                )
         return detections

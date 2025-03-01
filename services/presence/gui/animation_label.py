@@ -6,13 +6,15 @@ from PyQt5.QtWidgets import QLabel
 from PyQt5.QtCore import pyqtProperty
 from PyQt5.QtGui import QPainter
 
+
 class AnimatedLabel(QLabel):
     """Enhanced QLabel with animation properties and opacity control"""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._opacity = 1.0
         self.setStyleSheet("background: transparent;")
-        
+
         # Add resource tracking
         self.movie_resource_id = None
 

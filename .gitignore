@@ -1,31 +1,67 @@
-# Ignore AI models & cache files
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+.env
+.venv
+
+# IDE & Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
+*.log
+.log
+
+# OS Generated
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# AI Models & Large Files
 models/
 *.wav
 *.mp3
-*.log
-node_modules/
+
+# Data & Sensitive
+config/api_keys.env
+data/temp/
+data/captures/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Project Specific
 services/vision/captures/*.png
-
-# Ignore compiled Python files
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Ignore logs, caches, and temp files
-/logs/
-/cache/
-/data/temp/
-/data/captures/
-
-# Ignore animation assets (optional)
-assets/*
-!assets/idle.gif
-!assets/listening.gif
-!assets/talking.gif
-!assets/working.gif
-!assets/static.png
-
-# Ignore virtual environment
-venv/
-.env

@@ -109,12 +109,12 @@ Sabrina AI is designed as a locally-running, privacy-focused AI assistant with a
   - FastAPI
   - PyTorch
   - PyQt5
-- **Communication**: 
+- **Communication**:
   - Event-Driven Architecture
   - REST API Interfaces
 
 ### Processing Frameworks
-- **Machine Learning**: 
+- **Machine Learning**:
   - YOLOv8
   - Whisper
   - Vosk

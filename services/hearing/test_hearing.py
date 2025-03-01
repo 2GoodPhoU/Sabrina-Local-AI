@@ -1,10 +1,10 @@
-import time
 import logging
 from hearing import Hearing
 
 # Configure logging for test script
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("test_hearing")
+
 
 def test_hearing_module():
     """
@@ -14,7 +14,9 @@ def test_hearing_module():
     hearing = Hearing(wake_word="hey sabrina", model_path="models/vosk-model")
 
     if not hearing.vosk_model:
-        logger.error("Failed to load Vosk model. Check the model path and dependencies.")
+        logger.error(
+            "Failed to load Vosk model. Check the model path and dependencies."
+        )
         return
 
     logger.info("Testing wake word detection...")
@@ -33,6 +35,7 @@ def test_hearing_module():
 
     logger.info("Closing Hearing module...")
     hearing.close()
+
 
 if __name__ == "__main__":
     test_hearing_module()
