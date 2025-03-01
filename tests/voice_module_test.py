@@ -10,6 +10,7 @@ import sys
 import requests
 import time
 import json
+import tempfile
 
 def main():
     print("Voice API Test Script")
@@ -90,8 +91,11 @@ def main():
         if response.status_code == 200:
             print("✅ Speech synthesis successful!")
             
+            # Create a temporary file with proper permissions
+            temp_dir = tempfile.gettempdir()
+            output_file = os.path.join(temp_dir, "test_output.wav")
+            
             # Save audio file for inspection
-            output_file = "test_output.wav"
             with open(output_file, "wb") as f:
                 f.write(response.content)
             
@@ -119,6 +123,10 @@ def main():
             return False
     except requests.RequestException as e:
         print(f"❌ Error: {str(e)}")
+        return False
+    except PermissionError as e:
+        print(f"❌ Permission error: {str(e)}")
+        print("Try running the script with administrator privileges or in a directory with write permissions.")
         return False
     
     print("\nAll tests completed successfully! ✅")
