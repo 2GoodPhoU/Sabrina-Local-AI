@@ -56,9 +56,8 @@ models/
 # Data & Sensitive
 config/api_keys.env
 data/temp/
-data/captures/
-services/vision/data/captures/
-services/vision/captures/
+data/captures/*.png
+
 
 # Testing
 .pytest_cache/
@@ -67,3 +66,4 @@ htmlcov/
 
 # Project Specific
 services/vision/captures/*.png
+services/vision/data/captures/*.png
