@@ -63,7 +63,15 @@ def get_args():
         "--test",
         type=str,
         default="all",
-        choices=["status", "speak", "voices", "settings", "enhanced", "all"],
+        choices=[
+            "status",
+            "speak",
+            "voices",
+            "settings",
+            "enhanced",
+            "variations",
+            "all",
+        ],
         help="Test to run",
     )
     parser.add_argument(
@@ -308,6 +316,51 @@ def test_enhanced_client():
     return success
 
 
+def test_voice_variations(client):
+    """Test various voice settings to demonstrate differences"""
+    logger.info("Testing different voice settings...")
+
+    # Text to use for all tests
+    test_text = "This is a demonstration of different voice settings."
+
+    # Test different settings
+    settings_to_test = [
+        {"speed": 1.0, "pitch": 1.0, "volume": 0.8, "name": "default"},
+        {"speed": 1.2, "pitch": 1.0, "volume": 0.8, "name": "faster"},
+        {"speed": 0.8, "pitch": 1.0, "volume": 0.8, "name": "slower"},
+        {"speed": 1.0, "pitch": 1.1, "volume": 0.8, "name": "higher_pitch"},
+        {"speed": 1.0, "pitch": 0.9, "volume": 0.8, "name": "lower_pitch"},
+    ]
+
+    success_count = 0
+    for settings in settings_to_test:
+        name = settings.pop("name")
+        logger.info(f"Testing {name} voice: {settings}")
+
+        # Update settings
+        client.update_settings(settings)
+
+        # Speak with these settings
+        result = client.speak(f"{test_text} This is the {name} voice.")
+
+        if result:
+            logger.info(f"✓ Generated speech with {name} voice settings")
+            success_count += 1
+        else:
+            logger.error(f"✗ Failed to generate speech with {name} voice settings")
+
+        # Small pause between samples
+        time.sleep(1)
+
+    # Reset to default settings
+    client.update_settings({"speed": 1.0, "pitch": 1.0, "volume": 0.8})
+
+    logger.info(
+        f"Voice variations test: {success_count}/{len(settings_to_test)} successful"
+    )
+    return success_count == len(settings_to_test)
+
+
 def run_tests(args):
     """Run the specified tests"""
     # Create client
@@ -324,6 +377,9 @@ def run_tests(args):
 
     if args.test == "voices" or args.test == "all":
         results["voices"] = test_voices(client)
+
+    if args.test == "variations" or args.test == "all":
+        results["variations"] = test_voice_variations(client)
 
     if args.test == "settings" or args.test == "all":
         results["settings"] = test_settings(client)

@@ -280,19 +280,8 @@ class TTSEngine:
     def _apply_audio_effects(
         self, wav, pitch_factor: float, volume: float, speed: float
     ) -> np.ndarray:
-        """Apply audio effects to the generated speech
-
-        Args:
-            wav: Audio data
-            pitch_factor: Pitch adjustment factor
-            volume: Volume adjustment factor
-            speed: Speed adjustment factor
-
-        Returns:
-            Modified audio data
-        """
+        """Apply audio effects to the generated speech"""
         try:
-            # Import here to avoid dependency issues if not available
             import numpy as np
 
             # Convert to numpy array if needed
@@ -305,7 +294,11 @@ class TTSEngine:
                     )
                     return wav
 
-            # Apply volume adjustment (simple multiplication)
+            logger.debug(
+                f"Audio data type: {type(wav)}, shape: {getattr(wav, 'shape', 'unknown')}"
+            )
+
+            # Apply volume adjustment
             try:
                 wav_adjusted = wav * volume
             except Exception as e:
@@ -316,28 +309,28 @@ class TTSEngine:
             if abs(pitch_factor - 1.0) < 0.01 and abs(speed - 1.0) < 0.01:
                 return wav_adjusted
 
-            # Create a simplified approach to speed/pitch adjustment without using librosa
-            # This is a fallback method that doesn't require the complex phase vocoder
             try:
-                # For speed changes only, we can use simple resampling
-                if abs(pitch_factor - 1.0) < 0.01 and abs(speed - 1.0) >= 0.01:
+                # Implement a simple resampling approach for speed changes
+                # This will affect both speed and pitch together (like a tape speed effect)
+                if abs(speed - 1.0) >= 0.01:
                     # Calculate new length based on speed
-                    new_length = int(len(wav_adjusted) / speed)
-                    # Use simple linear interpolation
-                    indices = np.linspace(0, len(wav_adjusted) - 1, new_length)
-                    indices = indices.astype(np.int32)
-                    wav_adjusted = wav_adjusted[indices]
-                    return wav_adjusted
+                    original_length = len(wav_adjusted)
+                    new_length = int(original_length / speed)
 
-                # If pitch adjustment is needed, simply return volume-adjusted audio
-                # Full pitch adjustment would require more complex processing
-                logger.info("Complex pitch adjustment skipped to avoid errors")
+                    # Use linear interpolation for resampling
+                    indices = np.linspace(0, original_length - 1, new_length)
+                    indices = np.clip(indices.astype(np.int32), 0, original_length - 1)
+                    wav_adjusted = wav_adjusted[indices]
+
+                    logger.info(
+                        f"Applied speed adjustment: {speed} (changed length from {original_length} to {new_length})"
+                    )
+
                 return wav_adjusted
 
             except Exception as e:
-                logger.error(f"Simplified audio effect processing failed: {e}")
+                logger.error(f"Audio effect processing failed: {e}")
                 logger.error(traceback.format_exc())
-                # Return the volume-adjusted audio at least
                 return wav_adjusted
 
         except Exception as e:
