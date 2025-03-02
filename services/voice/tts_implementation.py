@@ -73,16 +73,35 @@ class TTSEngine:
             else:
                 logger.info("CUDA not available, using CPU for TTS")
 
-            # Initialize TTS
-            self.tts = TTS(
-                model_name=self.model_name,
-                device=device,
-            )
+            # Try:
+            try:
+                # First try the newer TTS API
+                self.tts = TTS(model_name=self.model_name)
 
-            self.tts_initialized = True
-            logger.info(
-                f"TTS engine initialized successfully with model: {self.model_name}"
-            )
+                # If the TTS object has a to method to set device, use it
+                if hasattr(self.tts, "to") and device == "cuda":
+                    self.tts.to(device)
+
+                self.tts_initialized = True
+                logger.info(
+                    f"TTS engine initialized successfully with model: {self.model_name}"
+                )
+            except TypeError:
+                # If that fails, try older API
+                try:
+                    # Try alternative constructor format
+                    self.tts = TTS()
+                    self.tts.load_model(self.model_name)
+
+                    self.tts_initialized = True
+                    logger.info(
+                        f"TTS engine initialized with alternative API method: {self.model_name}"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"Failed to initialize TTS with alternative method: {str(e)}"
+                    )
+                    self.tts_initialized = False
 
             # Log available models for reference
             logger.info(
