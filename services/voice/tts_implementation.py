@@ -296,6 +296,11 @@ class TTSEngine:
             import librosa
             import numpy as np
 
+            # Convert wav to numpy array if it's not already
+            if not isinstance(wav, np.ndarray):
+                # If wav is a list or other sequence type, convert to numpy array
+                wav = np.array(wav, dtype=np.float32)
+
             # Apply volume adjustment
             wav = wav * volume
 
