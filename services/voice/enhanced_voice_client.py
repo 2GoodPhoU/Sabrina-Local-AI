@@ -65,17 +65,13 @@ class EnhancedVoiceClient:
         self.speaking = True
         self.last_text = text
 
-        # When posting the speaking_started event:
+        # When posting speaking_started event:
         if self.event_bus:
             try:
-                # Create event data
-                event_data = {"status": "speaking_started", "text": text}
-
-                # Create and post event - Use the correct event type from the event system
                 self.event_bus.post_event(
                     Event(
-                        event_type="VOICE_STATUS",  # This should match what the test is listening for
-                        data=event_data,
+                        event_type=EventType.VOICE,  # Make sure this is the same as below
+                        data={"status": "speaking_started", "text": text},
                         source="enhanced_voice_client",
                     )
                 )

@@ -20,6 +20,9 @@ import argparse
 import requests
 import subprocess
 
+# Import event system components
+from utilities.event_system import EventType
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -266,12 +269,10 @@ def test_enhanced_client():
         logger.info(f"Received event: {event}")
         events_received.append(event)
 
-    # Register event handler for the correct event type
+    # Register event handler for both event types the client is sending
     handler_id = event_bus.register_handler(
         event_bus.create_event_handler(
-            event_types=[
-                "VOICE_STATUS"
-            ],  # Make sure this matches what the client is sending
+            event_types=[EventType.VOICE],  # This should match what the client is using
             callback=event_handler,
         )
     )

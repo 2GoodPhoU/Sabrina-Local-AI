@@ -76,7 +76,6 @@ class TTSEngine:
             # Initialize TTS
             self.tts = TTS(
                 model_name=self.model_name,
-                vocoder_name=self.vocoder_name,
                 device=device,
             )
 

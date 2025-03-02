@@ -100,7 +100,7 @@ class VoiceSettingsManager:
             os.makedirs(os.path.dirname(self.settings_file), exist_ok=True)
 
             with open(self.settings_file, "w") as f:
-                json.dump(settings.dict(), f, indent=4)
+                json.dump(settings.model_dump(), f, indent=4)
             return True
         except Exception as e:
             logger.error(f"Error saving voice settings: {str(e)}")
@@ -113,7 +113,7 @@ class VoiceSettingsManager:
     def update_settings(self, updates: UpdateSettingsRequest) -> VoiceSettings:
         """Update voice settings with new values"""
         # Get current settings as dict
-        current_settings = self.settings.dict()
+        current_settings = self.settings.model_dump()
 
         # Update with new values, ignoring None values
         updates_dict = updates.dict(exclude_unset=True)
@@ -174,7 +174,7 @@ except ImportError:
         ) -> str:
             """Placeholder speech synthesis method"""
             # Get settings and cache path
-            settings = self.settings_manager.get_settings().dict()
+            settings = self.settings_manager.get_settings().model_dump()
             if voice_settings:
                 for key, value in voice_settings.items():
                     if value is not None:
