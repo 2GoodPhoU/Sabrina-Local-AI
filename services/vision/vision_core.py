@@ -1,7 +1,8 @@
 """
 Enhanced Vision Core for Sabrina AI
 ==================================
-Provides real OCR and screen analysis functionality.
+Provides real OCR and screen analysis functionality with
+YOLOv8 integration for advanced UI element detection.
 """
 
 import os
@@ -13,7 +14,7 @@ from PIL import Image
 import mss
 import mss.tools
 
-# Configure logging
+# Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("vision")
 
@@ -32,10 +33,42 @@ class VisionCore:
         # Initialize OCR
         self.vision_ocr = VisionOCR()
 
+        # Initialize Vision AI for object detection (if available)
+        self.vision_ai = self._init_vision_ai()
+
         # Set up screen capture
         self.mss_available = self._check_mss_available()
         if not self.mss_available:
             logger.warning("MSS not available - screen capture will be limited")
+
+    def _init_vision_ai(self):
+        """Initialize the Vision AI module for object detection"""
+        try:
+            from services.vision.vision_ai import VisionAI
+
+            # Get model path from constants if possible
+            model_path = None
+            try:
+                from services.vision.constants import MODEL_PATH
+
+                if os.path.exists(MODEL_PATH):
+                    model_path = MODEL_PATH
+            except ImportError:
+                logger.warning("Could not import MODEL_PATH from constants")
+
+            # Create Vision AI instance
+            vision_ai = VisionAI(model_path=model_path)
+            logger.info("Vision AI initialized successfully")
+            return vision_ai
+
+        except ImportError:
+            logger.warning(
+                "Vision AI module not available - object detection will be limited"
+            )
+            return None
+        except Exception as e:
+            logger.error(f"Error initializing Vision AI: {str(e)}")
+            return None
 
     def _check_mss_available(self):
         """Check if MSS screen capture is available"""
@@ -73,10 +106,21 @@ class VisionCore:
                         monitor = sct.monitors[0]  # Primary monitor
                         screenshot = sct.grab(monitor)
                     elif mode == "active_window":
-                        # In a real implementation, you'd get the active window
-                        # For now, just use the primary monitor
-                        monitor = sct.monitors[0]
-                        screenshot = sct.grab(monitor)
+                        # Get active window info
+                        active_window = self.get_active_window_info()
+                        if active_window and "rect" in active_window:
+                            # Capture the active window region
+                            monitor = {
+                                "left": active_window["rect"][0],
+                                "top": active_window["rect"][1],
+                                "width": active_window["rect"][2],
+                                "height": active_window["rect"][3],
+                            }
+                            screenshot = sct.grab(monitor)
+                        else:
+                            # Fallback to primary monitor
+                            monitor = sct.monitors[0]
+                            screenshot = sct.grab(monitor)
                     elif mode == "specific_region" and region:
                         screenshot = sct.grab(region)
                     else:
@@ -92,6 +136,12 @@ class VisionCore:
 
                     if mode == "specific_region" and region:
                         screenshot = ImageGrab.grab(bbox=region)
+                    elif mode == "active_window":
+                        active_window = self.get_active_window_info()
+                        if active_window and "rect" in active_window:
+                            screenshot = ImageGrab.grab(bbox=active_window["rect"])
+                        else:
+                            screenshot = ImageGrab.grab()
                     else:
                         screenshot = ImageGrab.grab()
 
@@ -161,9 +211,13 @@ class VisionCore:
         # Perform OCR
         ocr_text = self.vision_ocr.run_ocr(image_path)
 
-        # Analyze the image (placeholder for future object detection)
+        # Detect UI elements if Vision AI is available
+        ui_elements = self.detect_ui_elements(image_path)
+
+        # Analyze the image
         analysis = {
             "ocr_text": ocr_text,
+            "ui_elements": ui_elements,
             "timestamp": datetime.now().isoformat(),
             "image_path": image_path,
         }
@@ -185,19 +239,41 @@ class VisionCore:
         Returns:
             List of detected UI elements with their coordinates and types
         """
-        # Check if VisionAI is available (YOLO-based detection)
-        if hasattr(self, "vision_ai") and self.vision_ai is not None:
-            # Use VisionAI for detection if available
-            return self.vision_ai.detect_objects(image_path)
+        # Use Vision AI if available
+        if self.vision_ai:
+            logger.info(f"Detecting UI elements with Vision AI in {image_path}")
+            elements = self.vision_ai.detect_ui_elements(image_path)
 
-        # Fallback to basic detection if VisionAI not available
+            # Extract text from detected UI elements if they have no text yet
+            elements_with_text = []
+            for element in elements:
+                if "text" not in element or not element["text"]:
+                    elements_with_text = self.vision_ai.extract_text_from_regions(
+                        image_path, [element], self.vision_ocr
+                    )
+                else:
+                    elements_with_text = elements
+
+            return elements_with_text
+
+        # Fallback to basic detection if Vision AI not available
+        return self._fallback_detect_ui_elements(image_path)
+
+    def _fallback_detect_ui_elements(self, image_path):
+        """
+        Fallback method for UI element detection when Vision AI is not available
+
+        Args:
+            image_path: Path to the image file
+
+        Returns:
+            List of detected UI elements
+        """
         try:
-            import cv2
-
             # Load image
             img = cv2.imread(image_path)
             if img is None:
-                print(f"[VisionCore] Error: Could not read image: {image_path}")
+                logger.error(f"Error: Could not read image: {image_path}")
                 return []
 
             # Convert to grayscale for simple edge detection
@@ -219,19 +295,57 @@ class VisionCore:
             elements = []
             for i, contour in enumerate(valid_contours):
                 x, y, w, h = cv2.boundingRect(contour)
+
+                # Extract ROI for OCR
+                roi = gray[y : y + h, x : x + w]
+                text = ""
+
+                # Only try OCR if ROI is large enough
+                if w > 20 and h > 10:
+                    try:
+                        text = pytesseract.image_to_string(roi).strip()
+                    except Exception as e:
+                        logger.error(f"OCR error on ROI: {str(e)}")
+
                 elements.append(
                     {
                         "type": "unknown_ui_element",
                         "coordinates": [int(x), int(y), int(x + w), int(y + h)],
                         "confidence": 0.5,  # Default confidence
-                        "text": "",  # No text available without OCR
+                        "text": text,
                     }
                 )
 
             return elements
+
         except Exception as e:
-            print(f"[VisionCore] Error detecting UI elements: {str(e)}")
+            logger.error(f"Error detecting UI elements: {str(e)}")
             return []
+
+    def create_annotated_image(self, image_path, save_path=None):
+        """
+        Create an annotated image with detected UI elements
+
+        Args:
+            image_path: Path to the original image
+            save_path: Path to save the annotated image (if None, auto-generated)
+
+        Returns:
+            Path to the annotated image
+        """
+        if not self.vision_ai:
+            logger.warning("Vision AI not available - cannot create annotated image")
+            return None
+
+        # Detect UI elements
+        elements = self.detect_ui_elements(image_path)
+
+        if not elements:
+            logger.warning("No UI elements detected")
+            return None
+
+        # Create annotated image
+        return self.vision_ai.add_bounding_boxes(image_path, elements, save_path)
 
 
 class VisionOCR:
