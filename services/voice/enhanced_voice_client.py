@@ -65,26 +65,22 @@ class EnhancedVoiceClient:
         self.speaking = True
         self.last_text = text
 
-        # Post event if event bus is available
+        # When posting the speaking_started event:
         if self.event_bus:
             try:
                 # Create event data
                 event_data = {"status": "speaking_started", "text": text}
 
-                # Create and post event using correct method
-                # Use Event constructor directly instead of create_event method
+                # Create and post event - Use the correct event type from the event system
                 self.event_bus.post_event(
                     Event(
-                        event_type=EventType.VOICE,  # Use EventType.VOICE from your event system
+                        event_type="VOICE_STATUS",  # This should match what the test is listening for
                         data=event_data,
                         source="enhanced_voice_client",
                     )
                 )
             except Exception as e:
                 logger.error(f"Error posting speaking_started event: {str(e)}")
-                import traceback
-
-                logger.error(traceback.format_exc())
 
         # Call parent speak method
         success = self.client.speak(text, **kwargs)

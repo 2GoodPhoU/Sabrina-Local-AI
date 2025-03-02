@@ -266,10 +266,13 @@ def test_enhanced_client():
         logger.info(f"Received event: {event}")
         events_received.append(event)
 
-    # Register event handler
+    # Register event handler for the correct event type
     handler_id = event_bus.register_handler(
         event_bus.create_event_handler(
-            event_types=["VOICE_STATUS"], callback=event_handler
+            event_types=[
+                "VOICE_STATUS"
+            ],  # Make sure this matches what the client is sending
+            callback=event_handler,
         )
     )
 
