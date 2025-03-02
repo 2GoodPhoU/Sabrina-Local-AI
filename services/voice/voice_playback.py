@@ -1,7 +1,7 @@
 """
-Audio Playback Module for Sabrina AI Voice Client
-================================================
-Provides audio playback capabilities for the Voice API Client.
+Improved Audio Playback Module for Sabrina AI Voice Client
+=========================================================
+Provides robust audio playback capabilities with multiple fallback methods.
 """
 
 import os
@@ -9,12 +9,14 @@ import time
 import logging
 import threading
 import traceback
+import tempfile
+import subprocess
 
 logger = logging.getLogger("voice_playback")
 
 
 class AudioPlayer:
-    """Handles audio playback for voice output"""
+    """Handles audio playback for voice output with improved error handling"""
 
     def __init__(self):
         """Initialize the audio player"""
@@ -32,78 +34,116 @@ class AudioPlayer:
         # Try to initialize various audio playback libraries
         # in order of preference
 
-        # 1. Try playsound - simple cross-platform playback
-        try:
-            from playsound import playsound
-
-            def play_with_playsound(file_path):
-                playsound(file_path)
-                return True
-
-            self.playback_methods.append(("playsound", play_with_playsound))
-            logger.info("Initialized playsound for audio playback")
-        except ImportError:
-            logger.debug("playsound not available")
-
-        # 2. Try pygame - good cross-platform alternative
-        try:
-            import pygame
-
-            # Initialize pygame mixer
-            pygame.mixer.init()
-
-            def play_with_pygame(file_path):
-                pygame.mixer.music.load(file_path)
-                pygame.mixer.music.play()
-
-                # Wait for playback to complete
-                while pygame.mixer.music.get_busy():
-                    time.sleep(0.1)
-                    if self.stop_requested:
-                        pygame.mixer.music.stop()
-                        break
-                return True
-
-            self.playback_methods.append(("pygame", play_with_pygame))
-            logger.info("Initialized pygame for audio playback")
-        except ImportError:
-            logger.debug("pygame not available")
-
-        # 3. Try sounddevice with soundfile - high quality but more dependencies
+        # 1. Try sounddevice - high quality and reliable
         try:
             import sounddevice as sd
             import soundfile as sf
 
             def play_with_sounddevice(file_path):
-                data, samplerate = sf.read(file_path)
-                sd.play(data, samplerate)
-                sd.wait()  # Wait until playback is finished
-                return True
+                try:
+                    data, samplerate = sf.read(file_path)
+                    sd.play(data, samplerate)
+                    status = sd.wait()  # Wait until playback is finished
+                    print(status)
+                    return True
+                except Exception as e:
+                    logger.warning(f"sounddevice playback failed: {e}")
+                    return False
 
             self.playback_methods.append(("sounddevice", play_with_sounddevice))
             logger.info("Initialized sounddevice for audio playback")
         except ImportError:
             logger.debug("sounddevice or soundfile not available")
 
+        # 2. Try pygame - good cross-platform alternative
+        try:
+            import pygame
+
+            # Initialize pygame mixer
+            pygame.mixer.init(frequency=48000)
+
+            def play_with_pygame(file_path):
+                try:
+                    pygame.mixer.music.load(file_path)
+                    pygame.mixer.music.play()
+
+                    # Wait for playback to complete
+                    while pygame.mixer.music.get_busy():
+                        if self.stop_requested:
+                            pygame.mixer.music.stop()
+                            break
+                        time.sleep(0.1)
+                    return True
+                except Exception as e:
+                    logger.warning(f"pygame playback failed: {e}")
+                    return False
+
+            self.playback_methods.append(("pygame", play_with_pygame))
+            logger.info("Initialized pygame for audio playback")
+        except ImportError:
+            logger.debug("pygame not available")
+
+        # 3. Try playsound - but with better path handling
+        try:
+            # Try to import playsound but handle path issues
+            from playsound import playsound
+
+            def play_with_playsound(file_path):
+                try:
+                    # Create a temporary file with a simple name if the path has spaces
+                    if " " in file_path or ":" in file_path:
+                        temp_dir = tempfile.gettempdir()
+                        temp_filename = f"sabrina_temp_{os.path.basename(file_path)}"
+                        temp_path = os.path.join(temp_dir, temp_filename)
+
+                        # Copy the file
+                        with open(file_path, "rb") as src, open(temp_path, "wb") as dst:
+                            dst.write(src.read())
+
+                        # Play from the temp location
+                        playsound(temp_path, block=True)
+
+                        # Clean up
+                        try:
+                            os.remove(temp_path)
+                        except Exception as e:
+                            logger.warning(f"Cleanup Error: {e}")
+                            pass
+                    else:
+                        playsound(file_path, block=True)
+                    return True
+                except Exception as e:
+                    logger.warning(f"playsound failed: {e}")
+                    return False
+
+            self.playback_methods.append(("playsound_fixed", play_with_playsound))
+            logger.info("Initialized playsound with path fixing for audio playback")
+        except ImportError:
+            logger.debug("playsound not available")
+
         # 4. As a last resort, try using system commands
         if os.name == "posix":  # Unix/Linux/MacOS
 
             def play_with_system_unix(file_path):
                 # Try several common audio players
-                players = ["aplay", "paplay", "mplayer", "afplay"]
-                for player in players:
+                players = [
+                    ["aplay", file_path],
+                    ["paplay", file_path],
+                    ["mplayer", file_path],
+                    ["afplay", file_path],
+                ]
+                for player_cmd in players:
                     try:
-                        import subprocess
-
                         result = subprocess.run(
-                            [player, file_path],
+                            player_cmd,
                             stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE,
+                            text=True,
                         )
                         if result.returncode == 0:
                             return True
                     except Exception as e:
-                        logger.debug(f"Error: {str(e)}")
+                        logger.debug(f"Player {player_cmd[0]} error: {str(e)}")
                         continue
                 return False
 
@@ -114,22 +154,29 @@ class AudioPlayer:
 
             def play_with_system_windows(file_path):
                 try:
+                    # Clean up the file path for PowerShell
+                    clean_path = file_path.replace("\\", "\\\\")
+
+                    # Try PowerShell approach first
+                    ps_command = f"powershell -c \"(New-Object Media.SoundPlayer '{clean_path}').PlaySync();\""
+                    result = subprocess.run(
+                        ps_command,
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                    )
+                    if result.returncode == 0:
+                        return True
+
+                    # Fall back to winsound if available
                     import winsound
 
                     winsound.PlaySound(file_path, winsound.SND_FILENAME)
                     return True
                 except Exception as e:
-                    logger.debug(f"Error: {str(e)}")
-                    # Try PowerShell as fallback
-                    try:
-                        import subprocess
-
-                        ps_command = f'powershell -c (New-Object Media.SoundPlayer "{file_path}").PlaySync();'
-                        subprocess.run(ps_command, shell=True)
-                        return True
-                    except Exception as e:
-                        logger.debug(f"Error: {str(e)}")
-                        return False
+                    logger.debug(f"Windows audio playback error: {str(e)}")
+                    return False
 
             self.playback_methods.append(("system_windows", play_with_system_windows))
             logger.info("Initialized system commands for audio playback on Windows")
@@ -186,6 +233,9 @@ class AudioPlayer:
             # Try each playback method until one succeeds
             success = False
 
+            # Log the full file path for debugging
+            logger.debug(f"Attempting to play audio file: {audio_file}")
+
             for method_name, play_func in self.playback_methods:
                 if self.stop_requested:
                     break
@@ -198,6 +248,7 @@ class AudioPlayer:
                         break
                 except Exception as e:
                     logger.debug(f"Playback with {method_name} failed: {str(e)}")
+                    logger.debug(traceback.format_exc())
                     continue
 
             if not success and not self.stop_requested:
@@ -235,7 +286,7 @@ class AudioPlayer:
         return self.playing
 
 
-# Create an easy-to-use function to play audio files
+# Create global player instance for easy access
 _audio_player = None
 
 
@@ -278,115 +329,3 @@ def is_playing() -> bool:
         return False
 
     return _audio_player.is_playing()
-
-
-# Enhanced VoiceAPIClient methods for audio playback
-
-
-def speak_with_playback(client, text: str, **kwargs) -> bool:
-    """
-    Convert text to speech and play it
-
-    Args:
-        client: VoiceAPIClient instance
-        text: Text to convert to speech
-        **kwargs: Additional parameters
-
-    Returns:
-        bool: True if successful, False otherwise
-    """
-    # First, get the full URL
-    audio_url, success = get_audio_url(client, text, **kwargs)
-
-    if not success or not audio_url:
-        logger.error(f"Failed to get audio URL for text: {text}")
-        return False
-
-    # Download the audio file if it's a URL
-    if audio_url.startswith(("http://", "https://")):
-        import requests
-        import tempfile
-
-        try:
-            response = requests.get(audio_url, stream=True, timeout=10.0)
-            if response.status_code != 200:
-                logger.error(f"Failed to download audio file: {response.status_code}")
-                return False
-
-            # Create a temporary file
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                for chunk in response.iter_content(chunk_size=8192):
-                    temp_file.write(chunk)
-
-                audio_path = temp_file.name
-        except Exception as e:
-            logger.error(f"Error downloading audio file: {str(e)}")
-            return False
-    else:
-        # If it's a local path, use it directly
-        audio_path = audio_url
-
-    # Play the audio file
-    return play_audio(audio_path)
-
-
-def get_audio_url(client, text: str, **kwargs) -> tuple:
-    """
-    Get the audio URL for the given text
-
-    Args:
-        client: VoiceAPIClient instance
-        text: Text to convert to speech
-        **kwargs: Additional parameters
-
-    Returns:
-        tuple: (audio_url, success)
-    """
-    if not text:
-        logger.warning("Empty text provided")
-        return None, False
-
-    # Check if connected
-    if not client.connected and not client.test_connection():
-        logger.error("Not connected to Voice API")
-        return None, False
-
-    try:
-        # Prepare request payload
-        payload = {"text": text}
-
-        # Add optional parameters if provided
-        for key in ["voice", "speed", "pitch", "volume", "emotion", "cache"]:
-            if key in kwargs and kwargs[key] is not None:
-                payload[key] = kwargs[key]
-
-        # Make API request
-        response = client.session.post(
-            f"{client.api_url}/speak",
-            json=payload,
-            headers=client.headers,
-            timeout=10.0,
-        )
-
-        if response.status_code == 200:
-            data = response.json()
-            audio_url = data.get("audio_url")
-
-            if audio_url:
-                # Get full URL
-                full_audio_url = f"{client.api_url}{audio_url}"
-                logger.info(f"Speech generated successfully: {full_audio_url}")
-                return full_audio_url, True
-            else:
-                logger.warning("No audio URL in response")
-                return None, False
-        else:
-            logger.error(
-                f"Voice API request failed: {response.status_code} - {response.text}"
-            )
-            return None, False
-
-    except Exception as e:
-        logger.error(f"Error in get_audio_url: {str(e)}")
-        logger.error(traceback.format_exc())
-        return None, False

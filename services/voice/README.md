@@ -1,94 +1,117 @@
-# Sabrina AI Voice Module
+# Sabrina AI Voice Service
 
-## 🎙️ Overview
-The Sabrina AI Voice Module provides advanced Text-to-Speech (TTS) capabilities through a comprehensive API for voice generation, settings management, and speech processing. This module enables natural, expressive voice interactions for the Sabrina AI Assistant.
+This is the voice service component of Sabrina AI, providing high-quality text-to-speech (TTS) capabilities through a REST API.
 
-## 🌟 Key Features
-- 🔊 High-quality TTS using Coqui TTS (Jenny model)
-- 🎛️ Configurable voice settings (speed, pitch, volume, emotion)
-- 🚀 FastAPI-based microservice architecture
-- 💾 Intelligent audio caching for efficiency
-- 🔒 Secure settings management with API key authentication
-- 📦 Containerized deployment with Docker
-- 🔄 Event-driven integration with Sabrina AI Core
+## 🚀 Features
 
-## 🛠️ Core Components
-
-### 1. Voice API (`voice_api.py`)
-A FastAPI-based service that provides:
-- REST endpoints for TTS generation
-- Voice settings management
-- Audio caching for performance
-- Secure API access
-
-### 2. Voice API Client (`voice_api_client.py`)
-A Python client library that:
-- Handles communication with the Voice API
-- Provides a simple interface for other Sabrina components
-- Offers basic error handling and reconnection strategies
-- Includes event bus integration for the enhanced client version
-
-### 3. Enhanced Voice Client (`enhanced_voice_client.py`)
-An advanced client with additional features:
-- Emotional voice synthesis based on content sentiment
-- Voice activity tracking and statistics
-- Text preprocessing and optimization
-- Speech queue management
-- Voice profile customization
-
-### 4. Testing and Deployment
-- Comprehensive test script (`voice_module_test.py`)
-- Docker configuration for containerized deployment
-- Setup guide for configuration and usage
+- **High-quality text-to-speech** using the Jenny TTS model
+- **FastAPI-based REST API** for speech generation
+- **Docker support** for easy deployment
+- **Configurable voice settings** (speed, pitch, volume, emotion)
+- **Audio caching** for improved performance
+- **Cross-platform audio playback** support
 
 ## 📦 Installation
 
 ### Prerequisites
-- Python 3.10+
-- TTS (Coqui TTS library)
-- FFmpeg
+
+- Python 3.8+ (3.10 recommended)
 - Docker (optional, for containerized deployment)
+- FFmpeg (recommended for audio processing)
 
-### Quick Setup
+### Option 1: Setup Script (Recommended)
+
+Run the included setup script to automatically install dependencies and set up the service:
+
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/sabrina-ai.git
-cd sabrina-ai/services/voice
+python setup_voice.py
+```
 
-# Install dependencies
+For additional options:
+
+```bash
+python setup_voice.py --help
+```
+
+### Option 2: Manual Setup
+
+1. **Create a virtual environment**:
+
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+2. **Install dependencies**:
+
+```bash
 pip install -r voice_docker_requirements.txt
+```
 
-# Start the Voice API
+3. **Create required directories**:
+
+```bash
+mkdir -p logs data/audio_cache config models
+```
+
+## 🚀 Usage
+
+### Option 1: Running with Docker (Recommended)
+
+1. **Build the Docker image**:
+
+```bash
+docker compose build
+```
+
+2. **Start the container**:
+
+```bash
+docker compose up -d
+```
+
+3. **Check logs**:
+
+```bash
+docker compose logs -f
+```
+
+### Option 2: Running Directly
+
+1. **Start the voice service**:
+
+```bash
 python voice_api.py
 ```
 
-### Docker Deployment
+The service will start on port 8100 by default.
+
+## 🧪 Testing
+
+You can test the voice service using the included test script:
+
 ```bash
-# Build and start the container
-docker-compose up -d
+python voice_module_test.py
 ```
 
-## 🔧 Voice Configuration
-The voice service supports the following configurable parameters:
+This script will:
+- Test connection to the voice service
+- Test speech generation
+- Test voice settings
+- Test available voices
 
-| Parameter | Description | Default | Range |
-|-----------|-------------|---------|-------|
-| `voice` | TTS voice model | en_US-jenny-medium | Available voices |
-| `speed` | Speech speed | 1.0 | 0.5-2.0 |
-| `pitch` | Voice pitch | 1.0 | 0.5-2.0 |
-| `volume` | Audio volume | 0.8 | 0.0-1.0 |
-| `emotion` | Emotional style | neutral | neutral, happy, sad |
-| `cache_enabled` | Enable audio caching | true | true, false |
-
-## 🔌 API Endpoints
+## 📋 API Endpoints
 
 ### Status Check
+
 ```
 GET /status
 ```
+
 Returns the service status and TTS initialization state.
 
 ### Text-to-Speech
+
 ```
 POST /speak
 Content-Type: application/json
@@ -104,23 +127,37 @@ X-API-Key: your-api-key
     "cache": true
 }
 ```
+
 Returns a URL to the generated audio file.
 
-### Get Voices
+### Simple Text-to-Speech
+
+```
+POST /speak_simple?text=Hello%20World
+```
+
+Simpler endpoint that doesn't require authentication.
+
+### Available Voices
+
 ```
 GET /voices
 X-API-Key: your-api-key
 ```
+
 Returns a list of available voice models.
 
-### Get Settings
+### Voice Settings
+
 ```
 GET /settings
 X-API-Key: your-api-key
 ```
+
 Returns the current voice settings.
 
 ### Update Settings
+
 ```
 POST /settings
 Content-Type: application/json
@@ -135,13 +172,13 @@ X-API-Key: your-api-key
     "cache_enabled": true
 }
 ```
-Updates the voice settings.
 
-## 📝 Usage Examples
+## 📢 Client Usage Examples
 
 ### Basic Usage
+
 ```python
-from services.voice.voice_api_client import VoiceAPIClient
+from voice_api_client import VoiceAPIClient
 
 # Create client
 client = VoiceAPIClient(api_url="http://localhost:8100")
@@ -160,10 +197,11 @@ client.update_settings({
 })
 ```
 
-### Using the Enhanced Client
+### With Event Bus
+
 ```python
-from services.voice.enhanced_voice_client import EnhancedVoiceClient
-from utilities.event_system import EventBus
+from voice_api_client import EnhancedVoiceClient
+from utilities.event_system import EventBus, EventType, Event
 
 # Create event bus
 event_bus = EventBus()
@@ -172,90 +210,75 @@ event_bus.start()
 # Create enhanced client
 client = EnhancedVoiceClient(
     api_url="http://localhost:8100",
-    event_bus=event_bus,
-    voice_profile="casual",
-    auto_punctuate=True
+    event_bus=event_bus
 )
 
-# Queue multiple speech requests
-client.speak("This will be said first.")
-client.speak("This will be said second.")
-
-# Interrupt with important message
-client.interrupt("This is an important message!")
-
-# Use different voice profiles
-client.set_voice_profile("formal")
-client.speak("I am now speaking in a more formal tone.")
+# Speak with event notifications
+client.speak("This will trigger voice status events")
 
 # Clean up
 event_bus.stop()
 ```
 
-## 🚀 Docker Deployment
-The voice module comes with Docker support for easy deployment:
+## 🔧 Configuration
 
-- `voice.Dockerfile`: Container definition for the Voice API
-- `docker-compose.yml`: Orchestration for the voice service
-- `voice_docker_requirements.txt`: Dependencies for the container
+Configuration is stored in `config/voice_settings.json` and includes:
 
-Environment variables for Docker:
+- `voice`: TTS voice model name
+- `speed`: Speech speed (0.5-2.0)
+- `pitch`: Voice pitch (0.5-2.0)
+- `volume`: Audio volume (0.0-1.0)
+- `emotion`: Emotional style (neutral, happy, sad)
+- `cache_enabled`: Whether to cache generated audio files
+
+## 🚀 Docker Environment Variables
+
+When running with Docker, you can configure:
+
 - `VOICE_API_PORT`: Port for the Voice API (default: 8100)
-- `VOICE_API_KEY`: API key for securing the API
+- `VOICE_API_KEY`: API key for securing the API (default: sabrina-dev-key)
 - `DEBUG`: Enable debug mode (true/false)
 
-## 🔒 Security Considerations
-- API authentication via API key
-- Docker network isolation for added security
-- Validation of all input parameters
-- Error handling to prevent information leakage
+## 🔍 Troubleshooting
 
-## 📋 Project Structure
+If you encounter issues:
+
+1. **API is not accessible**:
+   - Check if the service is running: `docker ps` or check the process list
+   - Verify port 8100 is not in use by another application
+
+2. **Audio playback issues**:
+   - Check if the required audio libraries are installed
+   - Try installing additional audio backends: `pip install pygame sounddevice soundfile playsound`
+
+3. **TTS model issues**:
+   - Check if the model was downloaded correctly
+   - Look for error messages in the logs
+
+4. **Container won't start**:
+   - Check docker logs: `docker compose logs`
+   - Ensure volumes are properly mounted
+
+## 📦 File Structure
+
 ```
 /services/voice/
-│-- voice_api.py                  # FastAPI-based Voice API server
-│-- voice_api_client.py           # API client for voice interactions
-│-- enhanced_voice_client.py      # Advanced voice client with additional features
-│-- voice_module_test.py          # Test script for the voice service
-│-- voice.Dockerfile              # Docker container setup
-│-- docker-compose.yml            # Container orchestration
-│-- voice_docker_requirements.txt # Dependencies for Docker
-│-- setup_guide.md                # Installation and configuration guide
-│-- README.md                     # Module documentation
+│-- voice_api.py                  # FastAPI server
+│-- voice_api_client.py           # Client library
+│-- tts_implementation.py         # TTS engine implementation
+│-- voice_playback.py             # Audio playback utilities
+│-- voice_module_test.py          # Test script
+│-- voice.Dockerfile              # Docker configuration
+│-- docker-compose.yml            # Docker compose setup
+│-- voice_docker_requirements.txt # Dependencies
+│-- setup_voice.py                # Setup script
+│-- /config/                      # Configuration files
+│-- /data/                        # Data storage
+│   │-- /audio_cache/            # Cached audio files
+│-- /logs/                        # Log files
+│-- /models/                      # TTS models
 ```
 
-## 🧪 Testing
-The voice module includes a comprehensive test script that verifies all functionality:
+## 📋 License
 
-```bash
-# Run all tests
-python voice_module_test.py --test all
-
-# Test specific functionality
-python voice_module_test.py --test speak
-python voice_module_test.py --test settings
-```
-
-## 🛣️ Roadmap
-- [ ] Multi-language support
-- [ ] Voice cloning for personalized voices
-- [ ] SSML (Speech Synthesis Markup Language) support
-- [ ] Real-time voice parameter adjustment
-- [ ] Integration with additional TTS backends
-
-## 🤝 Integration with Sabrina AI Core
-The voice module integrates with the Sabrina AI Core through:
-
-1. The Enhanced Voice Client with event bus integration
-2. Standardized voice status events
-3. Speech queue management for coordinated voice output
-4. Emotional voice adaptation based on context
-
-## 💡 Troubleshooting
-See the `setup_guide.md` file for detailed troubleshooting steps and solutions to common issues.
-
-## 📄 License
 MIT License
-
-## 🌐 Contact
-Sabrina AI Development Team

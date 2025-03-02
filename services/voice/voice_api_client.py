@@ -1,20 +1,17 @@
 """
-Sabrina AI Voice API Client - Enhanced with Audio Playback
-=========================================================
-Client library for interacting with the Voice API service with audio playback.
-
-This module provides a simple interface for other Sabrina AI components
-to use the voice synthesis capabilities without directly dealing with
-the API requests and responses.
+Modified Voice API Client for Sabrina AI
+======================================
+Improved version of the voice client with better Docker compatibility
+and more robust audio file handling.
 """
 
 import os
 import time
 import logging
 import requests
+import tempfile
 from typing import Dict, Any, List, Optional
 import traceback
-import tempfile
 
 # Configure logging
 logging.basicConfig(
@@ -23,30 +20,111 @@ logging.basicConfig(
 )
 logger = logging.getLogger("voice_api_client")
 
-# Try to import audio playback
+# Try to import improved audio playback
 try:
     from voice_playback import play_audio, stop_audio, is_playing
 
     audio_playback_available = True
     logger.info("Audio playback module loaded successfully")
 except ImportError:
-    logger.warning("Audio playback module not found, speech will be silent")
+    logger.warning("Audio playback module not found, attempting fallback methods")
+
+    # Try to find standard audio libraries
     audio_playback_available = False
+    standard_audio_available = False
 
-    # Dummy functions for compatibility
-    def play_audio(file_path):
-        logger.info(f"Would play audio file: {file_path}")
-        return False
+    try:
+        import pygame
 
-    def stop_audio():
-        pass
+        pygame.mixer.init(frequency=48000)
 
-    def is_playing():
-        return False
+        def play_audio(file_path):
+            try:
+                pygame.mixer.music.load(file_path)
+                pygame.mixer.music.play()
+
+                # Wait for playback to complete
+                while pygame.mixer.music.get_busy():
+                    time.sleep(0.1)
+                return True
+            except Exception as e:
+                logger.error(f"Pygame audio playback failed: {e}")
+                return False
+
+        def stop_audio():
+            try:
+                pygame.mixer.music.stop()
+            except Exception as e:
+                logger.warning(f"Error: {e}")
+                pass
+
+        def is_playing():
+            try:
+                return pygame.mixer.music.get_busy()
+            except Exception as e:
+                logger.warning(f"Error: {e}")
+                return False
+
+        audio_playback_available = True
+        standard_audio_available = True
+        logger.info("Using pygame for audio playback")
+    except ImportError:
+        logger.debug("pygame not available")
+
+    # Try sounddevice if pygame failed
+    if not standard_audio_available:
+        try:
+            import sounddevice as sd
+            import soundfile as sf
+
+            def play_audio(file_path):
+                try:
+                    data, samplerate = sf.read(file_path)
+                    sd.play(data, samplerate)
+                    sd.wait()  # Wait until playback is finished
+                    return True
+                except Exception as e:
+                    logger.error(f"Sounddevice audio playback failed: {e}")
+                    return False
+
+            def stop_audio():
+                try:
+                    sd.stop()
+                except Exception as e:
+                    logger.warning(f"Error: {e}")
+                    pass
+
+            def is_playing():
+                try:
+                    return sd.get_status().active
+                except Exception as e:
+                    logger.warning(f"Error: {e}")
+                    return False
+
+            audio_playback_available = True
+            standard_audio_available = True
+            logger.info("Using sounddevice for audio playback")
+        except ImportError:
+            logger.debug("sounddevice not available")
+
+    # If all else fails, use dummy functions
+    if not standard_audio_available:
+
+        def play_audio(file_path):
+            logger.info(f"Would play audio file: {file_path}")
+            return False
+
+        def stop_audio():
+            pass
+
+        def is_playing():
+            return False
+
+        logger.warning("Using dummy audio playback functions (no audio will play)")
 
 
 class VoiceAPIClient:
-    """Client for the Sabrina AI Voice API"""
+    """Client for the Sabrina AI Voice API with improved file handling"""
 
     def __init__(self, api_url="http://localhost:8100", api_key=None):
         """
@@ -64,6 +142,7 @@ class VoiceAPIClient:
         self.settings_cache = None
         self.last_audio_file = None
         self.temp_files = []
+        self.temp_dir = tempfile.mkdtemp(prefix="sabrina_voice_")
 
         # Use a persistent session for better performance
         self.session = requests.Session()
@@ -79,6 +158,8 @@ class VoiceAPIClient:
 
         atexit.register(self._cleanup_temp_files)
 
+        logger.info(f"Temporary directory created: {self.temp_dir}")
+
     def _cleanup_temp_files(self):
         """Clean up temporary files when the program exits"""
         for file_path in self.temp_files:
@@ -88,6 +169,16 @@ class VoiceAPIClient:
                     logger.debug(f"Cleaned up temporary file: {file_path}")
             except Exception as e:
                 logger.debug(f"Error cleaning up temp file {file_path}: {e}")
+
+        # Try to remove the temp directory
+        try:
+            if os.path.exists(self.temp_dir):
+                import shutil
+
+                shutil.rmtree(self.temp_dir, ignore_errors=True)
+        except Exception as e:
+            logger.warning(f"Error: {e}")
+            pass
 
     def test_connection(self) -> bool:
         """
@@ -166,7 +257,11 @@ class VoiceAPIClient:
                         if audio_file:
                             # Play the audio
                             self.last_audio_file = audio_file
-                            play_audio(audio_file)
+                            playback_success = play_audio(audio_file)
+                            if not playback_success:
+                                logger.warning(
+                                    f"Audio playback failed for: {audio_file}"
+                                )
                             return True
                         else:
                             logger.error("Failed to download audio file")
@@ -196,7 +291,7 @@ class VoiceAPIClient:
 
     def _download_audio(self, audio_url: str) -> Optional[str]:
         """
-        Download audio file from URL
+        Download audio file from URL to a clean temporary location
 
         Args:
             audio_url: URL of the audio file
@@ -205,12 +300,9 @@ class VoiceAPIClient:
             Path to the downloaded file, or None if download failed
         """
         try:
-            # Create a temporary file with .wav extension
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
-                temp_path = temp_file.name
-
-            # Add to cleanup list
-            self.temp_files.append(temp_path)
+            # Create a unique filename based on url path
+            url_path = audio_url.split("/")[-1]
+            temp_path = os.path.join(self.temp_dir, f"voice_{url_path}")
 
             # Download the file
             response = self.session.get(audio_url, stream=True, timeout=10.0)
@@ -220,6 +312,8 @@ class VoiceAPIClient:
                     for chunk in response.iter_content(chunk_size=8192):
                         f.write(chunk)
 
+                # Add to cleanup list
+                self.temp_files.append(temp_path)
                 logger.info(f"Downloaded audio to {temp_path}")
                 return temp_path
             else:
@@ -418,14 +512,38 @@ class EnhancedVoiceClient:
         # Post event if event bus is available
         if self.event_bus:
             try:
-                self.event_bus.post_event(
-                    self.event_bus.create_event(
-                        event_type="VOICE_STATUS",
-                        data={"status": "speaking_started", "text": text},
+                # Create event object - use standard EventType.VOICE if available
+                event_type = getattr(self.event_bus, "EventType", None)
+                if event_type and hasattr(event_type, "VOICE"):
+                    event_cls = getattr(self.event_bus, "Event", None)
+                    if event_cls:
+                        event = event_cls(
+                            event_type=event_type.VOICE,
+                            data={"status": "speaking_started", "text": text},
+                            source="enhanced_voice_client",
+                        )
+                        self.event_bus.post_event(event)
+                    else:
+                        logger.debug("Event class not found, using create_event method")
+                        event = self.event_bus.create_event(
+                            event_type="VOICE",
+                            data={"status": "speaking_started", "text": text},
+                            source="enhanced_voice_client",
+                        )
+                        self.event_bus.post_event(event)
+                else:
+                    logger.debug("EventType.VOICE not found, using string 'VOICE'")
+                    # Fall back to simple event posting
+                    self.event_bus.post_event(
+                        self.event_bus.create_event(
+                            event_type="VOICE",
+                            data={"status": "speaking_started", "text": text},
+                            source="enhanced_voice_client",
+                        )
                     )
-                )
             except Exception as e:
                 logger.error(f"Error posting speaking_started event: {str(e)}")
+                logger.error(traceback.format_exc())
 
         # Call parent speak method
         success = self.client.speak(text, **kwargs)
@@ -448,15 +566,39 @@ class EnhancedVoiceClient:
         # Post event if event bus is available
         if self.event_bus:
             try:
-                event_type = "speaking_completed" if success else "speaking_failed"
-                self.event_bus.post_event(
-                    self.event_bus.create_event(
-                        event_type="VOICE_STATUS",
-                        data={"status": event_type, "text": text, "success": success},
+                event_status = "speaking_completed" if success else "speaking_failed"
+                event_data = {"status": event_status, "text": text, "success": success}
+
+                # Create and post event with type adaptation
+                event_type = getattr(self.event_bus, "EventType", None)
+                if event_type and hasattr(event_type, "VOICE"):
+                    event_cls = getattr(self.event_bus, "Event", None)
+                    if event_cls:
+                        event = event_cls(
+                            event_type=event_type.VOICE,
+                            data=event_data,
+                            source="enhanced_voice_client",
+                        )
+                        self.event_bus.post_event(event)
+                    else:
+                        event = self.event_bus.create_event(
+                            event_type="VOICE",
+                            data=event_data,
+                            source="enhanced_voice_client",
+                        )
+                        self.event_bus.post_event(event)
+                else:
+                    # Fall back to simple event posting
+                    self.event_bus.post_event(
+                        self.event_bus.create_event(
+                            event_type="VOICE",
+                            data=event_data,
+                            source="enhanced_voice_client",
+                        )
                     )
-                )
             except Exception as e:
-                logger.error(f"Error posting {event_type} event: {str(e)}")
+                logger.error(f"Error posting {event_status} event: {str(e)}")
+                logger.error(traceback.format_exc())
 
         return success
 
