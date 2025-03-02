@@ -1,17 +1,15 @@
 """
-Sabrina AI Voice API Service - Updated with Real TTS
-===================================================
-FastAPI-based voice service that provides TTS (Text-to-Speech) capabilities
-for the Sabrina AI Assistant system with enhanced TTS implementation.
+Sabrina AI Voice API Service
+===========================
+FastAPI-based voice service providing text-to-speech capabilities
+for the Sabrina AI Assistant system with simplified implementation.
 """
 
 import os
 import uuid
 import json
 import logging
-import hashlib
-import asyncio
-from typing import Dict, Optional, Any
+from typing import Optional
 from pydantic import BaseModel, Field
 import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, status, Request
@@ -19,7 +17,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import APIKeyHeader
-import traceback
 
 # Configure logging
 logging.basicConfig(
@@ -132,125 +129,18 @@ class VoiceSettingsManager:
 # ================== Import TTS Engine ==================
 
 try:
-    # Import our enhanced TTS engine
+    # Import TTS engine
     from tts_implementation import TTSEngine
 
-    logger.info("Imported enhanced TTS engine")
+    logger.info("Imported TTS engine")
 except ImportError:
-    logger.error("Failed to import TTS implementation. Using placeholder.")
-
-    # Fallback to basic implementation if import fails
-    class TTSEngine:
-        """Placeholder TTS engine if enhanced implementation is not available"""
-
-        def __init__(self, settings_manager):
-            self.settings_manager = settings_manager
-            self.cache_dir = "data/audio_cache"
-            self.tts_initialized = False
-            self.voice_models = [
-                "en_US-jenny-medium",
-                "en_US-default",
-            ]
-            os.makedirs(self.cache_dir, exist_ok=True)
-
-            # Try to initialize (just logging)
-            logger.warning(
-                "Using placeholder TTS engine - no real speech synthesis available"
-            )
-            self.tts_initialized = True
-
-        def _get_cache_path(self, text: str, settings: Dict[str, Any]) -> str:
-            """Get cache file path for the given text and settings"""
-            # Create a unique hash based on text and voice settings
-            settings_str = json.dumps(
-                {k: v for k, v in settings.items() if k != "cache"}
-            )
-            cache_key = f"{text}|{settings_str}"
-            cache_hash = hashlib.md5(cache_key.encode("utf-8")).hexdigest()
-            return os.path.join(self.cache_dir, f"{cache_hash}.wav")
-
-        async def speak(
-            self, text: str, voice_settings: Optional[Dict[str, Any]] = None
-        ) -> str:
-            """Placeholder speech synthesis method"""
-            # Get settings and cache path
-            settings = self.settings_manager.get_settings().model_dump()
-            if voice_settings:
-                for key, value in voice_settings.items():
-                    if value is not None:
-                        settings[key] = value
-
-            cache_path = self._get_cache_path(text, settings)
-
-            # Simulate TTS processing
-            await asyncio.sleep(0.5)
-
-            # Create a simple tone as placeholder
-            await self._create_test_wav(cache_path)
-
-            return cache_path
-
-        async def _create_test_wav(self, file_path: str):
-            """Create a test WAV file for demonstration purposes"""
-            try:
-                import numpy as np
-                from scipy.io import wavfile
-
-                # Create a simple sine wave
-                sample_rate = 48000
-                duration = 2  # seconds
-                t = np.linspace(
-                    0, duration, int(sample_rate * duration), endpoint=False
-                )
-
-                # Create a tone that changes pitch
-                frequency = 440  # A4 note
-                amplitude = 0.5
-
-                # Add some variation for different texts
-                seed_value = sum(ord(c) for c in file_path)
-                np.random.seed(seed_value)
-
-                # Create a sound with varying frequency
-                factor = 0.5 + np.random.random()
-                wave = amplitude * np.sin(2 * np.pi * frequency * factor * t)
-
-                # Normalize to 16-bit range
-                audio = np.int16(wave * 32767)
-
-                # Save as WAV file
-                os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                wavfile.write(file_path, sample_rate, audio)
-
-            except Exception as e:
-                logger.error(f"Error creating test WAV file: {str(e)}")
-                # Fallback to even simpler WAV creation
-                os.makedirs(os.path.dirname(file_path), exist_ok=True)
-                with open(file_path, "wb") as f:
-                    # WAV header (44 bytes) + minimal audio data
-                    f.write(
-                        bytes.fromhex(
-                            "52 49 46 46 24 00 00 00 57 41 56 45 66 6D 74 20 10 00 00 00 01 00 01 00"
-                            "44 AC 00 00 88 58 01 00 02 00 10 00 64 61 74 61 00 00 00 00"
-                        )
-                    )
-
-        async def _generate_speech(
-            self, text: str, output_path: str, settings: Dict[str, Any]
-        ) -> bool:
-            """Placeholder for speech generation"""
-            await self._create_test_wav(output_path)
-            return True
-
-        async def _fallback_synthesis(
-            self, text: str, output_path: str, settings: Dict[str, Any]
-        ) -> str:
-            """Placeholder for fallback synthesis"""
-            await self._create_test_wav(output_path)
-            return output_path
+    logger.error(
+        "Failed to import TTS implementation. Voice API will not function correctly."
+    )
+    raise
 
 
-# ================== Setup App and TTS ==================
+# ================== Setup App ==================
 
 # Setup FastAPI app
 app = FastAPI(
@@ -297,9 +187,8 @@ async def catch_exceptions_middleware(request: Request, call_next):
         return await call_next(request)
     except Exception as e:
         logger.error(f"Unhandled exception: {str(e)}")
-        logger.error(traceback.format_exc())
         return JSONResponse(
-            status_code=500,  # Use integer 500 instead of status.HTTP_500_INTERNAL_SERVER_ERROR
+            status_code=500,
             content={"detail": "Internal server error", "error": str(e)},
         )
 
@@ -323,9 +212,7 @@ async def speak(request: SpeakRequest, api_key: str = Depends(verify_api_key)):
     try:
         # Check if text is provided
         if not request.text:
-            raise HTTPException(
-                status_code=400, detail="Text is required"  # Use integer 400
-            )
+            raise HTTPException(status_code=400, detail="Text is required")
 
         # Convert text to speech
         audio_path = await tts_engine.speak(
@@ -352,9 +239,8 @@ async def speak(request: SpeakRequest, api_key: str = Depends(verify_api_key)):
 
     except Exception as e:
         logger.error(f"Error in speak endpoint: {str(e)}")
-        logger.error(traceback.format_exc())
         raise HTTPException(
-            status_code=500,  # Use integer 500
+            status_code=500,
             detail=f"Failed to generate speech: {str(e)}",
         )
 
@@ -381,7 +267,6 @@ async def get_file_audio(text: str, api_key: str = Depends(verify_api_key)):
 
     except Exception as e:
         logger.error(f"Error in get_file_audio endpoint: {str(e)}")
-        logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate speech: {str(e)}",
@@ -441,7 +326,6 @@ async def speak_simple(text: str):
 
     except Exception as e:
         logger.error(f"Error in speak_simple endpoint: {str(e)}")
-        logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate speech: {str(e)}",
@@ -450,16 +334,16 @@ async def speak_simple(text: str):
 
 # ================== Main ==================
 
-# Check if this file is executed directly, not imported
+# Serve static files
+app.mount("/audio", StaticFiles(directory="data/audio_cache"), name="audio")
+
+# Run the server if this file is executed directly
 if __name__ == "__main__":
-    # Check for debug flag in environment
+    # Get configuration from environment
     debug_mode = os.getenv("DEBUG", "false").lower() == "true"
-
-    # Serve static files
-    app.mount("/audio", StaticFiles(directory="data/audio_cache"), name="audio")
-
-    # Run the server
     port = int(os.getenv("VOICE_API_PORT", "8100"))
+
+    # Start the server
     uvicorn.run(
         app, host="0.0.0.0", port=port, log_level="debug" if debug_mode else "info"
     )

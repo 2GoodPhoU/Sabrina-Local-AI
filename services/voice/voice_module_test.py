@@ -5,56 +5,37 @@ Voice Module Test Script for Sabrina AI
 This script tests the voice service and client components.
 
 Usage:
-    python voice_module_test.py [--url URL] [--test TEST_NAME]
+    python voice_module_test.py [--url URL] [--test TEST_NAME] [--start-service]
 
 Options:
-    --url URL        Voice API URL (default: http://localhost:8100)
-    --test TEST_NAME Run a specific test (status, speak, voices, settings, all)
+    --url URL               Voice API URL (default: http://localhost:8100)
+    --test TEST_NAME        Run a specific test (status, speak, voices, settings, enhanced, all)
+    --start-service         Attempt to start voice service if not running
 """
 
-import os
 import sys
 import time
 import logging
 import argparse
 import requests
 import subprocess
-
-# Import event system components
-from utilities.event_system import EventType
+from pathlib import Path
 
 # Set up logging
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("voice_test")
 
-# Add parent directory to PYTHONPATH
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-# Import the voice client
-try:
-    from voice_api_client import VoiceAPIClient
-    from enhanced_voice_client import EnhancedVoiceClient
-except ImportError:
-    logger.error(
-        "Could not import VoiceAPIClient. Make sure the module is in the correct path."
-    )
-    sys.exit(1)
-
-# Import event bus if available for enhanced tests
-try:
-    from utilities.event_system import EventBus
-
-    event_bus_available = True
-except ImportError:
-    logger.warning("EventBus not available. Enhanced tests will be limited.")
-    event_bus_available = False
+# Add parent directory to PYTHONPATH if needed
+script_dir = Path(__file__).parent.absolute()
+project_dir = script_dir.parent if "services" in script_dir.parts else script_dir
+if str(project_dir) not in sys.path:
+    sys.path.insert(0, str(project_dir))
 
 
-def get_args():
-    """Parse command-line arguments"""
+def parse_args():
+    """Parse command line arguments"""
     parser = argparse.ArgumentParser(description="Test the Voice API service")
     parser.add_argument(
         "--url", type=str, default="http://localhost:8100", help="Voice API URL"
@@ -94,28 +75,37 @@ def check_service(url):
 def start_voice_service():
     """Start the voice service"""
     logger.info("Starting voice service...")
-    script_path = os.path.abspath(
-        os.path.join(
-            os.path.dirname(__file__), "..", "services", "voice", "voice_api.py"
-        )
-    )
 
-    if not os.path.exists(script_path):
-        logger.error(f"Voice API script not found: {script_path}")
+    # Find voice_api.py
+    possible_paths = [
+        Path("services/voice/voice_api.py"),
+        Path("voice/voice_api.py"),
+        Path("voice_api.py"),
+    ]
+
+    script_path = None
+    for path in possible_paths:
+        if path.exists():
+            script_path = path
+            break
+
+    if not script_path:
+        logger.error("Voice API script not found")
         return False
 
     # Start the service in a separate process
     try:
         if sys.platform == "win32":
             # Windows
-            subprocess.Popen(
-                [sys.executable, script_path],
+            process = subprocess.Popen(
+                [sys.executable, str(script_path)],
                 creationflags=subprocess.CREATE_NEW_CONSOLE,
             )
+            print(process)
         else:
             # Linux/Mac
-            subprocess.Popen(
-                [sys.executable, script_path],
+            process = subprocess.Popen(
+                [sys.executable, str(script_path)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 start_new_session=True,
@@ -123,18 +113,61 @@ def start_voice_service():
 
         # Wait for service to start
         logger.info("Waiting for voice service to start...")
-        for _ in range(10):  # Try for 10 seconds
+        for i in range(10):  # Try for 10 seconds
             time.sleep(1)
+            sys.stdout.write(".")
+            sys.stdout.flush()
             if check_service("http://localhost:8100"):
+                print()  # New line
                 logger.info("Voice service started successfully")
                 return True
 
+        print()  # New line
         logger.error("Voice service did not start within the timeout period")
         return False
 
     except Exception as e:
         logger.error(f"Error starting voice service: {str(e)}")
         return False
+
+
+def import_client():
+    """Import the voice client with fallbacks"""
+    try:
+        # Try to import enhanced client first
+        try:
+            from services.voice.enhanced_voice_client import EnhancedVoiceClient
+            from services.voice.voice_api_client import VoiceAPIClient
+
+            return VoiceAPIClient, EnhancedVoiceClient, True
+        except ImportError:
+            # Try regular path
+            sys.path.append(str(script_dir))
+            from enhanced_voice_client import EnhancedVoiceClient
+            from voice_api_client import VoiceAPIClient
+
+            return VoiceAPIClient, EnhancedVoiceClient, True
+    except ImportError:
+        # Fall back to just VoiceAPIClient if enhanced client not available
+        try:
+            from services.voice.voice_api_client import VoiceAPIClient
+
+            logger.warning(
+                "Enhanced voice client not available, testing with basic client only"
+            )
+            return VoiceAPIClient, None, False
+        except ImportError:
+            try:
+                sys.path.append(str(script_dir))
+                from voice_api_client import VoiceAPIClient
+
+                logger.warning(
+                    "Enhanced voice client not available, testing with basic client only"
+                )
+                return VoiceAPIClient, None, False
+            except ImportError:
+                logger.error("Failed to import voice client modules")
+                sys.exit(1)
 
 
 def test_status(client):
@@ -180,7 +213,7 @@ def test_voices(client):
     voices = client.get_voices()
 
     if voices:
-        logger.info(f"✓ Retrieved {len(voices)} voices: {', '.join(voices)}")
+        logger.info(f"✓ Retrieved {len(voices)} voices: {', '.join(voices[:3])}...")
         return True
     else:
         logger.error("✗ Failed to retrieve voices")
@@ -200,21 +233,31 @@ def test_settings(client):
     logger.info(f"✓ Current settings: {settings}")
 
     # Test updating settings
-    new_settings = {"speed": 1, "pitch": 1, "volume": 0.85}
-
+    new_settings = {"speed": 1.1, "pitch": 0.9, "volume": 0.85}
     logger.info(f"Updating settings: {new_settings}")
-    result = client.update_settings(new_settings)
 
+    result = client.update_settings(new_settings)
     if result:
         logger.info("✓ Settings updated successfully")
 
         # Verify settings were updated
         updated_settings = client.get_settings()
 
-        # Check if settings match
-        settings_match = all(
-            updated_settings.get(key) == value for key, value in new_settings.items()
-        )
+        # Check if settings match (allowing for minor float differences)
+        settings_match = True
+        for key, value in new_settings.items():
+            if key not in updated_settings:
+                settings_match = False
+                break
+            # For numerical values, check if they're close enough
+            if isinstance(value, (int, float)):
+                if abs(updated_settings.get(key, 0) - value) > 0.01:
+                    settings_match = False
+                    break
+            else:
+                if updated_settings.get(key) != value:
+                    settings_match = False
+                    break
 
         if settings_match:
             logger.info("✓ Settings verification successful")
@@ -254,66 +297,83 @@ def test_settings(client):
         return False
 
 
-def test_enhanced_client():
+def test_enhanced_client(api_url):
     """Test the enhanced voice client with event bus"""
-    if not event_bus_available:
-        logger.warning("EventBus not available. Skipping enhanced client test.")
-        return False
-
     logger.info("Testing enhanced voice client with event bus...")
+
+    # Import required modules
+    try:
+        VoiceAPIClient, EnhancedVoiceClient, enhanced_available = import_client()
+
+        if not enhanced_available or not EnhancedVoiceClient:
+            logger.warning("Enhanced client not available, skipping test")
+            return None
+
+        from utilities.event_system import EventBus, EventType
+    except ImportError:
+        logger.warning("EventBus not available. Skipping enhanced client test.")
+        return None
 
     # Create event bus
     event_bus = EventBus()
     event_bus.start()
 
-    # Create enhanced client
-    client = EnhancedVoiceClient(api_url="http://localhost:8100", event_bus=event_bus)
+    try:
+        # Create enhanced client
+        client = EnhancedVoiceClient(api_url=api_url, event_bus=event_bus)
 
-    # Track events
-    events_received = []
+        # Track events
+        events_received = []
 
-    # Create event handler
-    def event_handler(event):
-        logger.info(f"Received event: {event}")
-        events_received.append(event)
+        # Create event handler
+        def event_handler(event):
+            logger.info(f"Received event: {event}")
+            events_received.append(event)
 
-    # Register event handler for both event types the client is sending
-    handler_id = event_bus.register_handler(
-        event_bus.create_event_handler(
-            event_types=[EventType.VOICE],  # This should match what the client is using
-            callback=event_handler,
+        # Register event handler
+        handler_id = event_bus.register_handler(
+            event_bus.create_event_handler(
+                event_types=[EventType.VOICE],
+                callback=event_handler,
+            )
         )
-    )
 
-    # Test speaking
-    logger.info("Testing speaking with events...")
-    result = client.speak(
-        "This is a test of the enhanced voice client with event notifications."
-    )
+        # Test speaking
+        logger.info("Testing speaking with events...")
+        result = client.speak(
+            "This is a test of the enhanced voice client with event notifications."
+        )
 
-    # Wait for events to be processed
-    time.sleep(1)
+        # Wait for events to be processed
+        time.sleep(1)
 
-    # Check results
-    success = (
-        result
-        and len(events_received) >= 2
-        and any(e.data.get("status") == "speaking_started" for e in events_received)
-        and any(e.data.get("status") == "speaking_completed" for e in events_received)
-    )
+        # Check results
+        success = (
+            result
+            and len(events_received) >= 2
+            and any(e.data.get("status") == "speaking_started" for e in events_received)
+            and any(
+                e.data.get("status") == "speaking_completed" for e in events_received
+            )
+        )
 
-    if success:
-        logger.info("✓ Enhanced client test successful")
-    else:
-        logger.error("✗ Enhanced client test failed")
-        logger.error(f"  - Speech result: {result}")
-        logger.error(f"  - Events received: {len(events_received)}")
+        if success:
+            logger.info("✓ Enhanced client test successful")
+        else:
+            logger.error("✗ Enhanced client test failed")
+            logger.error(f"  - Speech result: {result}")
+            logger.error(f"  - Events received: {len(events_received)}")
 
-    # Clean up
-    event_bus.unregister_handler(handler_id)
-    event_bus.stop()
+        # Clean up
+        event_bus.unregister_handler(handler_id)
+        event_bus.stop()
 
-    return success
+        return success
+    except Exception as e:
+        logger.error(f"Error in enhanced client test: {e}")
+        if event_bus:
+            event_bus.stop()
+        return False
 
 
 def test_voice_variations(client):
@@ -363,12 +423,16 @@ def test_voice_variations(client):
 
 def run_tests(args):
     """Run the specified tests"""
+    # Import client class
+    VoiceAPIClient, EnhancedVoiceClient, _ = import_client()
+
     # Create client
     client = VoiceAPIClient(api_url=args.url)
 
     # Track test results
     results = {}
 
+    # Run tests
     if args.test == "status" or args.test == "all":
         results["status"] = test_status(client)
 
@@ -385,7 +449,9 @@ def run_tests(args):
         results["settings"] = test_settings(client)
 
     if args.test == "enhanced" or args.test == "all":
-        results["enhanced"] = test_enhanced_client()
+        enhanced_result = test_enhanced_client(args.url)
+        if enhanced_result is not None:
+            results["enhanced"] = enhanced_result
 
     # Print summary
     print("\n" + "=" * 50)
@@ -405,7 +471,7 @@ def run_tests(args):
 
 def main():
     """Main entry point"""
-    args = get_args()
+    args = parse_args()
 
     # Check if service is running
     if not check_service(args.url):

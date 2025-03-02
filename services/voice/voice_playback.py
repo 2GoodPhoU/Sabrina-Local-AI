@@ -1,23 +1,24 @@
 """
-Improved Audio Playback Module for Sabrina AI with Windows Path Fix
-=================================================================
-Provides robust audio playback capabilities with multiple fallback methods.
-Fixes specific Windows path issues with quotes and spaces.
+Audio Playback Module for Sabrina AI
+===================================
+Provides robust audio playback capabilities with multiple fallback methods
+and a clean API for voice playback functionality.
 """
 
 import os
 import time
 import logging
 import threading
-import traceback
 import tempfile
 import subprocess
+import shutil
 
+# Configure logging
 logger = logging.getLogger("voice_playback")
 
 
 class AudioPlayer:
-    """Handles audio playback for voice output with improved error handling"""
+    """Handles audio playback with multiple fallback methods"""
 
     def __init__(self):
         """Initialize the audio player"""
@@ -26,55 +27,76 @@ class AudioPlayer:
         self.playback_thread = None
         self.stop_requested = False
         self.playback_methods = []
+        self.temp_files = []
 
-        # Initialize playback methods in order of preference
+        # Create a temporary directory for audio files
+        self.temp_dir = tempfile.mkdtemp(prefix="sabrina_audio_")
+
+        # Initialize available playback methods
         self._init_playback_methods()
 
-    def _init_playback_methods(self):
-        """Initialize available audio playback methods"""
-        # Windows-specific methods first if on Windows
-        if os.name == "nt":  # Windows
-            # 1. Try winsound - most reliable on Windows
+        # Set up cleanup on exit
+        import atexit
+
+        atexit.register(self._cleanup)
+
+    def _cleanup(self):
+        """Clean up temporary files and directory"""
+        for file_path in self.temp_files:
             try:
-                import winsound
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception as e:
+                logger.debug(f"Error cleaning up temp file {file_path}: {e}")
 
-                def play_with_winsound(file_path):
-                    try:
-                        winsound.PlaySound(file_path, winsound.SND_FILENAME)
-                        return True
-                    except Exception as e:
-                        logger.warning(f"winsound playback failed: {e}")
-                        return False
+        # Remove temp directory
+        try:
+            if os.path.exists(self.temp_dir):
+                shutil.rmtree(self.temp_dir, ignore_errors=True)
+        except Exception as e:
+            logger.debug(f"Error removing temp directory: {e}")
 
-                self.playback_methods.append(("winsound", play_with_winsound))
-                logger.info("Initialized winsound for audio playback")
-            except ImportError:
-                logger.debug("winsound not available")
+    def _init_playback_methods(self):
+        """Initialize available audio playback methods in priority order"""
+        # Track successful initialization
+        methods_initialized = 0
 
-            # 2. Try PowerShell approach
-            def play_with_powershell(file_path):
-                try:
-                    # Use PowerShell to play audio without path issues
-                    # Convert path to absolute path to avoid issues
-                    abs_path = os.path.abspath(file_path)
-                    ps_command = f"powershell -c \"(New-Object Media.SoundPlayer '{abs_path}').PlaySync();\""
-                    result = subprocess.run(
-                        ps_command,
-                        shell=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                    )
-                    return result.returncode == 0
-                except Exception as e:
-                    logger.warning(f"PowerShell audio playback failed: {e}")
-                    return False
+        # On Windows, prioritize Windows Media Player via system commands
+        if os.name == "nt":
+            if self._init_windows_commands():
+                methods_initialized += 1
 
-            self.playback_methods.append(("powershell", play_with_powershell))
-            logger.info("Initialized PowerShell for audio playback")
+            if self._init_winsound():
+                methods_initialized += 1
 
-        # Cross-platform methods
-        # 3. Try sounddevice - high quality and reliable
+        # 1. Try sounddevice - high quality and cross-platform
+        if self._init_sounddevice():
+            methods_initialized += 1
+
+        # 2. Try pygame - good cross-platform alternative
+        if self._init_pygame():
+            methods_initialized += 1
+
+        # 3. Try playsound - fixed for Windows path issues
+        if self._init_playsound():
+            methods_initialized += 1
+
+        # Unix system commands as fallback
+        if os.name == "posix" and self._init_unix_commands():
+            methods_initialized += 1
+
+        # Log available methods
+        if methods_initialized > 0:
+            logger.info(
+                f"Initialized {methods_initialized} audio playback methods: {[m[0] for m in self.playback_methods]}"
+            )
+        else:
+            logger.warning(
+                "No audio playback methods available! Voice output won't be audible."
+            )
+
+    def _init_sounddevice(self) -> bool:
+        """Initialize sounddevice audio playback"""
         try:
             import sounddevice as sd
             import soundfile as sf
@@ -83,19 +105,24 @@ class AudioPlayer:
                 try:
                     data, samplerate = sf.read(file_path)
                     sd.play(data, samplerate)
-                    status = sd.wait()  # Wait until playback is finished
-                    print(status)
+                    sd.wait()  # Wait until playback is finished
                     return True
                 except Exception as e:
-                    logger.warning(f"sounddevice playback failed: {e}")
+                    logger.warning(f"Sounddevice playback failed: {e}")
                     return False
 
             self.playback_methods.append(("sounddevice", play_with_sounddevice))
             logger.info("Initialized sounddevice for audio playback")
+            return True
         except ImportError:
-            logger.debug("sounddevice or soundfile not available")
+            logger.debug("Sounddevice not available")
+            return False
+        except Exception as e:
+            logger.warning(f"Failed to initialize sounddevice: {e}")
+            return False
 
-        # 4. Try pygame - good cross-platform alternative
+    def _init_pygame(self) -> bool:
+        """Initialize pygame audio playback"""
         try:
             import pygame
 
@@ -115,98 +142,152 @@ class AudioPlayer:
                         time.sleep(0.1)
                     return True
                 except Exception as e:
-                    logger.warning(f"pygame playback failed: {e}")
+                    logger.warning(f"Pygame playback failed: {e}")
                     return False
 
             self.playback_methods.append(("pygame", play_with_pygame))
             logger.info("Initialized pygame for audio playback")
+            return True
         except ImportError:
-            logger.debug("pygame not available")
+            logger.debug("Pygame not available")
+            return False
+        except Exception as e:
+            logger.warning(f"Failed to initialize pygame: {e}")
+            return False
 
-        # 5. Try playsound - now with no-spaces version for Windows
+    def _init_playsound(self) -> bool:
+        """Initialize playsound with Windows path fixes"""
         try:
             from playsound import playsound
 
             def play_with_playsound(file_path):
                 try:
-                    if os.name == "nt" and (" " in file_path or ":" in file_path):
-                        # On Windows: Create a temp file with a short, safe name to avoid path issues
-                        temp_dir = tempfile.gettempdir()
-                        # Generate a very short name with no spaces or special chars
-                        temp_name = "sabvoice.wav"
-                        temp_path = os.path.join(temp_dir, temp_name)
+                    # For Windows, copy to a simple path to avoid issues with spaces
+                    if os.name == "nt":
+                        # Create a simple temp filename without spaces
+                        simple_path = os.path.join(
+                            self.temp_dir,
+                            f"play_{os.path.basename(file_path).replace(' ', '_')}",
+                        )
 
                         # Copy the file
-                        try:
-                            with open(file_path, "rb") as src, open(
-                                temp_path, "wb"
-                            ) as dst:
-                                dst.write(src.read())
+                        shutil.copy2(file_path, simple_path)
+                        self.temp_files.append(simple_path)
 
-                            # Play from the temp location
-                            playsound(temp_path, block=True)
+                        # Play the copied file
+                        playsound(simple_path, block=True)
+                    else:
+                        # On other systems, play directly
+                        playsound(file_path, block=True)
 
-                            # Clean up
-                            try:
-                                os.remove(temp_path)
-                            except Exception as e:
-                                logger.warning(f"Failed tpo clean up temp file: {e}")
-                                pass
-                            return True
-                        except Exception as e:
-                            logger.warning(f"Failed to copy to temp file: {e}")
-                            # Fall through to normal method
-
-                    # Normal method for non-Windows or simple paths
-                    playsound(file_path, block=True)
                     return True
                 except Exception as e:
-                    logger.warning(f"playsound failed: {e}")
+                    logger.warning(f"Playsound failed: {e}")
                     return False
 
-            self.playback_methods.append(("playsound_fixed", play_with_playsound))
-            logger.info("Initialized playsound with path fixing for audio playback")
+            self.playback_methods.append(("playsound", play_with_playsound))
+            logger.info("Initialized playsound for audio playback")
+            return True
         except ImportError:
-            logger.debug("playsound not available")
+            logger.debug("Playsound not available")
+            return False
+        except Exception as e:
+            logger.warning(f"Failed to initialize playsound: {e}")
+            return False
 
-        # 6. Unix-specific methods
-        if os.name == "posix":  # Unix/Linux/MacOS
+    def _init_winsound(self) -> bool:
+        """Initialize winsound for Windows systems"""
+        if os.name != "nt":
+            return False
 
-            def play_with_system_unix(file_path):
-                # Try several common audio players
-                players = [
-                    ["aplay", file_path],
-                    ["paplay", file_path],
-                    ["mplayer", file_path],
-                    ["afplay", file_path],
-                ]
-                for player_cmd in players:
-                    try:
-                        result = subprocess.run(
-                            player_cmd,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            text=True,
-                        )
-                        if result.returncode == 0:
-                            return True
-                    except Exception as e:
-                        logger.debug(f"Player {player_cmd[0]} error: {str(e)}")
-                        continue
+        try:
+            import winsound
+
+            def play_with_winsound(file_path):
+                try:
+                    winsound.PlaySound(file_path, winsound.SND_FILENAME)
+                    return True
+                except Exception as e:
+                    logger.warning(f"Winsound playback failed: {e}")
+                    return False
+
+            self.playback_methods.append(("winsound", play_with_winsound))
+            logger.info("Initialized winsound for audio playback")
+            return True
+        except ImportError:
+            logger.debug("Winsound not available")
+            return False
+        except Exception as e:
+            logger.warning(f"Failed to initialize winsound: {e}")
+            return False
+
+    def _init_unix_commands(self) -> bool:
+        """Initialize Unix command-line audio players"""
+
+        def play_with_unix_commands(file_path):
+            # Try several common audio players
+            players = [
+                ["aplay", file_path],
+                ["paplay", file_path],
+                ["mplayer", file_path],
+                ["afplay", file_path],  # macOS
+            ]
+            for player_cmd in players:
+                try:
+                    result = subprocess.run(
+                        player_cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                    )
+                    if result.returncode == 0:
+                        return True
+                except Exception:
+                    continue
+            return False
+
+        self.playback_methods.append(("unix_commands", play_with_unix_commands))
+        logger.info("Initialized Unix command-line audio players")
+        return True
+
+    def _init_windows_commands(self) -> bool:
+        """Initialize Windows-specific audio playback methods"""
+
+        def play_with_windows_commands(file_path):
+            try:
+                # Use Windows Media Player to play audio (no quotes needed)
+                cmd = f"powershell -c \"(New-Object Media.SoundPlayer -ArgumentList '{file_path}').PlaySync()\""
+
+                result = subprocess.run(
+                    cmd,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+
+                if result.returncode == 0:
+                    return True
+
+                # Alternative Windows command
+                cmd2 = f"powershell -c \"$player = New-Object System.Media.SoundPlayer; $player.SoundLocation = '{file_path}'; $player.PlaySync()\""
+
+                result = subprocess.run(
+                    cmd2,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+
+                return result.returncode == 0
+            except Exception as e:
+                logger.warning(f"Windows commands playback failed: {e}")
                 return False
 
-            self.playback_methods.append(("system_unix", play_with_system_unix))
-            logger.info("Initialized system commands for audio playback on Unix")
-
-        # 7. Log all available methods
-        if self.playback_methods:
-            logger.info(
-                f"Available audio playback methods: {[m[0] for m in self.playback_methods]}"
-            )
-        else:
-            logger.warning(
-                "No audio playback methods available! Voice output won't be audible."
-            )
+        self.playback_methods.append(("windows_commands", play_with_windows_commands))
+        logger.info("Initialized Windows audio playback methods")
+        return True
 
     def play(self, audio_file: str) -> bool:
         """
@@ -249,8 +330,6 @@ class AudioPlayer:
         try:
             # Try each playback method until one succeeds
             success = False
-
-            # Log the full file path for debugging
             logger.debug(f"Attempting to play audio file: {audio_file}")
 
             for method_name, play_func in self.playback_methods:
@@ -265,7 +344,6 @@ class AudioPlayer:
                         break
                 except Exception as e:
                     logger.debug(f"Playback with {method_name} failed: {str(e)}")
-                    logger.debug(traceback.format_exc())
                     continue
 
             if not success and not self.stop_requested:
@@ -273,7 +351,6 @@ class AudioPlayer:
 
         except Exception as e:
             logger.error(f"Error in audio playback thread: {str(e)}")
-            logger.error(traceback.format_exc())
 
         finally:
             self.playing = False
@@ -281,17 +358,17 @@ class AudioPlayer:
 
     def stop(self):
         """Stop current audio playback"""
-        if self.playing and self.playback_thread:
+        if self.playing and self.playback_thread and self.playback_thread.is_alive():
             # Signal playback to stop
             self.stop_requested = True
 
-            # Wait for thread to finish (with timeout)
-            if self.playback_thread.is_alive():
-                self.playback_thread.join(timeout=1.0)
+            # Wait for playback to finish (with timeout)
+            self.playback_thread.join(timeout=1.0)
 
-            # Reset state
-            self.playing = False
-            self.current_audio = None
+        # Reset state
+        self.playing = False
+        self.current_audio = None
+        self.stop_requested = False
 
     def is_playing(self) -> bool:
         """
@@ -300,16 +377,27 @@ class AudioPlayer:
         Returns:
             bool: True if playing, False otherwise
         """
-        return self.playing
+        return self.playing and self.playback_thread and self.playback_thread.is_alive()
 
 
-# Create global player instance for easy access
-_audio_player = None
+# Create singleton instance for easy global access
+_player_instance = None
+
+
+def _get_player() -> AudioPlayer:
+    """Get or create the singleton AudioPlayer instance"""
+    global _player_instance
+    if _player_instance is None:
+        _player_instance = AudioPlayer()
+    return _player_instance
+
+
+# Public API
 
 
 def play_audio(file_path: str) -> bool:
     """
-    Play an audio file using the best available method
+    Play an audio file
 
     Args:
         file_path: Path to the audio file
@@ -317,20 +405,12 @@ def play_audio(file_path: str) -> bool:
     Returns:
         bool: True if playback started, False otherwise
     """
-    global _audio_player
-
-    if _audio_player is None:
-        _audio_player = AudioPlayer()
-
-    return _audio_player.play(file_path)
+    return _get_player().play(file_path)
 
 
 def stop_audio():
     """Stop current audio playback"""
-    global _audio_player
-
-    if _audio_player is not None:
-        _audio_player.stop()
+    _get_player().stop()
 
 
 def is_playing() -> bool:
@@ -340,9 +420,4 @@ def is_playing() -> bool:
     Returns:
         bool: True if playing, False otherwise
     """
-    global _audio_player
-
-    if _audio_player is None:
-        return False
-
-    return _audio_player.is_playing()
+    return _get_player().is_playing()
