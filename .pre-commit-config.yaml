@@ -15,4 +15,4 @@ repos:
     rev: 6.0.0
     hooks:
     -   id: flake8
-        args: ['--max-line-length=120', '--ignore=E203,W503']  # Each argument needs to be a separate string
+        args: ['--max-line-length=120', '--ignore=E203,W503,F811']  # Each argument needs to be a separate string

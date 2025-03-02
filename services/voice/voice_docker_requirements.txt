@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pydantic
+requests
+python-multipart
+aiofiles
+numpy
+scipy
+TTS
+python-dotenv
