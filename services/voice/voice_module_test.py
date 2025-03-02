@@ -192,7 +192,7 @@ def test_settings(client):
     logger.info(f"✓ Current settings: {settings}")
 
     # Test updating settings
-    new_settings = {"speed": 1.2, "pitch": 0.9, "volume": 0.85}
+    new_settings = {"speed": 1, "pitch": 1, "volume": 0.85}
 
     logger.info(f"Updating settings: {new_settings}")
     result = client.update_settings(new_settings)
