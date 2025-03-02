@@ -197,7 +197,7 @@ except ImportError:
                 from scipy.io import wavfile
 
                 # Create a simple sine wave
-                sample_rate = 22050
+                sample_rate = 48000
                 duration = 2  # seconds
                 t = np.linspace(
                     0, duration, int(sample_rate * duration), endpoint=False

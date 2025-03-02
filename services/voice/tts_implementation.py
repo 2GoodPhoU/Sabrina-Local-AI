@@ -338,7 +338,7 @@ class TTSEngine:
             logger.error(traceback.format_exc())
             return wav  # Return original on error
 
-    def _save_wav(self, wav: np.ndarray, output_path: str, sample_rate: int = 22050):
+    def _save_wav(self, wav: np.ndarray, output_path: str, sample_rate: int = 48000):
         """Save audio data to WAV file
 
         Args:
@@ -382,7 +382,7 @@ class TTSEngine:
             # This is a basic fallback when the main TTS fails
 
             # Create a simple tone sequence
-            sample_rate = 22050
+            sample_rate = 48000
             duration = min(0.1 * len(text.split()), 10)  # 0.1s per word, max 10s
             duration = max(duration, 1.0)  # At least 1 second
 
@@ -453,7 +453,7 @@ class TTSEngine:
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
                 # Create a simple silent audio file
-                sample_rate = 22050
+                sample_rate = 48000
                 duration = 1.0  # 1 second
 
                 # Generate silent audio
