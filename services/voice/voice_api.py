@@ -299,7 +299,7 @@ async def catch_exceptions_middleware(request: Request, call_next):
         logger.error(f"Unhandled exception: {str(e)}")
         logger.error(traceback.format_exc())
         return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=500,  # Use integer 500 instead of status.HTTP_500_INTERNAL_SERVER_ERROR
             content={"detail": "Internal server error", "error": str(e)},
         )
 
@@ -324,7 +324,7 @@ async def speak(request: SpeakRequest, api_key: str = Depends(verify_api_key)):
         # Check if text is provided
         if not request.text:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Text is required"
+                status_code=400, detail="Text is required"  # Use integer 400
             )
 
         # Convert text to speech
@@ -354,7 +354,7 @@ async def speak(request: SpeakRequest, api_key: str = Depends(verify_api_key)):
         logger.error(f"Error in speak endpoint: {str(e)}")
         logger.error(traceback.format_exc())
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=500,  # Use integer 500
             detail=f"Failed to generate speech: {str(e)}",
         )
 

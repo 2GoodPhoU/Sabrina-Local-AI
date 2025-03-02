@@ -87,10 +87,10 @@ class TTSEngine:
 
             # Log available models for reference
             logger.info(
-                f"Available speaker voices:{self.tts.speakers if hasattr(self.tts, 'speakers') else 'No speaker selection available'}"
+                f"Available speaker voices: {self.tts.speakers if hasattr(self.tts, 'speakers') else 'No speaker selection available'}"
             )
             logger.info(
-                f"Available languages:{self.tts.languages if hasattr(self.tts, 'languages') else 'No language selection available'}"
+                f"Available languages: {self.tts.languages if hasattr(self.tts, 'languages') else 'No language selection available'}"
             )
 
         except ImportError as e:
@@ -136,6 +136,53 @@ class TTSEngine:
 
         return text
 
+    async def speak(self, text: str, voice_settings: Dict[str, Any] = None) -> str:
+        """Generate speech for the given text
+
+        Args:
+            text: Text to convert to speech
+            voice_settings: Voice settings to use for this speech
+
+        Returns:
+            Path to generated audio file
+        """
+        import hashlib
+        import json
+        import os
+
+        # Get settings
+        settings = self.settings_manager.get_settings().dict()
+        if voice_settings:
+            # Update with provided settings
+            for key, value in voice_settings.items():
+                if value is not None:
+                    settings[key] = value
+
+        # Get cache path
+        use_cache = settings.get("cache_enabled", True)
+        if "cache" in voice_settings:
+            use_cache = voice_settings["cache"]
+
+        # Create a unique hash based on text and settings
+        settings_for_hash = {k: v for k, v in settings.items() if k != "cache_enabled"}
+        cache_key = f"{text}|{json.dumps(settings_for_hash)}"
+        cache_hash = hashlib.md5(cache_key.encode("utf-8")).hexdigest()
+        output_path = os.path.join(self.cache_dir, f"{cache_hash}.wav")
+
+        # Check if cached file exists
+        if use_cache and os.path.exists(output_path):
+            logger.info(f"Using cached audio file: {output_path}")
+            return output_path
+
+        # Generate speech
+        if self.tts_initialized:
+            success = await self._generate_speech(text, output_path, settings)
+            if success:
+                return output_path
+
+        # Fallback to alternative synthesis if TTS fails
+        return await self._fallback_synthesis(text, output_path, settings)
+
     async def _generate_speech(
         self, text: str, output_path: str, settings: Dict[str, Any]
     ) -> bool:
@@ -163,7 +210,9 @@ class TTSEngine:
             pitch = settings.get("pitch", 1.0)
             volume = settings.get("volume", 0.8)
             emotion = settings.get("emotion", "neutral")
+
             print(voice)
+
             # Map voice to model parameters
             speaker = None
             language = None
