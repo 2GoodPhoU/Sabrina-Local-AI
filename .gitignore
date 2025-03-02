@@ -57,6 +57,8 @@ models/
 config/api_keys.env
 data/temp/
 data/captures/
+services/vision/data/captures/
+services/vision/captures/
 
 # Testing
 .pytest_cache/
