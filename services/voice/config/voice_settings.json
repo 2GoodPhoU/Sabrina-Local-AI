@@ -1,8 +1,8 @@
 {
     "voice": "en_US-jenny-medium",
-    "speed": 1.0,
-    "pitch": 1.0,
-    "volume": 0.8,
+    "speed": 1.2,
+    "pitch": 0.9,
+    "volume": 0.85,
     "emotion": "neutral",
     "cache_enabled": true
 }

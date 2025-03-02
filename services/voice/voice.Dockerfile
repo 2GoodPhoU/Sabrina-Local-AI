@@ -8,7 +8,6 @@ WORKDIR /app
 
 # Copy required files
 COPY voice_docker_requirements.txt requirements.txt
-COPY tts-requirements.txt tts-requirements.txt
 COPY voice_api.py voice_api.py
 COPY voice_api_client.py voice_api_client.py
 COPY tts_implementation.py tts_implementation.py
@@ -19,7 +18,6 @@ RUN mkdir -p logs data/audio_cache config models
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir -r tts-requirements.txt
 
 # Expose API port
 EXPOSE 8100
