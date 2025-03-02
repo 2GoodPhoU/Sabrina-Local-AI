@@ -32,7 +32,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 # Import the voice client
 try:
-    from services.voice.voice_api_client import VoiceAPIClient, EnhancedVoiceClient
+    from voice_api_client import VoiceAPIClient
+    from enhanced_voice_client import EnhancedVoiceClient
 except ImportError:
     logger.error(
         "Could not import VoiceAPIClient. Make sure the module is in the correct path."
