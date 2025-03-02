@@ -1,7 +1,8 @@
 """
-Improved Audio Playback Module for Sabrina AI Voice Client
-=========================================================
+Improved Audio Playback Module for Sabrina AI with Windows Path Fix
+=================================================================
 Provides robust audio playback capabilities with multiple fallback methods.
+Fixes specific Windows path issues with quotes and spaces.
 """
 
 import os
@@ -31,10 +32,49 @@ class AudioPlayer:
 
     def _init_playback_methods(self):
         """Initialize available audio playback methods"""
-        # Try to initialize various audio playback libraries
-        # in order of preference
+        # Windows-specific methods first if on Windows
+        if os.name == "nt":  # Windows
+            # 1. Try winsound - most reliable on Windows
+            try:
+                import winsound
 
-        # 1. Try sounddevice - high quality and reliable
+                def play_with_winsound(file_path):
+                    try:
+                        winsound.PlaySound(file_path, winsound.SND_FILENAME)
+                        return True
+                    except Exception as e:
+                        logger.warning(f"winsound playback failed: {e}")
+                        return False
+
+                self.playback_methods.append(("winsound", play_with_winsound))
+                logger.info("Initialized winsound for audio playback")
+            except ImportError:
+                logger.debug("winsound not available")
+
+            # 2. Try PowerShell approach
+            def play_with_powershell(file_path):
+                try:
+                    # Use PowerShell to play audio without path issues
+                    # Convert path to absolute path to avoid issues
+                    abs_path = os.path.abspath(file_path)
+                    ps_command = f"powershell -c \"(New-Object Media.SoundPlayer '{abs_path}').PlaySync();\""
+                    result = subprocess.run(
+                        ps_command,
+                        shell=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                    )
+                    return result.returncode == 0
+                except Exception as e:
+                    logger.warning(f"PowerShell audio playback failed: {e}")
+                    return False
+
+            self.playback_methods.append(("powershell", play_with_powershell))
+            logger.info("Initialized PowerShell for audio playback")
+
+        # Cross-platform methods
+        # 3. Try sounddevice - high quality and reliable
         try:
             import sounddevice as sd
             import soundfile as sf
@@ -55,7 +95,7 @@ class AudioPlayer:
         except ImportError:
             logger.debug("sounddevice or soundfile not available")
 
-        # 2. Try pygame - good cross-platform alternative
+        # 4. Try pygame - good cross-platform alternative
         try:
             import pygame
 
@@ -83,34 +123,42 @@ class AudioPlayer:
         except ImportError:
             logger.debug("pygame not available")
 
-        # 3. Try playsound - but with better path handling
+        # 5. Try playsound - now with no-spaces version for Windows
         try:
-            # Try to import playsound but handle path issues
             from playsound import playsound
 
             def play_with_playsound(file_path):
                 try:
-                    # Create a temporary file with a simple name if the path has spaces
-                    if " " in file_path or ":" in file_path:
+                    if os.name == "nt" and (" " in file_path or ":" in file_path):
+                        # On Windows: Create a temp file with a short, safe name to avoid path issues
                         temp_dir = tempfile.gettempdir()
-                        temp_filename = f"sabrina_temp_{os.path.basename(file_path)}"
-                        temp_path = os.path.join(temp_dir, temp_filename)
+                        # Generate a very short name with no spaces or special chars
+                        temp_name = "sabvoice.wav"
+                        temp_path = os.path.join(temp_dir, temp_name)
 
                         # Copy the file
-                        with open(file_path, "rb") as src, open(temp_path, "wb") as dst:
-                            dst.write(src.read())
-
-                        # Play from the temp location
-                        playsound(temp_path, block=True)
-
-                        # Clean up
                         try:
-                            os.remove(temp_path)
+                            with open(file_path, "rb") as src, open(
+                                temp_path, "wb"
+                            ) as dst:
+                                dst.write(src.read())
+
+                            # Play from the temp location
+                            playsound(temp_path, block=True)
+
+                            # Clean up
+                            try:
+                                os.remove(temp_path)
+                            except Exception as e:
+                                logger.warning(f"Failed tpo clean up temp file: {e}")
+                                pass
+                            return True
                         except Exception as e:
-                            logger.warning(f"Cleanup Error: {e}")
-                            pass
-                    else:
-                        playsound(file_path, block=True)
+                            logger.warning(f"Failed to copy to temp file: {e}")
+                            # Fall through to normal method
+
+                    # Normal method for non-Windows or simple paths
+                    playsound(file_path, block=True)
                     return True
                 except Exception as e:
                     logger.warning(f"playsound failed: {e}")
@@ -121,7 +169,7 @@ class AudioPlayer:
         except ImportError:
             logger.debug("playsound not available")
 
-        # 4. As a last resort, try using system commands
+        # 6. Unix-specific methods
         if os.name == "posix":  # Unix/Linux/MacOS
 
             def play_with_system_unix(file_path):
@@ -150,38 +198,7 @@ class AudioPlayer:
             self.playback_methods.append(("system_unix", play_with_system_unix))
             logger.info("Initialized system commands for audio playback on Unix")
 
-        elif os.name == "nt":  # Windows
-
-            def play_with_system_windows(file_path):
-                try:
-                    # Clean up the file path for PowerShell
-                    clean_path = file_path.replace("\\", "\\\\")
-
-                    # Try PowerShell approach first
-                    ps_command = f"powershell -c \"(New-Object Media.SoundPlayer '{clean_path}').PlaySync();\""
-                    result = subprocess.run(
-                        ps_command,
-                        shell=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                    )
-                    if result.returncode == 0:
-                        return True
-
-                    # Fall back to winsound if available
-                    import winsound
-
-                    winsound.PlaySound(file_path, winsound.SND_FILENAME)
-                    return True
-                except Exception as e:
-                    logger.debug(f"Windows audio playback error: {str(e)}")
-                    return False
-
-            self.playback_methods.append(("system_windows", play_with_system_windows))
-            logger.info("Initialized system commands for audio playback on Windows")
-
-        # Log available methods
+        # 7. Log all available methods
         if self.playback_methods:
             logger.info(
                 f"Available audio playback methods: {[m[0] for m in self.playback_methods]}"

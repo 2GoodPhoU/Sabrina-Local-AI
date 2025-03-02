@@ -138,6 +138,7 @@ class TTSEngine:
 
         # Replace common abbreviations
         replacements = {
+            "AI": "A.I.",
             "e.g.": "for example",
             "i.e.": "that is",
             "etc.": "etcetera",
