@@ -125,7 +125,19 @@ def start_services():
     """Start any required services"""
     logger.info("Starting services...")
 
-    # TODO: Add code to start voice service, etc. if not already running
+    # Start voice service
+    from utilities.service_starter import start_voice_api
+
+    voice_service_started = start_voice_api(os.path.dirname(__file__))
+
+    if voice_service_started:
+        logger.info("Voice API service started successfully")
+    else:
+        logger.warning(
+            "Voice API service could not be started. Voice features may not work correctly."
+        )
+
+    # TODO: Add code to start other services
 
     logger.info("Services started")
 

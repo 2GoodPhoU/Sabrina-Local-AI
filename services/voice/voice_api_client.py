@@ -1,7 +1,7 @@
 """
-Sabrina AI Voice API Client
-=========================
-Client library for interacting with the Voice API service.
+Sabrina AI Voice API Client - Enhanced with Audio Playback
+=========================================================
+Client library for interacting with the Voice API service with audio playback.
 
 This module provides a simple interface for other Sabrina AI components
 to use the voice synthesis capabilities without directly dealing with
@@ -12,8 +12,9 @@ import os
 import time
 import logging
 import requests
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import traceback
+import tempfile
 
 # Configure logging
 logging.basicConfig(
@@ -21,6 +22,27 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s",
 )
 logger = logging.getLogger("voice_api_client")
+
+# Try to import audio playback
+try:
+    from voice_playback import play_audio, stop_audio, is_playing
+
+    audio_playback_available = True
+    logger.info("Audio playback module loaded successfully")
+except ImportError:
+    logger.warning("Audio playback module not found, speech will be silent")
+    audio_playback_available = False
+
+    # Dummy functions for compatibility
+    def play_audio(file_path):
+        logger.info(f"Would play audio file: {file_path}")
+        return False
+
+    def stop_audio():
+        pass
+
+    def is_playing():
+        return False
 
 
 class VoiceAPIClient:
@@ -40,9 +62,32 @@ class VoiceAPIClient:
         self.connected = False
         self.voices_cache = None
         self.settings_cache = None
+        self.last_audio_file = None
+        self.temp_files = []
+
+        # Use a persistent session for better performance
+        self.session = requests.Session()
+
+        # Set default headers for all requests
+        self.session.headers.update(self.headers)
 
         # Test connection during initialization
         self.connected = self.test_connection()
+
+        # Clean up temporary files on exit
+        import atexit
+
+        atexit.register(self._cleanup_temp_files)
+
+    def _cleanup_temp_files(self):
+        """Clean up temporary files when the program exits"""
+        for file_path in self.temp_files:
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    logger.debug(f"Cleaned up temporary file: {file_path}")
+            except Exception as e:
+                logger.debug(f"Error cleaning up temp file {file_path}: {e}")
 
     def test_connection(self) -> bool:
         """
@@ -52,7 +97,7 @@ class VoiceAPIClient:
             bool: True if connection is successful, False otherwise
         """
         try:
-            response = requests.get(f"{self.api_url}/status", timeout=3.0)
+            response = self.session.get(f"{self.api_url}/status", timeout=3.0)
             if response.status_code == 200:
                 logger.info(f"Connected to Voice API at {self.api_url}")
                 return True
@@ -85,6 +130,10 @@ class VoiceAPIClient:
             logger.error("Not connected to Voice API")
             return False
 
+        # Stop any current playback
+        if audio_playback_available:
+            stop_audio()
+
         try:
             # Prepare request payload
             payload = {"text": text}
@@ -95,10 +144,9 @@ class VoiceAPIClient:
                     payload[key] = kwargs[key]
 
             # Make API request
-            response = requests.post(
+            response = self.session.post(
                 f"{self.api_url}/speak",
                 json=payload,
-                headers=self.headers,
                 timeout=10.0,
             )
 
@@ -107,10 +155,28 @@ class VoiceAPIClient:
                 audio_url = data.get("audio_url")
 
                 if audio_url:
-                    # In a real implementation, we might play the audio file here
+                    # Get full audio URL
                     full_audio_url = f"{self.api_url}{audio_url}"
                     logger.info(f"Speech generated successfully: {full_audio_url}")
-                    return True
+
+                    # Download and play the audio if playback is available
+                    if audio_playback_available:
+                        # Download the audio file
+                        audio_file = self._download_audio(full_audio_url)
+                        if audio_file:
+                            # Play the audio
+                            self.last_audio_file = audio_file
+                            play_audio(audio_file)
+                            return True
+                        else:
+                            logger.error("Failed to download audio file")
+                            return False
+                    else:
+                        # No audio playback, but API request was successful
+                        logger.info(
+                            "Audio playback not available, but speech was generated successfully"
+                        )
+                        return True
                 else:
                     logger.warning("No audio URL in response")
                     return False
@@ -128,6 +194,42 @@ class VoiceAPIClient:
             logger.error(traceback.format_exc())
             return False
 
+    def _download_audio(self, audio_url: str) -> Optional[str]:
+        """
+        Download audio file from URL
+
+        Args:
+            audio_url: URL of the audio file
+
+        Returns:
+            Path to the downloaded file, or None if download failed
+        """
+        try:
+            # Create a temporary file with .wav extension
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
+                temp_path = temp_file.name
+
+            # Add to cleanup list
+            self.temp_files.append(temp_path)
+
+            # Download the file
+            response = self.session.get(audio_url, stream=True, timeout=10.0)
+
+            if response.status_code == 200:
+                with open(temp_path, "wb") as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+
+                logger.info(f"Downloaded audio to {temp_path}")
+                return temp_path
+            else:
+                logger.error(f"Failed to download audio: {response.status_code}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error downloading audio: {str(e)}")
+            return None
+
     def speak_simple(self, text: str) -> bool:
         """
         Simple text-to-speech without authentication or additional parameters
@@ -143,7 +245,7 @@ class VoiceAPIClient:
             return False
 
         try:
-            response = requests.post(
+            response = self.session.post(
                 f"{self.api_url}/speak_simple", params={"text": text}, timeout=10.0
             )
 
@@ -152,10 +254,20 @@ class VoiceAPIClient:
                 audio_url = data.get("audio_url")
 
                 if audio_url:
-                    # In a real implementation, we might play the audio file here
+                    # Get full audio URL
                     full_audio_url = f"{self.api_url}{audio_url}"
                     logger.info(f"Speech generated successfully: {full_audio_url}")
-                    return True
+
+                    # Download and play the audio if playback is available
+                    if audio_playback_available:
+                        audio_file = self._download_audio(full_audio_url)
+                        if audio_file:
+                            self.last_audio_file = audio_file
+                            play_audio(audio_file)
+                            return True
+                    else:
+                        # No audio playback, but API request was successful
+                        return True
                 else:
                     logger.warning("No audio URL in response")
                     return False
@@ -184,9 +296,7 @@ class VoiceAPIClient:
             return self.voices_cache
 
         try:
-            response = requests.get(
-                f"{self.api_url}/voices", headers=self.headers, timeout=5.0
-            )
+            response = self.session.get(f"{self.api_url}/voices", timeout=5.0)
 
             if response.status_code == 200:
                 data = response.json()
@@ -210,9 +320,7 @@ class VoiceAPIClient:
             Dict with settings or empty dict if failed
         """
         try:
-            response = requests.get(
-                f"{self.api_url}/settings", headers=self.headers, timeout=5.0
-            )
+            response = self.session.get(f"{self.api_url}/settings", timeout=5.0)
 
             if response.status_code == 200:
                 self.settings_cache = response.json()
@@ -238,10 +346,9 @@ class VoiceAPIClient:
             bool: True if successful, False otherwise
         """
         try:
-            response = requests.post(
+            response = self.session.post(
                 f"{self.api_url}/settings",
                 json=settings,
-                headers=self.headers,
                 timeout=5.0,
             )
 
@@ -368,3 +475,12 @@ class EnhancedVoiceClient:
     def update_settings(self, settings: Dict[str, Any]) -> bool:
         """Update voice settings"""
         return self.client.update_settings(settings)
+
+    def is_speaking(self) -> bool:
+        """
+        Check if currently speaking
+
+        Returns:
+            bool: True if speaking, False otherwise
+        """
+        return self.speaking

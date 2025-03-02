@@ -474,7 +474,7 @@ class SabrinaCore:
         try:
             # Import the enhanced voice client
             try:
-                from services.voice.enhanced_voice_client import EnhancedVoiceClient
+                from services.voice.voice_api_client import EnhancedVoiceClient
 
                 voice_client_class = EnhancedVoiceClient
                 logger.info("Using EnhancedVoiceClient for voice integration")
@@ -507,7 +507,7 @@ class SabrinaCore:
             voice_settings = {
                 "speed": voice_config.get("speed", 1.0),
                 "pitch": voice_config.get("pitch", 1.0),
-                "emotion": voice_config.get("emotion", "normal"),
+                "emotion": voice_config.get("emotion", "neutral"),
                 "volume": voice_config.get("volume", 0.8),
             }
 
