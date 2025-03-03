@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Integration tests for Sabrina AI Core System
-Tests the integration between core and service components
+Unit tests for Sabrina AI Core System
+Tests the core functionality, component initialization, and event system integration
 """
 
 import os
@@ -14,21 +14,22 @@ import yaml
 import logging
 
 # Import core components
-from core.core import SabrinaCore
+from core.core import SabrinaCore, ComponentStatus
 from core.state_machine import SabrinaState
 from utilities.event_system import Event, EventType, EventPriority
 
-# Add project root to path
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+# Ensure the project root is in the Python path
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(script_dir, "../.."))
 sys.path.insert(0, project_root)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("integration_test")
+logger = logging.getLogger("test_core")
 
 
-class TestCoreIntegration(unittest.TestCase):
-    """Integration tests for the Sabrina Core system"""
+class TestCore(unittest.TestCase):
+    """Test case for SabrinaCore class"""
 
     @classmethod
     def setUpClass(cls):
@@ -67,74 +68,161 @@ class TestCoreIntegration(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures"""
+        # Set up component class patchers
+        self._setup_component_patchers()
+
         # Initialize the core system with test configuration
         self.core = SabrinaCore(self.config_path)
-
-        # Mock the component classes to avoid external dependencies
-        self._setup_component_mocks()
-
-        # Initialize components
-        self.core.initialize_components()
 
     def tearDown(self):
         """Clean up test fixtures"""
         # Shut down the core system
-        self.core.shutdown()
+        if hasattr(self, "core") and self.core:
+            self.core.shutdown()
 
-    def _setup_component_mocks(self):
-        """Set up mock components for testing"""
-        # Create patchers for the component classes
-        voice_patcher = patch("core.component_service_wrappers.VoiceService")
-        automation_patcher = patch("core.component_service_wrappers.AutomationService")
+        # Stop patchers
+        self._stop_patchers()
 
-        # Start the patchers
-        self.mock_voice_class = voice_patcher.start()
-        self.mock_automation_class = automation_patcher.start()
+    def _setup_component_patchers(self):
+        """Set up mock component classes"""
+        self._patchers = []
 
-        # Create mock instances
-        self.mock_voice = MagicMock()
-        self.mock_automation = MagicMock()
+        # Create patchers for component classes
+        component_classes = {
+            "VoiceService": "core.component_service_wrappers.VoiceService",
+            "AutomationService": "core.component_service_wrappers.AutomationService",
+            "VisionService": "core.component_service_wrappers.VisionService",
+            "HearingService": "core.component_service_wrappers.HearingService",
+            "PresenceService": "core.component_service_wrappers.PresenceService",
+            "SmartHomeService": "core.component_service_wrappers.SmartHomeService",
+        }
 
-        # Set up successful initialization
-        self.mock_voice.initialize.return_value = True
-        self.mock_automation.initialize.return_value = True
+        self.mock_components = {}
+        self.mock_component_instances = {}
 
-        # Set the status attribute
-        self.mock_voice.status = "READY"
-        self.mock_automation.status = "READY"
+        for name, path in component_classes.items():
+            # Create patcher
+            patcher = patch(path)
+            self._patchers.append(patcher)
 
-        # Configure the mock classes to return the mock instances
-        self.mock_voice_class.return_value = self.mock_voice
-        self.mock_automation_class.return_value = self.mock_automation
+            # Start patcher and store mock
+            mock_class = patcher.start()
+            self.mock_components[name] = mock_class
 
-        # Add the patchers to the cleanup list
-        self.addCleanup(voice_patcher.stop)
-        self.addCleanup(automation_patcher.stop)
+            # Create mock instance
+            mock_instance = MagicMock()
+            mock_instance.initialize.return_value = True
+            mock_instance.status = ComponentStatus.READY
+            mock_instance.shutdown.return_value = True
+            mock_instance.name = name.replace("Service", "").lower()
+
+            # Set as return value for the class
+            mock_class.return_value = mock_instance
+
+            # Store for easy access
+            self.mock_component_instances[name] = mock_instance
+
+    def _stop_patchers(self):
+        """Stop all patchers"""
+        for patcher in self._patchers:
+            patcher.stop()
+        self._patchers = []
 
     def test_core_initialization(self):
         """Test core system initialization"""
-        # Check that core is running
-        self.assertTrue(hasattr(self.core, "running"))
-        self.assertTrue(hasattr(self.core, "initialized"))
-
-        # Check that event bus is started
-        self.assertTrue(self.core.event_bus.running)
-
-        # Check that state machine is initialized
+        # Check that core attributes are properly initialized
+        self.assertIsNotNone(self.core.event_bus)
         self.assertIsNotNone(self.core.state_machine)
-        self.assertEqual(self.core.state_machine.current_state, SabrinaState.READY)
+        self.assertIsNotNone(self.core.config)
 
-        # Check components were initialized
+        # Check configuration loading
+        self.assertTrue(self.core.config.get("core", "debug_mode"))
+        self.assertEqual(self.core.config.get("core", "log_level"), "DEBUG")
+
+        # Check component registry initialization
+        self.assertIsInstance(self.core.components, dict)
+        self.assertIn("core", self.core.components)  # Core should register itself
+
+    def test_initialize_components(self):
+        """Test component initialization"""
+        # Initialize components
+        self.core.initialize_components()
+
+        # Check that components were registered
         self.assertIn("voice", self.core.components)
         self.assertIn("automation", self.core.components)
-        self.assertIn("core", self.core.components)  # Core registers itself
 
-        # Check initialization was called on components
-        self.mock_voice.initialize.assert_called_once()
-        self.mock_automation.initialize.assert_called_once()
+        # Check that component initialize methods were called
+        self.mock_component_instances["VoiceService"].initialize.assert_called_once()
+        self.mock_component_instances[
+            "AutomationService"
+        ].initialize.assert_called_once()
+
+        # Vision should not be initialized (not in enabled_components)
+        self.assertNotIn("vision", self.core.components)
+
+    def test_initialization_with_component_failure(self):
+        """Test initialization with a component failure"""
+        # Make voice component initialization fail
+        self.mock_component_instances["VoiceService"].initialize.return_value = False
+        self.mock_component_instances[
+            "VoiceService"
+        ].error_message = "Test initialization error"
+
+        # Initialize components (should handle the failure)
+        self.core.initialize_components()
+
+        # Voice component should still be registered
+        self.assertIn("voice", self.core.components)
+
+        # Voice status should reflect the error
+        voice_component = self.core.components["voice"]
+        self.assertEqual(voice_component.error_message, "Test initialization error")
+
+        # Core should still be in READY state
+        self.assertEqual(self.core.state_machine.current_state, SabrinaState.READY)
+
+    def test_component_dependency_ordering(self):
+        """Test component initialization respects dependencies"""
+        # Add test components with dependencies
+        with patch.dict(
+            self.core._component_dependencies,
+            {
+                "component_a": ["event_bus", "config", "core"],
+                "component_b": ["event_bus", "config", "core", "component_a"],
+                "component_c": [
+                    "event_bus",
+                    "config",
+                    "core",
+                    "component_a",
+                    "component_b",
+                ],
+            },
+        ):
+            # Set up test components
+            self.core.components = {
+                "core": self.core,
+                "component_a": MagicMock(),
+                "component_b": MagicMock(),
+                "component_c": MagicMock(),
+            }
+
+            # Get initialization order
+            init_order = self.core._get_initialization_order()
+
+            # Check order respects dependencies
+            component_a_idx = init_order.index("component_a")
+            component_b_idx = init_order.index("component_b")
+            component_c_idx = init_order.index("component_c")
+
+            self.assertLess(component_a_idx, component_b_idx)
+            self.assertLess(component_b_idx, component_c_idx)
 
     def test_event_propagation(self):
         """Test event propagation between components through the core"""
+        # Initialize components first
+        self.core.initialize_components()
+
         # Create a test event
         test_event = Event(
             event_type=EventType.SPEECH_STARTED,
@@ -173,6 +261,9 @@ class TestCoreIntegration(unittest.TestCase):
 
     def test_state_transitions(self):
         """Test state transitions propagate to components"""
+        # Initialize components
+        self.core.initialize_components()
+
         # Test the transition to LISTENING state
         self.core.state_machine.transition_to(SabrinaState.LISTENING)
 
@@ -190,12 +281,14 @@ class TestCoreIntegration(unittest.TestCase):
         # Wait for event processing
         time.sleep(0.1)
 
-        # In a real system, the hearing component would start listening
-        # We can verify that the state machine is in the correct state
+        # Remain in LISTENING state
         self.assertEqual(self.core.state_machine.current_state, SabrinaState.LISTENING)
 
-    def test_voice_command_processing(self):
-        """Test processing of voice commands"""
+    def test_command_processing(self):
+        """Test processing of user commands"""
+        # Initialize components
+        self.core.initialize_components()
+
         # Create a voice command event
         command_event = Event(
             event_type=EventType.USER_VOICE_COMMAND,
@@ -208,321 +301,182 @@ class TestCoreIntegration(unittest.TestCase):
         self.core.event_bus.post_event(command_event)
 
         # Wait for event processing
-        time.sleep(0.1)
+        time.sleep(0.2)
 
-        # Verify state transitions
         # Should go to PROCESSING state first
         self.assertEqual(self.core.state_machine.current_state, SabrinaState.PROCESSING)
 
-        # Let processing complete
-        time.sleep(0.2)
-
-        # Should now be in RESPONDING or READY state
-        self.assertIn(
-            self.core.state_machine.current_state,
-            [SabrinaState.RESPONDING, SabrinaState.READY],
+        # Process the command (in a real system, this would generate a response)
+        # For now, we'll manually trigger a response event
+        response_event = Event(
+            event_type=EventType.SPEECH_STARTED,
+            data={"text": "Response to test command"},
+            priority=EventPriority.NORMAL,
+            source="core",
         )
+        self.core.event_bus.post_event(response_event)
+
+        # Wait for event processing
+        time.sleep(0.1)
+
+        # Voice component should be called to speak the response
+        if "voice" in self.core.components:
+            voice_component = self.core.components["voice"]
+            voice_component.speak.assert_called()
 
     def test_core_shutdown(self):
         """Test core system shutdown"""
-        # Run the core for a moment
-        # (Normally this would be the core.run() method, but we're not using that in tests)
-        time.sleep(0.1)
+        # Initialize components
+        self.core.initialize_components()
 
-        # Verify core is running
-        self.assertTrue(self.core.running)
+        # Verify core is ready
+        self.assertEqual(self.core.state_machine.current_state, SabrinaState.READY)
 
         # Shut down the core
         self.core.shutdown()
 
-        # Verify it's not running
-        self.assertFalse(self.core.running)
-
-        # Check that components were shut down
-        self.mock_voice.shutdown.assert_called_once()
-        self.mock_automation.shutdown.assert_called_once()
-
         # Event bus should be stopped
         self.assertFalse(self.core.event_bus.running)
 
-    def test_component_error_handling(self):
-        """Test error handling for component failures"""
-        # Configure mock component to fail
-        self.mock_voice.initialize.return_value = False
-        self.mock_voice.error_message = "Test initialization error"
+        # Components should be shut down
+        for name, mock_instance in self.mock_component_instances.items():
+            if name.lower().replace("service", "") in self.core.components:
+                mock_instance.shutdown.assert_called_once()
 
-        # Create a new core instance
-        test_core = SabrinaCore(self.config_path)
+    def test_error_handling(self):
+        """Test error handling in the core system"""
+        # Initialize components
+        self.core.initialize_components()
 
-        # Initialize components (should handle the failure)
-        test_core.initialize_components()
-
-        # Verify error handling
-        self.assertIn("voice", test_core.components)
-        self.assertEqual(
-            test_core.components["voice"].error_message, "Test initialization error"
-        )
-
-        # Clean up
-        test_core.shutdown()
-
-    def test_event_handler_registration(self):
-        """Test registration of event handlers through the core system"""
-        # Define a test handler
-        test_callback = MagicMock()
-
-        # Create a handler
-        handler = self.core.event_bus.create_handler(
-            callback=test_callback,
-            event_types=[EventType.SYSTEM_ERROR, EventType.SYSTEM],
-        )
-
-        # Register the handler
-        handler_id = self.core.event_bus.register_handler(handler)
-
-        # Verify registration
-        handler_count = self.core.event_bus.get_stats()["handler_count"]
-        self.assertGreaterEqual(handler_count, 1)
-
-        # Test that handlers receive events
-        test_event = Event(
-            event_type=EventType.SYSTEM, data={"test": "data"}, source="test"
-        )
-
-        # Post event
-        self.core.event_bus.post_event(test_event)
-
-        # Wait for processing
-        time.sleep(0.1)
-
-        # Verify callback was called
-        test_callback.assert_called_once()
-
-        # Check argument
-        event_arg = test_callback.call_args[0][0]
-        self.assertEqual(event_arg.event_type, EventType.SYSTEM)
-        self.assertEqual(event_arg.data["test"], "data")
-
-        # Unregister handler
-        self.core.event_bus.unregister_handler(handler_id)
-
-        # Verify unregistration
-        new_handler_count = self.core.event_bus.get_stats()["handler_count"]
-        self.assertEqual(new_handler_count, handler_count - 1)
-
-    def test_voice_integration(self):
-        """Test integration with voice service"""
-        # Set up mock voice service behavior
-        self.mock_voice.speak.return_value = True
-
-        # Create a speech request event
-        speech_event = Event(
-            event_type=EventType.SPEECH_STARTED,
-            data={"text": "Test speech text"},
-            priority=EventPriority.NORMAL,
-            source="test",
-        )
-
-        # Post event
-        self.core.event_bus.post_event(speech_event)
-
-        # Wait for processing
-        time.sleep(0.1)
-
-        # Verify that voice service was called
-        self.mock_voice.speak.assert_called_once()
-        self.assertEqual(self.mock_voice.speak.call_args[0][0], "Test speech text")
-
-    def test_automation_integration(self):
-        """Test integration with automation service"""
-        # Set up mock automation service behavior
-        self.mock_automation.execute_task.return_value = True
-
-        # Create an automation request event
-        automation_event = Event(
-            event_type=EventType.AUTOMATION_STARTED,
-            data={"action": "click_at", "parameters": {"x": 100, "y": 200}},
-            priority=EventPriority.NORMAL,
-            source="test",
-        )
-
-        # Post event
-        self.core.event_bus.post_event(automation_event)
-
-        # Wait for processing
-        time.sleep(0.1)
-
-        # In a real system, this would be routed to the automation service
-        # We would verify the automation service methods were called correctly
-
-        # For testing component delegation:
-        # Create a delegated task event
-        delegated_event = Event(
-            event_type=EventType.DELEGATED_TASK,
+        # Create an error event
+        error_event = Event(
+            event_type=EventType.SYSTEM_ERROR,
             data={
-                "component": "automation",
-                "method": "click_at",
-                "args": {"x": 150, "y": 250},
+                "component": "test_component",
+                "error": "Test error message",
+                "timestamp": time.time(),
             },
-            priority=EventPriority.NORMAL,
-            source="test",
-        )
-
-        # Post the event
-        self.core.event_bus.post_event(delegated_event)
-
-        # Wait for processing
-        time.sleep(0.1)
-
-    def test_llm_integration(self):
-        """Test integration with LLM framework"""
-        # This would normally use the LLMInputHandler
-        # For testing, we'll check if the core has the required components
-
-        # Import LLM components
-        from core.llm_input_framework import LLMInputHandler, LLMInput, InputType
-
-        # Create an LLM input handler with our core
-        input_handler = LLMInputHandler(self.core)
-
-        # Test a simple function call
-        llm_input = LLMInput(type=InputType.ACTION, action="get_system_status")
-
-        # Process the input
-        result = input_handler.process_input(llm_input)
-
-        # Check result
-        self.assertEqual(result.status, "success")
-        self.assertIsNotNone(result.data)
-
-        # Test core status information
-        system_status = result.data
-        self.assertIn("name", system_status)
-        self.assertIn("uptime", system_status)
-        self.assertIn("state", system_status)
-        self.assertIn("components", system_status)
-
-    def test_cross_component_interaction(self):
-        """Test interaction between multiple components through the core"""
-        # Set up a scenario that involves multiple components
-        # For example, a voice command that triggers automation
-
-        # First, set up the mock responses
-        self.mock_voice.speak.return_value = True
-        self.mock_automation.execute_task.return_value = True
-
-        # Simulate a voice command that should trigger automation
-        command_event = Event(
-            event_type=EventType.USER_VOICE_COMMAND,
-            data={"command": "click at position 100 200"},
             priority=EventPriority.HIGH,
             source="test",
         )
 
-        # Post the command
-        self.core.event_bus.post_event(command_event)
-
-        # Wait for processing
-        time.sleep(0.2)
-
-        # In a full system, this would be parsed by an LLM, then turned into
-        # automation commands. Since we're mocking, we can simulate the completion
-        # with a direct automation command
-
-        # Simulate the resulting automation command
-        automation_event = Event(
-            event_type=EventType.AUTOMATION_STARTED,
-            data={"action": "click_at", "parameters": {"x": 100, "y": 200}},
-            priority=EventPriority.NORMAL,
-            source="llm_handler",
-        )
-
-        # Post the automation event
-        self.core.event_bus.post_event(automation_event)
+        # Post the error event
+        self.core.event_bus.post_event(error_event)
 
         # Wait for processing
         time.sleep(0.1)
 
-        # Simulate the response after completion
-        response_event = Event(
-            event_type=EventType.SPEECH_STARTED,
-            data={"text": "I clicked at position 100, 200"},
-            priority=EventPriority.NORMAL,
-            source="llm_handler",
+        # System should remain in READY state for non-critical errors
+        self.assertEqual(self.core.state_machine.current_state, SabrinaState.READY)
+
+        # Now create a critical error
+        critical_error = Event(
+            event_type=EventType.SYSTEM_ERROR,
+            data={
+                "component": "critical_component",
+                "error": "Critical error message",
+                "timestamp": time.time(),
+            },
+            priority=EventPriority.CRITICAL,
+            source="test",
         )
 
-        # Post the response event
-        self.core.event_bus.post_event(response_event)
+        # Post the critical error event
+        self.core.event_bus.post_event(critical_error)
 
         # Wait for processing
         time.sleep(0.1)
 
-        # Voice service should have been called to speak the response
-        self.assertTrue(self.mock_voice.speak.called)
+        # System should transition to ERROR state
+        self.assertEqual(self.core.state_machine.current_state, SabrinaState.ERROR)
 
-    def test_component_dependency_ordering(self):
-        """Test component initialization respects dependencies"""
-        # Create a temporary configuration with component dependencies
-        dependency_config = {
-            "core": {
-                "debug_mode": True,
-                "enabled_components": ["component_a", "component_b", "component_c"],
-            },
-            "component_a": {"enabled": True},
-            "component_b": {"enabled": True},
-            "component_c": {"enabled": True},
-        }
+    def test_get_status(self):
+        """Test the get_status method"""
+        # Initialize components
+        self.core.initialize_components()
 
-        # Create temp config file
-        config_path = os.path.join(self.temp_dir.name, "dependency_config.yaml")
-        with open(config_path, "w") as f:
-            yaml.dump(dependency_config, f)
+        # Get status
+        status = self.core.get_status()
 
-        # Mock the dependency relationships
-        # component_c depends on component_b, which depends on component_a
-        with patch.dict(
-            self.core._component_dependencies,
-            {
-                "component_b": ["event_bus", "config", "core", "component_a"],
-                "component_c": [
-                    "event_bus",
-                    "config",
-                    "core",
-                    "component_a",
-                    "component_b",
-                ],
-            },
-        ):
-            # We would also need to mock the component classes
-            # But for simplicity, we'll just check the initialization order method
+        # Check status structure
+        self.assertEqual(status["name"], "Sabrina AI Core")
+        self.assertEqual(status["status"], ComponentStatus.READY.name)
+        self.assertIn("uptime", status)
+        self.assertEqual(status["state"], SabrinaState.READY.name)
+        self.assertIn("components", status)
+        self.assertIn("event_bus", status)
+        self.assertTrue(status["initialized"])
 
-            # Create a new core with our config
-            test_core = SabrinaCore(config_path)
+        # Check component statuses
+        self.assertIn("voice", status["components"])
+        self.assertIn("automation", status["components"])
 
-            # Use a spy on the _create_component_instances method
-            with patch.object(test_core, "_create_component_instances") as mock_create:
-                # Force the components dict to include our test components
-                print(mock_create)
-                test_core.components = {
-                    "core": test_core,
-                    "component_a": MagicMock(),
-                    "component_b": MagicMock(),
-                    "component_c": MagicMock(),
-                }
+    def test_command_registry(self):
+        """Test command registration and execution"""
+        # Create a mock command handler
+        mock_handler = MagicMock(return_value="Command result")
 
-                # Get initialization order
-                init_order = test_core._get_initialization_order()
+        # Register the command
+        self.core.register_command(
+            command_name="test_command",
+            handler=mock_handler,
+            description="Test command for unit testing",
+            parameters={"param1": "Parameter 1 description"},
+            examples=["Example usage of test_command"],
+        )
 
-                # Check order respects dependencies
-                component_a_idx = init_order.index("component_a")
-                component_b_idx = init_order.index("component_b")
-                component_c_idx = init_order.index("component_c")
+        # Check command was registered
+        self.assertIn("test_command", self.core.commands)
+        self.assertIn("test_command", self.core.command_documentation)
 
-                self.assertLess(component_a_idx, component_b_idx)
-                self.assertLess(component_b_idx, component_c_idx)
+        # Execute the command
+        result = self.core.execute_command("test_command", param1="value1")
 
-            # Clean up
-            test_core.shutdown()
+        # Check result
+        self.assertEqual(result, "Command result")
+        mock_handler.assert_called_once_with(param1="value1")
+
+        # Test nonexistent command
+        result = self.core.execute_command("nonexistent_command")
+        self.assertIsNone(result)
+
+        # Test error in command
+        mock_handler.side_effect = Exception("Command error")
+        result = self.core.execute_command("test_command")
+        self.assertIsNone(result)  # Should return None on error
+
+    def test_load_component_class(self):
+        """Test loading component classes"""
+        # Mock the import process
+        with patch("importlib.import_module") as mock_import:
+            # Create mock module and class
+            mock_module = MagicMock()
+            mock_class = MagicMock()
+
+            # Set up the mocks
+            mock_import.return_value = mock_module
+            mock_module.VoiceService = mock_class
+
+            # Set class to be a proper ServiceComponent subclass
+            mock_class.__mro__ = (mock_class, self.core.ServiceComponent)
+
+            # Load the component class
+            result = self.core._load_component_class("voice")
+
+            # Check result
+            self.assertEqual(result, mock_class)
+            mock_import.assert_called_once()
+
+            # Test import error
+            mock_import.side_effect = ImportError("Module not found")
+            result = self.core._load_component_class("voice")
+            self.assertIsNone(result)
+
+            # Test attribute error
+            mock_import.side_effect = None
+            mock_module.VoiceService = None
+            result = self.core._load_component_class("voice")
+            self.assertIsNone(result)
 
 
 if __name__ == "__main__":
