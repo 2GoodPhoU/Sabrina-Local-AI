@@ -15,13 +15,12 @@ import time
 import json
 import logging
 from datetime import datetime
+from pathlib import Path
 
 # Ensure the project root is in the Python path
-script_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(
-    script_dir
-)  # Go up one level from tests/ to project root
-sys.path.insert(0, project_root)
+script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+project_root = script_dir.parent  # Go up one level from tests/ to project root
+sys.path.insert(0, str(project_root))
 
 # Configure logging
 logging.basicConfig(
@@ -125,15 +124,24 @@ def discover_tests(args):
     if args.unit or args.all or (not args.integration and not args.e2e):
         unit_dir = os.path.join(test_dir, "unit")
         if os.path.exists(unit_dir):
-            for test in loader.discover(unit_dir, pattern="test_*.py"):
-                if component_filter:
-                    # Filter by component name
-                    for comp in component_filter:
-                        if comp in test.id():
-                            unit_tests.addTest(test)
-                            break
-                else:
-                    unit_tests.addTest(test)
+            # Make sure __init__.py exists in the unit directory
+            init_path = os.path.join(unit_dir, "__init__.py")
+            if not os.path.exists(init_path):
+                with open(init_path, "w") as f:
+                    f.write("# Unit tests package\n")
+
+            try:
+                for test in loader.discover(unit_dir, pattern="test_*.py"):
+                    if component_filter:
+                        # Filter by component name
+                        for comp in component_filter:
+                            if comp in test.id():
+                                unit_tests.addTest(test)
+                                break
+                    else:
+                        unit_tests.addTest(test)
+            except ImportError as e:
+                logger.warning(f"Error discovering unit tests: {e}")
         else:
             logger.warning(f"Unit test directory not found: {unit_dir}")
 
@@ -141,15 +149,24 @@ def discover_tests(args):
     if args.integration or args.all or (not args.unit and not args.e2e):
         integration_dir = os.path.join(test_dir, "integration")
         if os.path.exists(integration_dir):
-            for test in loader.discover(integration_dir, pattern="test_*.py"):
-                if component_filter:
-                    # Filter by component name
-                    for comp in component_filter:
-                        if comp in test.id():
-                            integration_tests.addTest(test)
-                            break
-                else:
-                    integration_tests.addTest(test)
+            # Make sure __init__.py exists in the integration directory
+            init_path = os.path.join(integration_dir, "__init__.py")
+            if not os.path.exists(init_path):
+                with open(init_path, "w") as f:
+                    f.write("# Integration tests package\n")
+
+            try:
+                for test in loader.discover(integration_dir, pattern="test_*.py"):
+                    if component_filter:
+                        # Filter by component name
+                        for comp in component_filter:
+                            if comp in test.id():
+                                integration_tests.addTest(test)
+                                break
+                    else:
+                        integration_tests.addTest(test)
+            except ImportError as e:
+                logger.warning(f"Error discovering integration tests: {e}")
         else:
             logger.warning(f"Integration test directory not found: {integration_dir}")
 
@@ -157,15 +174,24 @@ def discover_tests(args):
     if args.e2e or args.all:
         e2e_dir = os.path.join(test_dir, "e2e")
         if os.path.exists(e2e_dir):
-            for test in loader.discover(e2e_dir, pattern="test_*.py"):
-                if component_filter:
-                    # Filter by component name
-                    for comp in component_filter:
-                        if comp in test.id():
-                            e2e_tests.addTest(test)
-                            break
-                else:
-                    e2e_tests.addTest(test)
+            # Make sure __init__.py exists in the e2e directory
+            init_path = os.path.join(e2e_dir, "__init__.py")
+            if not os.path.exists(init_path):
+                with open(init_path, "w") as f:
+                    f.write("# End-to-end tests package\n")
+
+            try:
+                for test in loader.discover(e2e_dir, pattern="test_*.py"):
+                    if component_filter:
+                        # Filter by component name
+                        for comp in component_filter:
+                            if comp in test.id():
+                                e2e_tests.addTest(test)
+                                break
+                    else:
+                        e2e_tests.addTest(test)
+            except ImportError as e:
+                logger.warning(f"Error discovering e2e tests: {e}")
         else:
             logger.warning(f"E2E test directory not found: {e2e_dir}")
 
@@ -455,8 +481,6 @@ def check_test_dependencies():
     # Check for test dependencies
     try:
         import unittest
-
-        print(unittest)
     except ImportError:
         missing_deps.append("unittest")
 
@@ -505,6 +529,19 @@ def setup_test_environment(args):
 
     # Create test results directory
     os.makedirs(os.path.join(project_root, "test_results"), exist_ok=True)
+
+    # Ensure __init__.py exists in tests directory
+    tests_init = os.path.join(project_root, "tests", "__init__.py")
+    if not os.path.exists(tests_init):
+        with open(tests_init, "w") as f:
+            f.write(
+                """\"\"\"
+Sabrina AI Test Suite
+==================
+This package contains tests for the Sabrina AI project.
+\"\"\"
+"""
+            )
 
 
 def main():
