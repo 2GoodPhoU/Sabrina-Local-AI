@@ -290,9 +290,13 @@ class TestEventSystem(unittest.TestCase):
         # Post some events
         num_events = 5
         for i in range(num_events):
+            # Use post_event_immediate to ensure immediate processing
             self.event_bus.post_event_immediate(
                 Event(event_type=EventType.SYSTEM, data={"index": i}, source="test")
             )
+
+        # Add a small delay to ensure processing completes
+        time.sleep(0.2)
 
         # Get updated stats
         updated_stats = self.event_bus.get_stats()

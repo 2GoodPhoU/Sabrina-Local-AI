@@ -408,6 +408,32 @@ class EventBus:
                 logger.error(f"Error in event processing thread: {str(e)}")
                 logger.error(traceback.format_exc())
 
+    def create_handler(
+        self,
+        callback: Callable[[Event], None],
+        event_types: Union[Any, List[Any]],
+        min_priority: EventPriority = EventPriority.LOW,
+        sources: Optional[List[str]] = None,
+    ) -> EventHandler:
+        """
+        Create an event handler
+
+        Args:
+            callback: Function to call when an event is received
+            event_types: Event type or list of event types to handle
+            min_priority: Minimum priority to handle
+            sources: List of sources to handle events from
+
+        Returns:
+            EventHandler: Created event handler (not registered yet)
+        """
+        # Convert single event type to list
+        if not isinstance(event_types, list):
+            event_types = [event_types]
+
+        # Create and return handler
+        return EventHandler(callback, event_types, min_priority, sources)
+
     def _process_event(self, event: Event) -> bool:
         """
         Process a single event
