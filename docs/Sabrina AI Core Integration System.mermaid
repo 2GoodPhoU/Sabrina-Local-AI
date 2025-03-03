@@ -1,0 +1,54 @@
+graph TB
+    User[User Input]
+    LLM[LLM Integration]
+    Core[Core System]
+    Event[Enhanced Event Bus]
+    State[State Machine]
+    Memory[Memory System]
+
+    Voice[Voice Service]
+    Vision[Vision Service]
+    Hearing[Hearing Service]
+    Automation[Automation Service]
+    Presence[Presence Service]
+    SmartHome[Smart Home Service]
+
+    %% User interaction paths
+    User -->|Voice Commands| Hearing
+    User -->|Text Input| Core
+
+    %% Core connections
+    Core -->|"Events (Register/Listen)"| Event
+    Core -->|"State Updates"| State
+    Core <-->|"Store/Retrieve"| Memory
+    Core <-->|"Prompt/Response"| LLM
+
+    %% Service connections to event bus
+    Hearing -->|"Events (Wake Word, Commands)"| Event
+    Voice -->|"Events (Speaking Status)"| Event
+    Vision -->|"Events (Screen Analysis)"| Event
+    Automation -->|"Events (Action Status)"| Event
+    Presence -->|"Events (Animation Status)"| Event
+    SmartHome -->|"Events (Device Status)"| Event
+
+    %% Event system distributes to services
+    Event -->|"Voice Commands"| Voice
+    Event -->|"Vision Tasks"| Vision
+    Event -->|"Automation Tasks"| Automation
+    Event -->|"Presence Updates"| Presence
+    Event -->|"Smart Home Commands"| SmartHome
+
+    %% State machine connections
+    State -->|"Current State"| Core
+    State -->|"State Updates"| Event
+
+    %% Style definitions
+    classDef core fill:#f96,stroke:#333,stroke-width:2px;
+    classDef service fill:#9cf,stroke:#333,stroke-width:1px;
+    classDef user fill:#fcf,stroke:#333,stroke-width:1px;
+    classDef infrastructure fill:#cfc,stroke:#333,stroke-width:1px;
+
+    class Core,State,Event,Memory core;
+    class Voice,Vision,Hearing,Automation,Presence,SmartHome service;
+    class User user;
+    class LLM infrastructure;
