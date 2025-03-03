@@ -16,6 +16,13 @@ import json
 import logging
 from datetime import datetime
 
+# Ensure the project root is in the Python path
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(
+    script_dir
+)  # Go up one level from tests/ to project root
+sys.path.insert(0, project_root)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -23,10 +30,6 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(), logging.FileHandler("test_run.log")],
 )
 logger = logging.getLogger("test_runner")
-
-# Ensure the project root is in the Python path
-project_root = os.path.abspath(os.path.dirname(__file__))
-sys.path.insert(0, project_root)
 
 
 def parse_arguments():
@@ -103,17 +106,14 @@ def get_test_loader(pattern=None):
 def discover_tests(args):
     """Discover all tests based on command line arguments"""
     loader = get_test_loader(args.pattern)
-    start_dir = project_root
+
+    # Start from the tests directory
+    test_dir = os.path.join(project_root, "tests")
 
     # Create test suites for different test types
     unit_tests = unittest.TestSuite()
     integration_tests = unittest.TestSuite()
     e2e_tests = unittest.TestSuite()
-
-    # Create test directories if they don't exist
-    os.makedirs(os.path.join(start_dir, "unit"), exist_ok=True)
-    os.makedirs(os.path.join(start_dir, "integration"), exist_ok=True)
-    os.makedirs(os.path.join(start_dir, "e2e"), exist_ok=True)
 
     # Check for component filter
     component_filter = None
@@ -123,42 +123,51 @@ def discover_tests(args):
 
     # Discover unit tests
     if args.unit or args.all or (not args.integration and not args.e2e):
-        unit_dir = os.path.join(start_dir, "unit")
-        for test in loader.discover(unit_dir, pattern="test_*.py"):
-            if component_filter:
-                # Filter by component name
-                for comp in component_filter:
-                    if comp in test.id():
-                        unit_tests.addTest(test)
-                        break
-            else:
-                unit_tests.addTest(test)
+        unit_dir = os.path.join(test_dir, "unit")
+        if os.path.exists(unit_dir):
+            for test in loader.discover(unit_dir, pattern="test_*.py"):
+                if component_filter:
+                    # Filter by component name
+                    for comp in component_filter:
+                        if comp in test.id():
+                            unit_tests.addTest(test)
+                            break
+                else:
+                    unit_tests.addTest(test)
+        else:
+            logger.warning(f"Unit test directory not found: {unit_dir}")
 
     # Discover integration tests
     if args.integration or args.all or (not args.unit and not args.e2e):
-        integration_dir = os.path.join(start_dir, "integration")
-        for test in loader.discover(integration_dir, pattern="test_*.py"):
-            if component_filter:
-                # Filter by component name
-                for comp in component_filter:
-                    if comp in test.id():
-                        integration_tests.addTest(test)
-                        break
-            else:
-                integration_tests.addTest(test)
+        integration_dir = os.path.join(test_dir, "integration")
+        if os.path.exists(integration_dir):
+            for test in loader.discover(integration_dir, pattern="test_*.py"):
+                if component_filter:
+                    # Filter by component name
+                    for comp in component_filter:
+                        if comp in test.id():
+                            integration_tests.addTest(test)
+                            break
+                else:
+                    integration_tests.addTest(test)
+        else:
+            logger.warning(f"Integration test directory not found: {integration_dir}")
 
     # Discover end-to-end tests
     if args.e2e or args.all:
-        e2e_dir = os.path.join(start_dir, "e2e")
-        for test in loader.discover(e2e_dir, pattern="test_*.py"):
-            if component_filter:
-                # Filter by component name
-                for comp in component_filter:
-                    if comp in test.id():
-                        e2e_tests.addTest(test)
-                        break
-            else:
-                e2e_tests.addTest(test)
+        e2e_dir = os.path.join(test_dir, "e2e")
+        if os.path.exists(e2e_dir):
+            for test in loader.discover(e2e_dir, pattern="test_*.py"):
+                if component_filter:
+                    # Filter by component name
+                    for comp in component_filter:
+                        if comp in test.id():
+                            e2e_tests.addTest(test)
+                            break
+                else:
+                    e2e_tests.addTest(test)
+        else:
+            logger.warning(f"E2E test directory not found: {e2e_dir}")
 
     # Combine all test suites
     all_tests = unittest.TestSuite()
@@ -490,15 +499,12 @@ def setup_test_environment(args):
         else:
             logger.warning(f"Test configuration file not found: {args.test_config}")
 
-    # Create necessary directories
-    os.makedirs(os.path.join(project_root, "tests", "unit"), exist_ok=True)
-    os.makedirs(os.path.join(project_root, "tests", "integration"), exist_ok=True)
-    os.makedirs(os.path.join(project_root, "tests", "e2e"), exist_ok=True)
-    os.makedirs(os.path.join(project_root, "test_results"), exist_ok=True)
-
     # Create test logs directory
     logs_dir = os.path.join(project_root, "logs")
     os.makedirs(logs_dir, exist_ok=True)
+
+    # Create test results directory
+    os.makedirs(os.path.join(project_root, "test_results"), exist_ok=True)
 
 
 def main():
