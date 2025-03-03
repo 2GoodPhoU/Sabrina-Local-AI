@@ -22,6 +22,9 @@ script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
 project_root = script_dir.parent  # Go up one level from tests/ to project root
 sys.path.insert(0, str(project_root))
 
+# Also add the tests directory to sys.path for proper relative imports
+sys.path.insert(0, str(script_dir))
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -102,12 +105,58 @@ def get_test_loader(pattern=None):
     return loader
 
 
+def setup_test_directories():
+    """
+    Setup all test directories to make sure they are importable
+    by creating necessary __init__.py files
+    """
+    # Get test directory
+    test_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+
+    # List of subdirectories to ensure exist and have __init__.py
+    subdirs = ["unit", "integration", "e2e", "test_utils"]
+
+    # Create main __init__.py
+    main_init = test_dir / "__init__.py"
+    if not main_init.exists():
+        with open(main_init, "w") as f:
+            f.write(
+                """\"\"\"
+Sabrina AI Test Suite
+==================
+This package contains tests for the Sabrina AI project.
+\"\"\"
+"""
+            )
+        logger.info(f"Created {main_init}")
+
+    # Create subdirectories and their __init__.py files
+    for subdir in subdirs:
+        subdir_path = test_dir / subdir
+        subdir_path.mkdir(exist_ok=True)
+
+        init_file = subdir_path / "__init__.py"
+        if not init_file.exists():
+            with open(init_file, "w") as f:
+                f.write(f"# {subdir.capitalize()} tests package\n")
+            logger.info(f"Created {init_file}")
+
+
 def discover_tests(args):
     """Discover all tests based on command line arguments"""
+    # Setup test directories before discovery
+    setup_test_directories()
+
+    # Create test loader
     loader = get_test_loader(args.pattern)
 
-    # Start from the tests directory
-    test_dir = os.path.join(project_root, "tests")
+    # Start from the tests directory (current directory)
+    test_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+
+    # Use relative imports to avoid path issues
+    unit_dir = "unit"
+    integration_dir = "integration"
+    e2e_dir = "e2e"
 
     # Create test suites for different test types
     unit_tests = unittest.TestSuite()
@@ -122,78 +171,105 @@ def discover_tests(args):
 
     # Discover unit tests
     if args.unit or args.all or (not args.integration and not args.e2e):
-        unit_dir = os.path.join(test_dir, "unit")
-        if os.path.exists(unit_dir):
-            # Make sure __init__.py exists in the unit directory
-            init_path = os.path.join(unit_dir, "__init__.py")
-            if not os.path.exists(init_path):
-                with open(init_path, "w") as f:
-                    f.write("# Unit tests package\n")
-
+        unit_path = test_dir / unit_dir
+        if unit_path.exists():
             try:
-                for test in loader.discover(unit_dir, pattern="test_*.py"):
-                    if component_filter:
-                        # Filter by component name
-                        for comp in component_filter:
-                            if comp in test.id():
-                                unit_tests.addTest(test)
-                                break
-                    else:
-                        unit_tests.addTest(test)
-            except ImportError as e:
+                logger.info(f"Looking for unit tests in {unit_path}")
+                # Use direct unittest loading rather than discovery for better control
+                for test_file in unit_path.glob("test_*.py"):
+                    module_name = f"unit.{test_file.stem}"
+                    try:
+                        module = __import__(module_name, fromlist=["*"])
+                        for attr_name in dir(module):
+                            attr = getattr(module, attr_name)
+                            if (
+                                isinstance(attr, type)
+                                and issubclass(attr, unittest.TestCase)
+                                and attr.__module__ == module.__name__
+                            ):
+                                tests = loader.loadTestsFromTestCase(attr)
+                                if component_filter:
+                                    # Filter by component name
+                                    for comp in component_filter:
+                                        if comp in module_name:
+                                            unit_tests.addTest(tests)
+                                            break
+                                else:
+                                    unit_tests.addTest(tests)
+                    except (ImportError, AttributeError) as e:
+                        logger.warning(f"Error importing {module_name}: {e}")
+            except Exception as e:
                 logger.warning(f"Error discovering unit tests: {e}")
         else:
-            logger.warning(f"Unit test directory not found: {unit_dir}")
+            logger.warning(f"Unit test directory not found: {unit_path}")
 
     # Discover integration tests
     if args.integration or args.all or (not args.unit and not args.e2e):
-        integration_dir = os.path.join(test_dir, "integration")
-        if os.path.exists(integration_dir):
-            # Make sure __init__.py exists in the integration directory
-            init_path = os.path.join(integration_dir, "__init__.py")
-            if not os.path.exists(init_path):
-                with open(init_path, "w") as f:
-                    f.write("# Integration tests package\n")
-
+        integration_path = test_dir / integration_dir
+        if integration_path.exists():
             try:
-                for test in loader.discover(integration_dir, pattern="test_*.py"):
-                    if component_filter:
-                        # Filter by component name
-                        for comp in component_filter:
-                            if comp in test.id():
-                                integration_tests.addTest(test)
-                                break
-                    else:
-                        integration_tests.addTest(test)
-            except ImportError as e:
+                logger.info(f"Looking for integration tests in {integration_path}")
+                # Use direct unittest loading rather than discovery for better control
+                for test_file in integration_path.glob("test_*.py"):
+                    module_name = f"integration.{test_file.stem}"
+                    try:
+                        module = __import__(module_name, fromlist=["*"])
+                        for attr_name in dir(module):
+                            attr = getattr(module, attr_name)
+                            if (
+                                isinstance(attr, type)
+                                and issubclass(attr, unittest.TestCase)
+                                and attr.__module__ == module.__name__
+                            ):
+                                tests = loader.loadTestsFromTestCase(attr)
+                                if component_filter:
+                                    # Filter by component name
+                                    for comp in component_filter:
+                                        if comp in module_name:
+                                            integration_tests.addTest(tests)
+                                            break
+                                else:
+                                    integration_tests.addTest(tests)
+                    except (ImportError, AttributeError) as e:
+                        logger.warning(f"Error importing {module_name}: {e}")
+            except Exception as e:
                 logger.warning(f"Error discovering integration tests: {e}")
         else:
-            logger.warning(f"Integration test directory not found: {integration_dir}")
+            logger.warning(f"Integration test directory not found: {integration_path}")
 
     # Discover end-to-end tests
     if args.e2e or args.all:
-        e2e_dir = os.path.join(test_dir, "e2e")
-        if os.path.exists(e2e_dir):
-            # Make sure __init__.py exists in the e2e directory
-            init_path = os.path.join(e2e_dir, "__init__.py")
-            if not os.path.exists(init_path):
-                with open(init_path, "w") as f:
-                    f.write("# End-to-end tests package\n")
-
+        e2e_path = test_dir / e2e_dir
+        if e2e_path.exists():
             try:
-                for test in loader.discover(e2e_dir, pattern="test_*.py"):
-                    if component_filter:
-                        # Filter by component name
-                        for comp in component_filter:
-                            if comp in test.id():
-                                e2e_tests.addTest(test)
-                                break
-                    else:
-                        e2e_tests.addTest(test)
-            except ImportError as e:
+                logger.info(f"Looking for e2e tests in {e2e_path}")
+                # Use direct unittest loading rather than discovery for better control
+                for test_file in e2e_path.glob("test_*.py"):
+                    module_name = f"e2e.{test_file.stem}"
+                    try:
+                        module = __import__(module_name, fromlist=["*"])
+                        for attr_name in dir(module):
+                            attr = getattr(module, attr_name)
+                            if (
+                                isinstance(attr, type)
+                                and issubclass(attr, unittest.TestCase)
+                                and attr.__module__ == module.__name__
+                            ):
+                                tests = loader.loadTestsFromTestCase(attr)
+                                if component_filter:
+                                    # Filter by component name
+                                    for comp in component_filter:
+                                        if comp in module_name:
+                                            e2e_tests.addTest(tests)
+                                            break
+                                else:
+                                    e2e_tests.addTest(tests)
+                    except (ImportError, AttributeError) as e:
+                        logger.warning(f"Error importing {module_name}: {e}")
+            except Exception as e:
                 logger.warning(f"Error discovering e2e tests: {e}")
         else:
-            logger.warning(f"E2E test directory not found: {e2e_dir}")
+            logger.warning(f"E2E test directory not found: {e2e_path}")
 
     # Combine all test suites
     all_tests = unittest.TestSuite()
@@ -529,19 +605,6 @@ def setup_test_environment(args):
 
     # Create test results directory
     os.makedirs(os.path.join(project_root, "test_results"), exist_ok=True)
-
-    # Ensure __init__.py exists in tests directory
-    tests_init = os.path.join(project_root, "tests", "__init__.py")
-    if not os.path.exists(tests_init):
-        with open(tests_init, "w") as f:
-            f.write(
-                """\"\"\"
-Sabrina AI Test Suite
-==================
-This package contains tests for the Sabrina AI project.
-\"\"\"
-"""
-            )
 
 
 def main():
