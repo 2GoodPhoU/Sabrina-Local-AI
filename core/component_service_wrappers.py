@@ -1361,3 +1361,836 @@ class PresenceService(ServiceComponent):
 
     def _register_handlers(self):
         """Register event handlers for the presence service"""
+        # Create handler for presence events
+        presence_handler = self.event_bus.create_handler(
+            callback=self._handle_presence_event,
+            event_types=[
+                EventType.ANIMATION_CHANGE,
+                EventType.STATE_CHANGE,
+                EventType.SYSTEM_ERROR,
+                EventType.SPEECH_STARTED,
+                EventType.SPEECH_COMPLETED,
+                EventType.LISTENING_STARTED,
+                EventType.LISTENING_COMPLETED,
+            ],
+        )
+
+        # Register the handler
+        handler_id = self.event_bus.register_handler(presence_handler)
+        self.handler_ids.append(handler_id)
+
+    def initialize(self) -> bool:
+        """Initialize the presence service"""
+        super().initialize()
+
+        logger.info("Initializing presence service")
+
+        try:
+            # Try to import presence system
+            try:
+                from services.presence.presence_system import PresenceSystem
+
+                logger.info("Using PresenceSystem class")
+
+                # Initialize presence system
+                self.presence_system = PresenceSystem()
+
+                # Configure presence settings
+                self._configure_presence_settings()
+
+                self.status = ComponentStatus.READY
+                logger.info("Presence service initialized successfully")
+                return True
+
+            except ImportError:
+                logger.warning("PresenceSystem class not available - using placeholder")
+                self._create_placeholder_client()
+                self.status = ComponentStatus.READY
+                return True
+
+        except Exception as e:
+            self.handle_error(e, "Failed to initialize presence service")
+            return False
+
+    def _create_placeholder_client(self):
+        """Create a placeholder presence client for testing"""
+
+        # Create a simple object with the required methods
+        class PlaceholderPresenceSystem:
+            def __init__(self):
+                self.current_animation = "idle"
+                self.theme = "default"
+                self.transparency = 0.85
+                self.click_through = False
+
+            def set_animation(self, animation):
+                logger.info(f"[PLACEHOLDER] Setting animation to: {animation}")
+                self.current_animation = animation
+                return True
+
+            def change_theme(self, theme):
+                logger.info(f"[PLACEHOLDER] Changing theme to: {theme}")
+                self.theme = theme
+                return True
+
+            def set_transparency(self, transparency):
+                logger.info(f"[PLACEHOLDER] Setting transparency to: {transparency}")
+                self.transparency = transparency
+                return True
+
+            def toggle_click_through(self):
+                self.click_through = not self.click_through
+                logger.info(f"[PLACEHOLDER] Toggle click through: {self.click_through}")
+                return True
+
+            def show(self):
+                logger.info("[PLACEHOLDER] Showing presence window")
+                return True
+
+            def hide(self):
+                logger.info("[PLACEHOLDER] Hiding presence window")
+                return True
+
+        self.presence_system = PlaceholderPresenceSystem()
+
+    def _configure_presence_settings(self):
+        """Configure presence settings from configuration"""
+        if not self.presence_system:
+            return
+
+        # Apply theme
+        if hasattr(self.presence_system, "change_theme") and self.theme:
+            self.presence_system.change_theme(self.theme)
+
+        # Apply transparency
+        if hasattr(self.presence_system, "set_transparency") and self.transparency:
+            self.presence_system.set_transparency(self.transparency)
+
+        # Apply click through mode
+        if hasattr(self.presence_system, "toggle_click_through") and self.click_through:
+            if not self.presence_system.click_through:
+                self.presence_system.toggle_click_through()
+
+    def _handle_presence_event(self, event: Event):
+        """Handle presence-related events"""
+        event_type = event.event_type
+
+        if event_type == EventType.ANIMATION_CHANGE:
+            # Extract animation from event
+            animation = event.get("animation", "")
+
+            if animation:
+                self.set_animation(animation)
+
+        elif event_type == EventType.STATE_CHANGE:
+            # Extract state from event
+            new_state = event.get("new_state", "")
+
+            if new_state:
+                # Map state to animation
+                animation = self._get_animation_for_state(new_state)
+                self.set_animation(animation)
+
+        elif event_type == EventType.SYSTEM_ERROR:
+            # Show error animation
+            self.set_animation("error")
+
+        elif event_type == EventType.SPEECH_STARTED:
+            # Show talking animation
+            self.set_animation("talking")
+
+        elif event_type == EventType.SPEECH_COMPLETED:
+            # Return to idle animation
+            self.set_animation("idle")
+
+        elif event_type == EventType.LISTENING_STARTED:
+            # Show listening animation
+            self.set_animation("listening")
+
+        elif event_type == EventType.LISTENING_COMPLETED:
+            # Return to idle or switch to processing based on result
+            if event.get("transcription", ""):
+                self.set_animation("thinking")
+            else:
+                self.set_animation("idle")
+
+    def _get_animation_for_state(self, state_name: str) -> str:
+        """Map system state to animation name"""
+        # Map of state names to animations
+        state_animations = {
+            "INITIALIZING": "idle",
+            "READY": "idle",
+            "SHUTTING_DOWN": "idle",
+            "ERROR": "error",
+            "LISTENING": "listening",
+            "PROCESSING": "thinking",
+            "RESPONDING": "talking",
+            "SPEAKING": "talking",
+            "EXECUTING_TASK": "working",
+            "MONITORING": "idle",
+            "WAITING": "waiting",
+            "CONTROLLING_DEVICES": "working",
+            "LEARNING": "thinking",
+            "PAUSED": "idle",
+        }
+
+        return state_animations.get(state_name, "idle")
+
+    def set_animation(self, animation: str) -> bool:
+        """
+        Set the presence animation
+
+        Args:
+            animation: Animation name to set
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.presence_system:
+            logger.warning("No presence system available")
+            return False
+
+        if not hasattr(self.presence_system, "set_animation"):
+            logger.warning("Presence system does not support animations")
+            return False
+
+        try:
+            # Set the animation
+            result = self.presence_system.set_animation(animation)
+
+            if result:
+                self.current_animation = animation
+                logger.info(f"Set presence animation to: {animation}")
+                return True
+            else:
+                logger.warning(f"Failed to set animation: {animation}")
+                return False
+
+        except Exception as e:
+            self.handle_error(e, f"Error setting animation: {animation}")
+            return False
+
+    def show(self) -> bool:
+        """
+        Show the presence window
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.presence_system:
+            logger.warning("No presence system available")
+            return False
+
+        if not hasattr(self.presence_system, "show"):
+            logger.warning("Presence system does not support show method")
+            return False
+
+        try:
+            self.presence_system.show()
+            logger.info("Presence window shown")
+            return True
+        except Exception as e:
+            self.handle_error(e, "Error showing presence window")
+            return False
+
+    def hide(self) -> bool:
+        """
+        Hide the presence window
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.presence_system:
+            logger.warning("No presence system available")
+            return False
+
+        if not hasattr(self.presence_system, "hide"):
+            logger.warning("Presence system does not support hide method")
+            return False
+
+        try:
+            self.presence_system.hide()
+            logger.info("Presence window hidden")
+            return True
+        except Exception as e:
+            self.handle_error(e, "Error hiding presence window")
+            return False
+
+    def toggle_click_through(self) -> bool:
+        """
+        Toggle click-through mode
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.presence_system:
+            logger.warning("No presence system available")
+            return False
+
+        if not hasattr(self.presence_system, "toggle_click_through"):
+            logger.warning("Presence system does not support click-through toggle")
+            return False
+
+        try:
+            result = self.presence_system.toggle_click_through()
+            if result:
+                self.click_through = not self.click_through
+                logger.info(f"Click-through mode toggled: {self.click_through}")
+                return True
+            else:
+                logger.warning("Failed to toggle click-through mode")
+                return False
+        except Exception as e:
+            self.handle_error(e, "Error toggling click-through mode")
+            return False
+
+    def change_theme(self, theme: str) -> bool:
+        """
+        Change the presence theme
+
+        Args:
+            theme: Theme name
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.presence_system:
+            logger.warning("No presence system available")
+            return False
+
+        if not hasattr(self.presence_system, "change_theme"):
+            logger.warning("Presence system does not support theme changes")
+            return False
+
+        try:
+            result = self.presence_system.change_theme(theme)
+            if result:
+                self.theme = theme
+                logger.info(f"Changed theme to: {theme}")
+                return True
+            else:
+                logger.warning(f"Failed to change theme: {theme}")
+                return False
+        except Exception as e:
+            self.handle_error(e, f"Error changing theme: {theme}")
+            return False
+
+    def set_transparency(self, transparency: float) -> bool:
+        """
+        Set presence window transparency
+
+        Args:
+            transparency: Transparency level (0.0 to 1.0)
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.presence_system:
+            logger.warning("No presence system available")
+            return False
+
+        if not hasattr(self.presence_system, "set_transparency"):
+            logger.warning("Presence system does not support transparency changes")
+            return False
+
+        try:
+            # Ensure transparency is within valid range
+            transparency = max(0.1, min(1.0, transparency))
+
+            result = self.presence_system.set_transparency(transparency)
+            if result:
+                self.transparency = transparency
+                logger.info(f"Set transparency to: {transparency}")
+                return True
+            else:
+                logger.warning(f"Failed to set transparency: {transparency}")
+                return False
+        except Exception as e:
+            self.handle_error(e, f"Error setting transparency: {transparency}")
+            return False
+
+    def shutdown(self) -> bool:
+        """Shutdown the presence service"""
+        # Hide window if showing
+        if self.presence_system and hasattr(self.presence_system, "hide"):
+            try:
+                self.presence_system.hide()
+            except Exception as e:
+                logger.error(f"Error hiding presence window: {str(e)}")
+
+        # Unregister handlers
+        super().shutdown()
+
+        return True
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get component status information"""
+        status = super().get_status()
+
+        # Add presence-specific status
+        status.update(
+            {
+                "current_animation": self.current_animation,
+                "theme": self.theme,
+                "transparency": self.transparency,
+                "click_through": self.click_through,
+            }
+        )
+
+        return status
+
+
+class SmartHomeService(ServiceComponent):
+    """Smart home service component for IoT device control and automation"""
+
+    def __init__(self, name, event_bus, state_machine, config=None):
+        """Initialize the smart home service component"""
+        super().__init__(name, event_bus, state_machine, config)
+
+        self.client = None
+        self.devices = {}
+        self.last_command = None
+        self.home_assistant_url = self.config.get(
+            "home_assistant_url", "http://homeassistant.local:8123"
+        )
+        self.use_google_home = self.config.get("use_google_home", False)
+        self.enabled = self.config.get("enable", False)
+
+    def _register_handlers(self):
+        """Register event handlers for the smart home service"""
+        # Create handler for smart home events
+        smart_home_handler = self.event_bus.create_handler(
+            callback=self._handle_smart_home_event,
+            event_types=[
+                EventType.DEVICE_COMMAND,
+                EventType.DEVICE_QUERY,
+                EventType.ROUTINE_EXECUTE,
+            ],
+        )
+
+        # Register the handler
+        handler_id = self.event_bus.register_handler(smart_home_handler)
+        self.handler_ids.append(handler_id)
+
+    def initialize(self) -> bool:
+        """Initialize the smart home service"""
+        super().initialize()
+
+        if not self.enabled:
+            logger.info("Smart home service is disabled in configuration")
+            self.status = ComponentStatus.PAUSED
+            return True
+
+        logger.info("Initializing smart home service")
+
+        try:
+            # Try to import smart home client
+            try:
+                if self.use_google_home:
+                    logger.info("Using Google Home API integration")
+                    from services.smart_home.google_home_client import GoogleHomeClient
+
+                    self.client = GoogleHomeClient()
+                else:
+                    logger.info("Using Home Assistant integration")
+                    from services.smart_home.home_assistant_client import (
+                        HomeAssistantClient,
+                    )
+
+                    self.client = HomeAssistantClient(self.home_assistant_url)
+
+                # Test connection
+                connected = False
+                if hasattr(self.client, "test_connection"):
+                    connected = self.client.test_connection()
+
+                if connected:
+                    logger.info("Successfully connected to smart home system")
+
+                    # Discover devices
+                    if hasattr(self.client, "discover_devices"):
+                        self.devices = self.client.discover_devices() or {}
+                        logger.info(
+                            f"Discovered {len(self.devices)} smart home devices"
+                        )
+
+                    self.status = ComponentStatus.READY
+                    return True
+                else:
+                    logger.warning("Failed to connect to smart home system")
+                    self.status = ComponentStatus.ERROR
+                    self.error_message = "Failed to connect to smart home system"
+                    return False
+
+            except ImportError:
+                logger.warning("Smart home client not available - using placeholder")
+                self._create_placeholder_client()
+                self.status = ComponentStatus.READY
+                return True
+
+        except Exception as e:
+            self.handle_error(e, "Failed to initialize smart home service")
+            return False
+
+    def _create_placeholder_client(self):
+        """Create a placeholder smart home client for testing"""
+
+        # Create a simple object with the required methods
+        class PlaceholderSmartHomeClient:
+            def __init__(self):
+                self.devices = {
+                    "living_room_light": {
+                        "name": "Living Room Light",
+                        "type": "light",
+                        "state": "off",
+                    },
+                    "kitchen_light": {
+                        "name": "Kitchen Light",
+                        "type": "light",
+                        "state": "off",
+                    },
+                    "bedroom_light": {
+                        "name": "Bedroom Light",
+                        "type": "light",
+                        "state": "off",
+                    },
+                    "thermostat": {
+                        "name": "Thermostat",
+                        "type": "climate",
+                        "state": "off",
+                        "temperature": 72,
+                    },
+                    "front_door": {
+                        "name": "Front Door",
+                        "type": "lock",
+                        "state": "locked",
+                    },
+                }
+
+            def test_connection(self):
+                return True
+
+            def discover_devices(self):
+                return self.devices
+
+            def get_device_state(self, device_id):
+                if device_id in self.devices:
+                    return self.devices[device_id]
+                return None
+
+            def set_device_state(self, device_id, state):
+                if device_id in self.devices:
+                    self.devices[device_id]["state"] = state
+                    logger.info(f"[PLACEHOLDER] Set {device_id} to state: {state}")
+                    return True
+                return False
+
+            def execute_routine(self, routine_name):
+                logger.info(f"[PLACEHOLDER] Executed routine: {routine_name}")
+                return True
+
+        self.client = PlaceholderSmartHomeClient()
+        self.devices = self.client.devices
+
+    def _handle_smart_home_event(self, event: Event):
+        """Handle smart home events"""
+        event_type = event.event_type
+
+        if event_type == EventType.DEVICE_COMMAND:
+            # Extract device ID and command from event
+            device_id = event.get("device_id", "")
+            command = event.get("command", "")
+            parameters = event.get("parameters", {})
+
+            if device_id and command:
+                self.control_device(device_id, command, parameters)
+
+        elif event_type == EventType.DEVICE_QUERY:
+            # Extract device ID from event
+            device_id = event.get("device_id", "")
+
+            if device_id:
+                device_state = self.get_device_state(device_id)
+
+                # Post response event with device state
+                if device_state:
+                    self.event_bus.post_event(
+                        Event(
+                            event_type=EventType.DEVICE_STATE,
+                            data={"device_id": device_id, "state": device_state},
+                            priority=EventPriority.NORMAL,
+                            source="smart_home_service",
+                        )
+                    )
+
+        elif event_type == EventType.ROUTINE_EXECUTE:
+            # Extract routine name from event
+            routine_name = event.get("routine", "")
+
+            if routine_name:
+                self.execute_routine(routine_name)
+
+    def control_device(
+        self, device_id: str, command: str, parameters: Dict[str, Any] = None
+    ) -> bool:
+        """
+        Control a smart home device
+
+        Args:
+            device_id: Device identifier
+            command: Command to execute (e.g., "on", "off", "set_temperature")
+            parameters: Additional command parameters
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.client:
+            logger.warning("No smart home client available")
+            return False
+
+        # Update last command
+        self.last_command = {
+            "device": device_id,
+            "command": command,
+            "parameters": parameters,
+        }
+
+        # Transition to controlling devices state
+        self.state_machine.transition_to(
+            self.state_machine.SabrinaState.CONTROLLING_DEVICES,
+            {"device_id": device_id, "command": command, "parameters": parameters},
+        )
+
+        try:
+            # Handle different command types
+            if command in ["on", "off"]:
+                # Simple on/off commands
+                if hasattr(self.client, "set_device_state"):
+                    result = self.client.set_device_state(device_id, command)
+
+                    # Update device state in cache
+                    if result and device_id in self.devices:
+                        self.devices[device_id]["state"] = command
+
+                    # Post device state change event
+                    self.event_bus.post_event(
+                        Event(
+                            event_type=EventType.DEVICE_STATE_CHANGED,
+                            data={"device_id": device_id, "state": command},
+                            priority=EventPriority.NORMAL,
+                            source="smart_home_service",
+                        )
+                    )
+
+                    # Transition back to ready state
+                    self.state_machine.transition_to(
+                        self.state_machine.SabrinaState.READY
+                    )
+
+                    return result
+                else:
+                    logger.warning(
+                        "Smart home client does not support set_device_state"
+                    )
+                    return False
+
+            elif (
+                command == "set_temperature"
+                and parameters
+                and "temperature" in parameters
+            ):
+                # Temperature control
+                temperature = parameters["temperature"]
+
+                if hasattr(self.client, "set_temperature"):
+                    result = self.client.set_temperature(device_id, temperature)
+
+                    # Update device state in cache
+                    if result and device_id in self.devices:
+                        self.devices[device_id]["temperature"] = temperature
+
+                    # Post device state change event
+                    self.event_bus.post_event(
+                        Event(
+                            event_type=EventType.DEVICE_STATE_CHANGED,
+                            data={"device_id": device_id, "temperature": temperature},
+                            priority=EventPriority.NORMAL,
+                            source="smart_home_service",
+                        )
+                    )
+
+                    # Transition back to ready state
+                    self.state_machine.transition_to(
+                        self.state_machine.SabrinaState.READY
+                    )
+
+                    return result
+                else:
+                    logger.warning("Smart home client does not support set_temperature")
+                    return False
+
+            elif command == "lock" or command == "unlock":
+                # Lock control
+                if hasattr(self.client, "set_lock_state"):
+                    result = self.client.set_lock_state(device_id, command)
+
+                    # Update device state in cache
+                    if result and device_id in self.devices:
+                        self.devices[device_id]["state"] = (
+                            "locked" if command == "lock" else "unlocked"
+                        )
+
+                    # Post device state change event
+                    self.event_bus.post_event(
+                        Event(
+                            event_type=EventType.DEVICE_STATE_CHANGED,
+                            data={"device_id": device_id, "state": command},
+                            priority=EventPriority.NORMAL,
+                            source="smart_home_service",
+                        )
+                    )
+
+                    # Transition back to ready state
+                    self.state_machine.transition_to(
+                        self.state_machine.SabrinaState.READY
+                    )
+
+                    return result
+                else:
+                    logger.warning("Smart home client does not support set_lock_state")
+                    return False
+
+            else:
+                # Generic command
+                if hasattr(self.client, "send_command"):
+                    result = self.client.send_command(
+                        device_id, command, parameters or {}
+                    )
+
+                    # Transition back to ready state
+                    self.state_machine.transition_to(
+                        self.state_machine.SabrinaState.READY
+                    )
+
+                    return result
+                else:
+                    logger.warning(
+                        "Smart home client does not support generic commands"
+                    )
+                    return False
+
+        except Exception as e:
+            self.handle_error(e, f"Error controlling device {device_id}")
+
+            # Transition to error state
+            self.state_machine.transition_to(
+                self.state_machine.SabrinaState.ERROR,
+                {"error_info": {"message": str(e), "source": "smart_home_service"}},
+            )
+
+            return False
+
+    def get_device_state(self, device_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get the current state of a device
+
+        Args:
+            device_id: Device identifier
+
+        Returns:
+            Dict with device state or None if not found
+        """
+        if not self.client:
+            logger.warning("No smart home client available")
+            return None
+
+        try:
+            if hasattr(self.client, "get_device_state"):
+                return self.client.get_device_state(device_id)
+            else:
+                logger.warning("Smart home client does not support get_device_state")
+                return None
+
+        except Exception as e:
+            self.handle_error(e, f"Error getting device state for {device_id}")
+            return None
+
+    def get_all_devices(self) -> Dict[str, Dict[str, Any]]:
+        """
+        Get all available devices
+
+        Returns:
+            Dict with device information
+        """
+        return self.devices
+
+    def execute_routine(self, routine_name: str) -> bool:
+        """
+        Execute a smart home routine
+
+        Args:
+            routine_name: Name of routine to execute
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.client:
+            logger.warning("No smart home client available")
+            return False
+
+        # Transition to controlling devices state
+        self.state_machine.transition_to(
+            self.state_machine.SabrinaState.CONTROLLING_DEVICES,
+            {"routine": routine_name},
+        )
+
+        try:
+            if hasattr(self.client, "execute_routine"):
+                result = self.client.execute_routine(routine_name)
+
+                # Transition back to ready state
+                self.state_machine.transition_to(self.state_machine.SabrinaState.READY)
+
+                return result
+            else:
+                logger.warning("Smart home client does not support execute_routine")
+
+                # Transition back to ready state
+                self.state_machine.transition_to(self.state_machine.SabrinaState.READY)
+
+                return False
+
+        except Exception as e:
+            self.handle_error(e, f"Error executing routine {routine_name}")
+
+            # Transition to error state
+            self.state_machine.transition_to(
+                self.state_machine.SabrinaState.ERROR,
+                {"error_info": {"message": str(e), "source": "smart_home_service"}},
+            )
+
+            return False
+
+    def shutdown(self) -> bool:
+        """Shutdown the smart home service"""
+        # Unregister handlers
+        super().shutdown()
+
+        return True
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get component status information"""
+        status = super().get_status()
+
+        # Add smart home-specific status
+        status.update(
+            {
+                "devices_count": len(self.devices),
+                "last_command": self.last_command,
+                "home_assistant_url": self.home_assistant_url,
+                "use_google_home": self.use_google_home,
+                "enabled": self.enabled,
+            }
+        )
+
+        return status
