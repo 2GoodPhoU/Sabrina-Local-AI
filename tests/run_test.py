@@ -169,6 +169,9 @@ def discover_tests(args):
         component_filter = [comp.strip() for comp in args.component.split(",")]
         logger.info(f"Filtering tests for components: {component_filter}")
 
+    # Track imported modules to avoid duplicates
+    imported_modules = {}
+
     # Discover unit tests
     if args.unit or args.all or (not args.integration and not args.e2e):
         unit_path = test_dir / unit_dir
@@ -178,8 +181,32 @@ def discover_tests(args):
                 # Use direct unittest loading rather than discovery for better control
                 for test_file in unit_path.glob("test_*.py"):
                     module_name = f"unit.{test_file.stem}"
+
+                    # Skip if already imported to avoid duplicates
+                    if module_name in imported_modules:
+                        continue
+
                     try:
-                        module = __import__(module_name, fromlist=["*"])
+                        # Use importlib for more controlled imports
+                        import importlib
+
+                        spec = importlib.util.spec_from_file_location(
+                            module_name, test_file
+                        )
+                        if spec is None:
+                            logger.warning(f"Could not create spec for {test_file}")
+                            continue
+
+                        module = importlib.util.module_from_spec(spec)
+                        imported_modules[module_name] = module
+
+                        # Add to sys.modules to make imports work properly
+                        sys.modules[module_name] = module
+
+                        # Execute the module
+                        spec.loader.exec_module(module)
+
+                        # Find test cases
                         for attr_name in dir(module):
                             attr = getattr(module, attr_name)
                             if (

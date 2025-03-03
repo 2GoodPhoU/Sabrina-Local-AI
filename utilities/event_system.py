@@ -21,16 +21,56 @@ logger = logging.getLogger("event_system")
 
 
 class EventType(Enum):
-    """Base event types supported by the system"""
+    # System events
+    SYSTEM = auto()
+    SYSTEM_STARTUP = auto()
+    SYSTEM_SHUTDOWN = auto()
+    SYSTEM_ERROR = auto()
 
-    SYSTEM = auto()  # System-level events (startup, shutdown)
-    USER_INPUT = auto()  # User input events (voice, text)
-    VISION = auto()  # Vision-related events (screen capture, OCR)
-    AUTOMATION = auto()  # Automation events (mouse, keyboard)
-    VOICE = auto()  # Voice output events
-    ERROR = auto()  # Error events
-    STATE_CHANGE = auto()  # State change events
-    CUSTOM = auto()  # Custom event types
+    # User interaction events
+    USER_INPUT = auto()
+    USER_VOICE_COMMAND = auto()
+    USER_TEXT_COMMAND = auto()
+
+    # Vision events
+    VISION = auto()
+    SCREEN_CAPTURED = auto()
+    OCR_RESULT = auto()
+    ELEMENT_DETECTED = auto()
+
+    # Automation events
+    AUTOMATION = auto()
+    AUTOMATION_STARTED = auto()
+    AUTOMATION_COMPLETED = auto()
+    AUTOMATION_ERROR = auto()
+
+    # Voice events
+    VOICE = auto()
+    SPEECH_STARTED = auto()
+    SPEECH_COMPLETED = auto()
+    SPEECH_ERROR = auto()
+
+    # Hearing events
+    HEARING = auto()
+    WAKE_WORD_DETECTED = auto()
+    LISTENING_STARTED = auto()
+    LISTENING_COMPLETED = auto()
+
+    # State events
+    STATE_CHANGE = auto()
+
+    # Smart home events
+    DEVICE_COMMAND = auto()
+    DEVICE_QUERY = auto()
+    DEVICE_STATE = auto()
+    DEVICE_STATE_CHANGED = auto()
+    ROUTINE_EXECUTE = auto()
+
+    # Animation events
+    ANIMATION_CHANGE = auto()
+
+    # Custom events
+    CUSTOM = auto()
 
 
 class EventPriority(Enum):

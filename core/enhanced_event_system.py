@@ -9,68 +9,29 @@ import logging
 import time
 import uuid
 from typing import Dict, List, Callable, Any, Optional, Union
-from enum import Enum, auto
 
 # Import base event system
 from utilities.event_system import (
     EventBus as BaseEventBus,
     Event as BaseEvent,
-    EventType as BaseEventType,
-    EventPriority as BaseEventPriority,
     EventHandler as BaseEventHandler,
 )
+
+# Import the unified EventType from utilities.event_system
+from utilities.event_system import EventPriority, Event, EventBus
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sabrina.enhanced_event_system")
 
 
-# Enhanced EventType - extends the base EventType with additional event types
-class EventType(BaseEventType):
-    """Enhanced event types supported by the system"""
+# Define the EnhancedEventBus class that extends EventBus
+class EnhancedEventBus(EventBus):
+    """Enhanced event bus that adds additional functionality to the base EventBus"""
 
-    # System events
-    SYSTEM_STARTUP = auto()
-    SYSTEM_SHUTDOWN = auto()
-    SYSTEM_ERROR = auto()
-
-    # State events
-    STATE_CHANGE = auto()
-
-    # Speech events
-    SPEECH_STARTED = auto()
-    SPEECH_COMPLETED = auto()
-    SPEECH_ERROR = auto()
-
-    # Hearing events
-    LISTENING_STARTED = auto()
-    LISTENING_COMPLETED = auto()
-    WAKE_WORD_DETECTED = auto()
-
-    # User input events
-    USER_VOICE_COMMAND = auto()
-    USER_TEXT_COMMAND = auto()
-
-    # Vision events
-    SCREEN_CAPTURED = auto()
-    ELEMENT_DETECTED = auto()
-    OCR_RESULT = auto()
-
-    # Automation events
-    AUTOMATION_STARTED = auto()
-    AUTOMATION_COMPLETED = auto()
-    AUTOMATION_ERROR = auto()
-
-    # Device events
-    DEVICE_COMMAND = auto()
-    DEVICE_QUERY = auto()
-    DEVICE_STATE = auto()
-    DEVICE_STATE_CHANGED = auto()
-    ROUTINE_EXECUTE = auto()
-
-
-# Use the base EventPriority directly
-EventPriority = BaseEventPriority
+    def __init__(self, max_queue_size: int = 1000, worker_count: int = 1):
+        """Initialize the enhanced event bus"""
+        super().__init__(max_queue_size, worker_count)
 
 
 # Enhanced Event class - extends the base Event class
