@@ -12,7 +12,7 @@ import argparse
 import traceback
 
 # Import our core system
-from core.enhanced_sabrina_core import SabrinaCore
+from core.core import SabrinaCore
 from utilities.config_manager import ConfigManager
 
 # Add project directory to Python path
