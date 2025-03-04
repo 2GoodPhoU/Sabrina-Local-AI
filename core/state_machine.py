@@ -382,26 +382,28 @@ class StateMachine:
         Returns:
             bool: True if the transition is allowed, False otherwise
         """
-        # Check direct transitions
-        if self.current_state in self.transitions:
-            if target_state in self.transitions[self.current_state]:
-                transition = self.transitions[self.current_state][target_state]
-                # If there's a condition, evaluate it; otherwise transition is allowed
-                if transition.condition:
-                    return transition.can_transition(self.context)
-                else:
-                    return True
+        # First check direct transitions from current state
+        if (
+            self.current_state in self.transitions
+            and target_state in self.transitions[self.current_state]
+        ):
+            transition = self.transitions[self.current_state][target_state]
+            if transition.condition:
+                return transition.can_transition(self.context)
+            else:
+                return True  # No condition means always allowed
 
-        # Check global transitions
+        # Next check global transitions if no direct transition was found or allowed
         for transition in self.global_transitions:
             if transition.to_state == target_state:
-                # If there's a condition, evaluate it; otherwise transition is allowed
                 if transition.condition:
-                    return transition.can_transition(self.context)
+                    # Only return True if the condition is met
+                    if transition.can_transition(self.context):
+                        return True
                 else:
-                    return True
+                    return True  # No condition means always allowed
 
-        # If we get here, no valid transition was found
+        # No valid transition found or all conditional transitions failed their conditions
         return False
 
     def transition_to(
