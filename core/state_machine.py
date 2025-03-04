@@ -70,7 +70,7 @@ class StateTransition:
         # Evaluate the condition with the given context
         try:
             ctx = context or {}
-            # Make sure we get a boolean result from the condition
+            # Call the condition and convert result to boolean
             result = self.condition(ctx)
             # Explicitly convert result to boolean to avoid any type issues
             return bool(result)
