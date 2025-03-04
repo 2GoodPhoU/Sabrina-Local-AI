@@ -457,6 +457,29 @@ class SabrinaCore:
         # Transition to READY state
         self.state_machine.transition_to(SabrinaState.READY)
 
+    def get_status(self) -> Dict[str, Any]:
+        """Get system status information"""
+        component_statuses = {}
+
+        # Avoid recursion by excluding self from component list
+        for name, component in self.components.items():
+            if hasattr(component, "get_status") and component != self:
+                try:
+                    component_statuses[name] = component.get_status()
+                except Exception as e:
+                    component_statuses[name] = {"error": str(e)}
+
+        return {
+            "name": "Sabrina AI Core",
+            "status": self.status.name,
+            "uptime": time.time() - self.start_time,
+            "state": self.state_machine.current_state.name,
+            "components": component_statuses,
+            "event_bus": self.event_bus.get_stats(),
+            "initialized": self.initialized,
+            "running": self.running,
+        }
+
     def _create_component_instances(self):
         """Create instances of all enabled components"""
         # Check which components are enabled in the configuration

@@ -136,6 +136,8 @@ class TestStateMachine(unittest.TestCase):
 
     def test_global_transition(self):
         """Test global transitions that work from any state"""
+        # First clear any existing global transitions
+        self.state_machine.global_transitions = []
 
         # Define a proper function instead of a lambda for the condition
         def error_condition(ctx):

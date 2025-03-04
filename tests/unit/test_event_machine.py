@@ -295,10 +295,21 @@ class TestEventSystem(unittest.TestCase):
         for i in range(num_events):
             # Use post_event_immediate to ensure immediate processing
             event = Event(event_type=EventType.SYSTEM, data={"index": i}, source="test")
+
+            # Register a handler that will actually count towards processing
+            def test_handler(evt):
+                pass
+
+            handler = self.event_bus.create_handler(
+                callback=test_handler, event_types=[EventType.SYSTEM]
+            )
+            self.event_bus.register_handler(handler)
+
+            # Now post the event
             self.event_bus.post_event_immediate(event)
 
         # Add a small delay to ensure processing completes
-        time.sleep(0.2)
+        time.sleep(0.1)
 
         # Get updated stats
         updated_stats = self.event_bus.get_stats()
