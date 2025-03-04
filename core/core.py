@@ -725,25 +725,6 @@ class SabrinaCore:
 
         logger.info("Sabrina AI Core System shutdown complete")
 
-    def get_status(self) -> Dict[str, Any]:
-        """Get system status information"""
-        component_statuses = {}
-
-        for name, component in self.components.items():
-            if hasattr(component, "get_status"):
-                component_statuses[name] = component.get_status()
-
-        return {
-            "name": "Sabrina AI Core",
-            "status": self.status.name,
-            "uptime": time.time() - self.start_time,
-            "state": self.state_machine.current_state.name,
-            "components": component_statuses,
-            "event_bus": self.event_bus.get_stats(),
-            "initialized": self.initialized,
-            "running": self.running,
-        }
-
     # Command handling for LLM integration
     def register_command(
         self,
