@@ -63,14 +63,17 @@ class StateTransition:
 
     def can_transition(self, context: Dict[str, Any] = None) -> bool:
         """Check if transition is allowed based on condition"""
+        # If there's no condition, then the transition is allowed
         if self.condition is None:
             return True
 
+        # Evaluate the condition with the given context
         try:
-            context = context or {}
-            # Ensure the condition function is properly evaluated and returns a boolean
-            result = self.condition(context)
-            return bool(result)  # Explicitly convert to boolean
+            ctx = context or {}
+            # Make sure we get a boolean result from the condition
+            result = self.condition(ctx)
+            # Explicitly convert result to boolean to avoid any type issues
+            return bool(result)
         except Exception as e:
             logger.error(f"Error evaluating transition condition: {str(e)}")
             return False
@@ -344,6 +347,10 @@ class StateMachine:
         description: str = "",
     ) -> None:
         """Add a global transition that can happen from any state"""
+        # Make sure we have a clean list of global transitions
+        if not hasattr(self, "global_transitions"):
+            self.global_transitions = []
+
         transition = StateTransition(
             from_state=None,  # None indicates any state
             to_state=to_state,
@@ -382,29 +389,39 @@ class StateMachine:
         Returns:
             bool: True if the transition is allowed, False otherwise
         """
-        # First check direct transitions from current state
+        # Initialize with no allowed transition
+        can_transition = False
+
+        # Check direct transitions from current state
         if (
             self.current_state in self.transitions
             and target_state in self.transitions[self.current_state]
         ):
             transition = self.transitions[self.current_state][target_state]
             if transition.condition:
-                return transition.can_transition(self.context)
+                # Evaluate condition for direct transition
+                can_transition = transition.can_transition(self.context)
             else:
-                return True  # No condition means always allowed
+                # No condition means transition is allowed
+                can_transition = True
 
-        # Next check global transitions if no direct transition was found or allowed
-        for transition in self.global_transitions:
-            if transition.to_state == target_state:
-                if transition.condition:
-                    # Only return True if the condition is met
-                    if transition.can_transition(self.context):
-                        return True
-                else:
-                    return True  # No condition means always allowed
+        # Only check global transitions if no direct transition is allowed
+        if not can_transition:
+            # Check each global transition
+            for transition in self.global_transitions:
+                if transition.to_state == target_state:
+                    if transition.condition:
+                        # Check condition - only allow if condition is true
+                        condition_result = transition.can_transition(self.context)
+                        if condition_result:
+                            can_transition = True
+                            break
+                    else:
+                        # No condition means global transition is allowed
+                        can_transition = True
+                        break
 
-        # No valid transition found or all conditional transitions failed their conditions
-        return False
+        return can_transition
 
     def transition_to(
         self, target_state: SabrinaState, context_updates: Dict[str, Any] = None
