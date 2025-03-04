@@ -385,8 +385,10 @@ class EventBus:
         try:
             # Add to queue with priority (negative so higher priority is processed first)
             # Use timestamp as tiebreaker for events with same priority
+            # Important: We use a tuple of (priority_value, timestamp, event_id, event)
+            # Adding event_id ensures no direct comparison between Event objects
             self.event_queue.put(
-                (-event.priority.value, event.timestamp, event), block=False
+                (-event.priority.value, event.timestamp, id(event), event), block=False
             )
 
             # Add to history
