@@ -137,6 +137,7 @@ class TestStateMachine(unittest.TestCase):
     # In tests/unit/test_state_machine.py, modify the test_global_transition method to
     # properly check the condition behavior:
 
+    # In tests/unit/test_state_machine.py
     def test_global_transition(self):
         """Test global transitions that work from any state"""
         # First clear any existing global transitions

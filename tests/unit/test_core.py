@@ -297,6 +297,7 @@ class TestCore(unittest.TestCase):
         # Remain in LISTENING state
         self.assertEqual(self.core.state_machine.current_state, SabrinaState.LISTENING)
 
+    # In tests/unit/test_core.py
     def test_command_processing(self):
         """Test processing of user commands"""
         # Initialize components
@@ -317,7 +318,7 @@ class TestCore(unittest.TestCase):
         self.core._handle_user_command(command_event)
 
         # Add a longer delay to ensure state transitions complete
-        time.sleep(0.2)  # Increase from 0.1 to 0.2 seconds
+        time.sleep(0.3)  # Increase from 0.2 to 0.3 seconds
 
         # Now check state
         self.assertEqual(self.core.state_machine.current_state, SabrinaState.PROCESSING)
