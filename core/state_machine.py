@@ -388,12 +388,7 @@ class StateMachine:
                 transition = self.transitions[self.current_state][target_state]
                 # If there's a condition, evaluate it; otherwise transition is allowed
                 if transition.condition:
-                    result = transition.can_transition(self.context)
-                    if result:
-                        return True
-                    # If direct transition condition fails, don't fall through to global transitions
-                    # This is because a direct transition with a failing condition should take precedence
-                    return False
+                    return transition.can_transition(self.context)
                 else:
                     return True
 
@@ -402,10 +397,8 @@ class StateMachine:
             if transition.to_state == target_state:
                 # If there's a condition, evaluate it; otherwise transition is allowed
                 if transition.condition:
-                    result = transition.can_transition(self.context)
-                    if result:
+                    if transition.can_transition(self.context):
                         return True
-                    # Continue checking other global transitions
                 else:
                     return True
 
