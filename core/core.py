@@ -96,14 +96,26 @@ class ServiceComponent:
         return False
 
     def get_status(self) -> Dict[str, Any]:
-        """Get component status information"""
+        """Get system status information"""
+        component_statuses = {}
+
+        # Avoid recursion by directly accessing component status methods
+        for name, component in list(self.components.items()):
+            if hasattr(component, "get_status") and component != self:
+                try:
+                    component_statuses[name] = component.get_status()
+                except Exception as e:
+                    component_statuses[name] = {"error": str(e)}
+
         return {
-            "name": self.name,
+            "name": "Sabrina AI Core",
             "status": self.status.name,
             "uptime": time.time() - self.start_time,
-            "error": self.error_message,
-            "last_error_time": self.last_error_time,
-            "handlers_registered": len(self.handler_ids),
+            "state": self.state_machine.current_state.name,
+            "components": component_statuses,
+            "event_bus": self.event_bus.get_stats(),
+            "initialized": self.initialized,
+            "running": self.running,
         }
 
     def handle_error(self, error: Exception, context: str = ""):

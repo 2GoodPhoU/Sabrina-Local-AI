@@ -186,7 +186,7 @@ class TestCore(unittest.TestCase):
         """Test component initialization respects dependencies"""
         # Add test components with dependencies
         with patch.dict(
-            self.core._component_dependencies,
+            self.core.component_dependencies,  # Change from _component_dependencies
             {
                 "component_a": ["event_bus", "config", "core"],
                 "component_b": ["event_bus", "config", "core", "component_a"],
@@ -447,6 +447,9 @@ class TestCore(unittest.TestCase):
 
     def test_load_component_class(self):
         """Test loading component classes"""
+        # Import ServiceComponent for test
+        from core.core_integration import ServiceComponent
+
         # Mock the import process
         with patch("importlib.import_module") as mock_import:
             # Create mock module and class
@@ -458,7 +461,10 @@ class TestCore(unittest.TestCase):
             mock_module.VoiceService = mock_class
 
             # Set class to be a proper ServiceComponent subclass
-            mock_class.__mro__ = (mock_class, self.core.ServiceComponent)
+            mock_class.__mro__ = (
+                mock_class,
+                ServiceComponent,
+            )  # Use imported ServiceComponent
 
             # Load the component class
             result = self.core._load_component_class("voice")

@@ -151,16 +151,30 @@ class TestStateMachine(unittest.TestCase):
         # Set initial state
         self.state_machine.current_state = SabrinaState.READY
 
-        # Transition should not occur without the condition
-        result = self.state_machine.transition_to(SabrinaState.ERROR)
+        # First verify condition works as expected
         self.assertFalse(
-            result, "Transition to ERROR should not occur without condition"
+            error_condition({}), "Condition should return False with empty context"
+        )
+        self.assertTrue(
+            error_condition({"critical_error": True}),
+            "Condition should return True with critical_error set",
+        )
+
+        # Transition should not occur without the condition being true in context
+        # We're not actually transitioning yet, just checking if we can
+        can_transition = self.state_machine.can_transition_to(SabrinaState.ERROR)
+        self.assertFalse(
+            can_transition, "Should not be able to transition without condition"
         )
 
         # Set the condition to make the transition work
         self.state_machine.context["critical_error"] = True
 
-        # Transition should occur with the condition
+        # Now check if transition is allowed
+        can_transition = self.state_machine.can_transition_to(SabrinaState.ERROR)
+        self.assertTrue(can_transition, "Should be able to transition with condition")
+
+        # Actually perform the transition
         result = self.state_machine.transition_to(SabrinaState.ERROR)
         self.assertTrue(
             result, "Global transition to ERROR should occur with condition"
@@ -246,15 +260,21 @@ class TestStateMachine(unittest.TestCase):
         # Perform some transitions
         states = [
             SabrinaState.READY,
-            SabrinaState.READY,  # Adjust the test to match the actual behavior
+            SabrinaState.LISTENING,
             SabrinaState.PROCESSING,
             SabrinaState.READY,
         ]
 
-        for state in states:
-            self.state_machine.transition_to(state)
+        # Starting state is INITIALIZING, so first transition is to READY
+        first_transition = self.state_machine.transition_to(states[0])
+        self.assertTrue(first_transition, "First transition should succeed")
 
-        # Check history length
+        # Perform remaining transitions
+        for state in states[1:]:
+            result = self.state_machine.transition_to(state)
+            self.assertTrue(result, f"Transition to {state.name} should succeed")
+
+        # Check history length (should now be same as states length)
         self.assertEqual(
             len(self.state_machine.state_history),
             len(states),
@@ -263,13 +283,12 @@ class TestStateMachine(unittest.TestCase):
 
         # Check history content
         for i, state in enumerate(states):
-            if i > 0:  # Skip first state (no transition yet)
-                history_entry = self.state_machine.state_history[i - 1]
-                self.assertEqual(
-                    history_entry["to"],
-                    state.name,
-                    f"History entry {i} should transition to {state.name}",
-                )
+            history_entry = self.state_machine.state_history[i]
+            self.assertEqual(
+                history_entry["to"],
+                state.name,
+                f"History entry {i} should transition to {state.name}",
+            )
 
     def test_state_callbacks(self):
         """Test state transition callbacks"""
