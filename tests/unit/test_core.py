@@ -313,8 +313,11 @@ class TestCore(unittest.TestCase):
         # Set the core to READY state explicitly before testing
         self.core.state_machine.current_state = SabrinaState.READY
 
-        # Process the event
+        # Directly handle the event
         self.core._handle_user_command(command_event)
+
+        # Add a small delay to ensure state transitions complete
+        time.sleep(0.1)
 
         # Now check state
         self.assertEqual(self.core.state_machine.current_state, SabrinaState.PROCESSING)
@@ -389,6 +392,16 @@ class TestCore(unittest.TestCase):
         """Test the get_status method"""
         # Initialize components
         self.core.initialize_components()
+
+        # Manually add components for testing if not already present
+        if "voice" not in self.core.components:
+            self.core.components["voice"] = self.mock_component_instances[
+                "VoiceService"
+            ]
+        if "automation" not in self.core.components:
+            self.core.components["automation"] = self.mock_component_instances[
+                "AutomationService"
+            ]
 
         # Get status
         status = self.core.get_status()

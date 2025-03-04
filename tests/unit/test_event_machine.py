@@ -290,26 +290,28 @@ class TestEventSystem(unittest.TestCase):
         # Reset the event bus to clear any previous test effects
         self.event_bus.processed_count = 0
 
+        # Create a handler that will increment the processed count
+        test_called = [0]
+
+        def test_handler(event):
+            test_called[0] += 1
+
+        handler = self.event_bus.create_handler(
+            callback=test_handler, event_types=[EventType.SYSTEM]
+        )
+        handler_id = self.event_bus.register_handler(handler)
+
         # Post some events and process them immediately
         num_events = 5
         for i in range(num_events):
-            # Use post_event_immediate to ensure immediate processing
             event = Event(event_type=EventType.SYSTEM, data={"index": i}, source="test")
-
-            # Register a handler that will actually count towards processing
-            def test_handler(evt):
-                pass
-
-            handler = self.event_bus.create_handler(
-                callback=test_handler, event_types=[EventType.SYSTEM]
-            )
-            self.event_bus.register_handler(handler)
-
-            # Now post the event
             self.event_bus.post_event_immediate(event)
 
         # Add a small delay to ensure processing completes
         time.sleep(0.1)
+
+        # Check that handler was called the expected number of times
+        self.assertEqual(test_called[0], num_events)
 
         # Get updated stats
         updated_stats = self.event_bus.get_stats()
@@ -320,6 +322,9 @@ class TestEventSystem(unittest.TestCase):
             num_events,
             f"Should process exactly {num_events} events",
         )
+
+        # Clean up
+        self.event_bus.unregister_handler(handler_id)
 
     def test_error_handling_in_callbacks(self):
         """Test error handling for exceptions in callbacks"""

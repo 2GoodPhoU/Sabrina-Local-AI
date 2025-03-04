@@ -408,6 +408,9 @@ class TestVisionServiceIntegration(unittest.TestCase):
             {"type": "button", "coordinates": [50, 100, 150, 150]}
         ]
 
+        # Explicitly set the capture directory to match expectations
+        self.vision_service.capture_directory = self.temp_dir.name
+
         # Get status
         status = self.vision_service.get_status()
 

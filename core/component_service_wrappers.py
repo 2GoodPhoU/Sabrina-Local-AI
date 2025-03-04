@@ -946,10 +946,24 @@ class VisionService(ServiceComponent):
             logger.warning("OCR not available")
             return ""
 
-    def shutdown(self) -> bool:
+    def shutdown(self):
         """Shutdown the vision service"""
-        # Unregister handlers
-        super().shutdown()
+        # Make sure we unregister all handlers
+        for handler_id in self.handler_ids[
+            :
+        ]:  # Create a copy of the list to iterate over
+            try:
+                if self.event_bus:
+                    self.event_bus.unregister_handler(handler_id)
+                    self.handler_ids.remove(handler_id)
+            except Exception as e:
+                logger.error(f"Error unregistering handler {handler_id}: {str(e)}")
+
+        # Clear the handlers list
+        self.handler_ids = []
+
+        # Set status to shutdown
+        self.status = ComponentStatus.SHUTDOWN
 
         return True
 

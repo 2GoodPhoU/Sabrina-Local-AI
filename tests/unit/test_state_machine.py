@@ -153,6 +153,9 @@ class TestStateMachine(unittest.TestCase):
         # Set initial state
         self.state_machine.current_state = SabrinaState.READY
 
+        # Clear any existing context
+        self.state_machine.context = {}
+
         # Check condition works as expected (without context)
         can_transition = self.state_machine.can_transition_to(SabrinaState.ERROR)
         self.assertFalse(
