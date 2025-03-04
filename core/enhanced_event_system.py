@@ -10,31 +10,21 @@ import time
 import uuid
 from typing import Dict, List, Callable, Any, Optional, Union
 
-# Import base event system
+# Import base event system components
 from utilities.event_system import (
     EventBus as BaseEventBus,
     Event as BaseEvent,
     EventHandler as BaseEventHandler,
+    EventType,  # Import EventType from base system
+    EventPriority,
 )
-
-# Import the unified EventType from utilities.event_system
-from utilities.event_system import EventPriority, Event, EventBus
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sabrina.enhanced_event_system")
 
 
-# Define the EnhancedEventBus class that extends EventBus
-class EnhancedEventBus(EventBus):
-    """Enhanced event bus that adds additional functionality to the base EventBus"""
-
-    def __init__(self, max_queue_size: int = 1000, worker_count: int = 1):
-        """Initialize the enhanced event bus"""
-        super().__init__(max_queue_size, worker_count)
-
-
-# Enhanced Event class - extends the base Event class
+# Extended Event class - extends the base Event class
 class Event(BaseEvent):
     """Enhanced event class with additional functionality"""
 

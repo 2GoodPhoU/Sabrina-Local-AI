@@ -1,0 +1,93 @@
+{
+  "timestamp": "20250303_175428",
+  "execution_time": 6.349215507507324,
+  "tests_run": 93,
+  "failures": 12,
+  "errors": 4,
+  "skipped": 0,
+  "was_successful": false,
+  "command_line_args": {
+    "unit": false,
+    "integration": false,
+    "e2e": false,
+    "all": false,
+    "component": null,
+    "pattern": null,
+    "verbose": 0,
+    "quiet": false,
+    "junit_xml": null,
+    "coverage": false,
+    "html_report": false,
+    "mock_all": false,
+    "test_config": null,
+    "fail_fast": false
+  },
+  "failure_details": [
+    {
+      "test": "unit.test_core.TestCore.test_command_processing",
+      "message": "Traceback (most recent call last):\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\tests\\unit\\test_core.py\", line 307, in test_command_processing\n    self.assertEqual(self.core.state_machine.current_state, SabrinaState.PROCESSING)\nAssertionError: <SabrinaState.READY: 2> != <SabrinaState.PROCESSING: 6>\n"
+    },
+    {
+      "test": "unit.test_core.TestCore.test_core_initialization",
+      "message": "Traceback (most recent call last):\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\tests\\unit\\test_core.py\", line 140, in test_core_initialization\n    self.assertEqual(self.core.config.get(\"core\", \"log_level\"), \"DEBUG\")\nAssertionError: {'debug_mode': True, 'log_level': 'DEBUG'[43 chars]on']} != 'DEBUG'\n"
+    },
+    {
+      "test": "unit.test_core.TestCore.test_initialization_with_component_failure",
+      "message": "Traceback (most recent call last):\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\tests\\unit\\test_core.py\", line 176, in test_initialization_with_component_failure\n    self.assertIn(\"voice\", self.core.components)\nAssertionError: 'voice' not found in {'core': <core.core.SabrinaCore object at 0x0000020BCAF37730>}\n"
+    },
+    {
+      "test": "unit.test_core.TestCore.test_initialize_components",
+      "message": "Traceback (most recent call last):\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\tests\\unit\\test_core.py\", line 152, in test_initialize_components\n    self.assertIn(\"voice\", self.core.components)\nAssertionError: 'voice' not found in {'core': <core.core.SabrinaCore object at 0x0000020BCB0922F0>}\n"
+    },
+    {
+      "test": "unit.test_error_handler.TestErrorHandler.test_get_recent_errors",
+      "message": "Traceback (most recent call last):\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\tests\\unit\\test_error_handler.py\", line 263, in test_get_recent_errors\n    self.assertEqual(subset[2][\"message\"], \"Error 0\")\nAssertionError: 'Error 4' != 'Error 0'\n- Error 4\n?       ^\n+ Error 0\n?       ^\n\n"
+    },
+    {
+      "test": "unit.test_event_machine.TestEventSystem.test_event_stats",
+      "message": "Traceback (most recent call last):\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\tests\\unit\\test_event_machine.py\", line 309, in test_event_stats\n    self.assertEqual(\nAssertionError: 0 != 5\n"
+    },
+    {
+      "test": "unit.test_state_machine.TestStateMachine.test_global_transition",
+      "message": "Traceback (most recent call last):\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\tests\\unit\\test_state_machine.py\", line 156, in test_global_transition\n    self.assertFalse(\nAssertionError: True is not false : Transition to ERROR should not occur without condition\n"
+    },
+    {
+      "test": "unit.test_state_machine.TestStateMachine.test_state_history",
+      "message": "Traceback (most recent call last):\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\tests\\unit\\test_state_machine.py\", line 258, in test_state_history\n    self.assertEqual(\nAssertionError: 3 != 4 : State history should track all transitions\n"
+    },
+    {
+      "test": "integration.test_vision_service.TestVoiceServiceIntegration.test_speech_event_handling",
+      "message": "Traceback (most recent call last):\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\tests\\integration\\test_vision_service.py\", line 175, in test_speech_event_handling\n    self.mock_voice_client.speak.assert_called_once_with(\n  File \"C:\\Users\\erics\\.pyenv\\pyenv-win\\versions\\3.10.11\\lib\\unittest\\mock.py\", line 941, in assert_called_once_with\n    return self.assert_called_with(*args, **kwargs)\n  File \"C:\\Users\\erics\\.pyenv\\pyenv-win\\versions\\3.10.11\\lib\\unittest\\mock.py\", line 929, in assert_called_with\n    raise AssertionError(_error_message()) from cause\nAssertionError: expected call not found.\nExpected: speak('Hello, this is a test.')\nActual: speak('Hello, this is a test.', emotion='neutral')\n"
+    },
+    {
+      "test": "integration.test_vision_service.TestVoiceServiceIntegration.test_state_machine_integration",
+      "message": "Traceback (most recent call last):\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\tests\\integration\\test_vision_service.py\", line 303, in test_state_machine_integration\n    self.mock_voice_client.speak.assert_called_once_with(\"State machine test\")\n  File \"C:\\Users\\erics\\.pyenv\\pyenv-win\\versions\\3.10.11\\lib\\unittest\\mock.py\", line 941, in assert_called_once_with\n    return self.assert_called_with(*args, **kwargs)\n  File \"C:\\Users\\erics\\.pyenv\\pyenv-win\\versions\\3.10.11\\lib\\unittest\\mock.py\", line 929, in assert_called_with\n    raise AssertionError(_error_message()) from cause\nAssertionError: expected call not found.\nExpected: speak('State machine test')\nActual: speak('State machine test', emotion='neutral')\n"
+    },
+    {
+      "test": "integration.test_voice_service.TestVoiceServiceIntegration.test_speech_event_handling",
+      "message": "Traceback (most recent call last):\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\tests\\integration\\test_voice_service.py\", line 174, in test_speech_event_handling\n    self.mock_voice_client.speak.assert_called_once_with(\n  File \"C:\\Users\\erics\\.pyenv\\pyenv-win\\versions\\3.10.11\\lib\\unittest\\mock.py\", line 941, in assert_called_once_with\n    return self.assert_called_with(*args, **kwargs)\n  File \"C:\\Users\\erics\\.pyenv\\pyenv-win\\versions\\3.10.11\\lib\\unittest\\mock.py\", line 929, in assert_called_with\n    raise AssertionError(_error_message()) from cause\nAssertionError: expected call not found.\nExpected: speak('Hello, this is a test.')\nActual: speak('Hello, this is a test.', emotion='neutral')\n"
+    },
+    {
+      "test": "integration.test_voice_service.TestVoiceServiceIntegration.test_state_machine_integration",
+      "message": "Traceback (most recent call last):\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\tests\\integration\\test_voice_service.py\", line 302, in test_state_machine_integration\n    self.mock_voice_client.speak.assert_called_once_with(\"State machine test\")\n  File \"C:\\Users\\erics\\.pyenv\\pyenv-win\\versions\\3.10.11\\lib\\unittest\\mock.py\", line 941, in assert_called_once_with\n    return self.assert_called_with(*args, **kwargs)\n  File \"C:\\Users\\erics\\.pyenv\\pyenv-win\\versions\\3.10.11\\lib\\unittest\\mock.py\", line 929, in assert_called_with\n    raise AssertionError(_error_message()) from cause\nAssertionError: expected call not found.\nExpected: speak('State machine test')\nActual: speak('State machine test', emotion='neutral')\n"
+    }
+  ],
+  "error_details": [
+    {
+      "test": "unit.test_core.TestCore.test_component_dependency_ordering",
+      "message": "Traceback (most recent call last):\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\tests\\unit\\test_core.py\", line 189, in test_component_dependency_ordering\n    self.core._component_dependencies,\nAttributeError: 'SabrinaCore' object has no attribute '_component_dependencies'\n"
+    },
+    {
+      "test": "unit.test_core.TestCore.test_get_status",
+      "message": "Traceback (most recent call last):\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\tests\\unit\\test_core.py\", line 399, in test_get_status\n    status = self.core.get_status()\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\core\\core.py\", line 722, in get_status\n    component_statuses[name] = component.get_status()\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\core\\core.py\", line 722, in get_status\n    component_statuses[name] = component.get_status()\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\core\\core.py\", line 722, in get_status\n    component_statuses[name] = component.get_status()\n  [Previous line repeated 981 more times]\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\core\\core.py\", line 720, in get_status\n    for name, component in self.components.items():\nRecursionError: maximum recursion depth exceeded while calling a Python object\n"
+    },
+    {
+      "test": "unit.test_core.TestCore.test_load_component_class",
+      "message": "Traceback (most recent call last):\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\tests\\unit\\test_core.py\", line 461, in test_load_component_class\n    mock_class.__mro__ = (mock_class, self.core.ServiceComponent)\nAttributeError: 'SabrinaCore' object has no attribute 'ServiceComponent'\n"
+    },
+    {
+      "test": "unit.test_path_handling.TestPathHandling.test_data_directory_creation",
+      "message": "Traceback (most recent call last):\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\tests\\unit\\test_path_handling.py\", line 127, in test_data_directory_creation\n    os.rmdir(data_dir)\nOSError: [WinError 145] The directory is not empty: 'C:\\\\Users\\\\erics\\\\OneDrive\\\\Documents\\\\GitHub\\\\Sabrina-Local-AI\\\\tests\\\\data'\n"
+    }
+  ]
+}
