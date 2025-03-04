@@ -134,16 +134,12 @@ class TestStateMachine(unittest.TestCase):
                 f"State should remain {from_state.name} after invalid transition attempt",
             )
 
-    # In tests/unit/test_state_machine.py, modify the test_global_transition method to
-    # properly check the condition behavior:
-
-    # In tests/unit/test_state_machine.py
     def test_global_transition(self):
         """Test global transitions that work from any state"""
         # First clear any existing global transitions
         self.state_machine.global_transitions = []
 
-        # Define a proper function instead of a lambda for the condition
+        # Define a condition function that checks for a critical_error flag
         def error_condition(ctx):
             return ctx.get("critical_error", False)
 
@@ -160,18 +156,15 @@ class TestStateMachine(unittest.TestCase):
         # Clear any existing context
         self.state_machine.context = {}
 
-        # Check condition works as expected (without condition being true)
-        # The issue was here - a global transition with a condition should not
-        # allow transition when the condition is false
+        # Try transition without the condition being met
         can_transition = self.state_machine.can_transition_to(SabrinaState.ERROR)
 
-        # We need to explicitly check the behavior of our condition function first
-        # to ensure it behaves as expected with empty context
+        # Verify the function works as expected
         self.assertFalse(
             error_condition({}), "Condition should be false with empty context"
         )
 
-        # Now check if transition is blocked as expected
+        # Verify transition is blocked when condition is false
         self.assertFalse(
             can_transition,
             "Should not be able to transition without condition being true",
@@ -179,6 +172,11 @@ class TestStateMachine(unittest.TestCase):
 
         # Set the condition to make the transition work
         self.state_machine.context["critical_error"] = True
+
+        # Verify condition function now returns true
+        self.assertTrue(
+            error_condition(self.state_machine.context), "Condition should now be true"
+        )
 
         # Now check if transition is allowed
         can_transition = self.state_machine.can_transition_to(SabrinaState.ERROR)
@@ -196,6 +194,89 @@ class TestStateMachine(unittest.TestCase):
             SabrinaState.ERROR,
             "Current state should be ERROR after global transition",
         )
+
+    def test_direct_transition_with_condition(self):
+        """Test direct transitions with conditions"""
+        # First set current state
+        self.state_machine.current_state = SabrinaState.READY
+
+        # Clear transitions to start fresh
+        if SabrinaState.READY in self.state_machine.transitions:
+            self.state_machine.transitions[SabrinaState.READY] = {}
+
+        # Define a condition function
+        def has_command(ctx):
+            return "command" in ctx and ctx["command"]
+
+        # Add a conditional transition
+        self.state_machine.add_transition(
+            from_state=SabrinaState.READY,
+            to_state=SabrinaState.PROCESSING,
+            condition=has_command,
+            description="Process command when present",
+        )
+
+        # Clear context
+        self.state_machine.context = {}
+
+        # Check that transition is not allowed without condition
+        self.assertFalse(self.state_machine.can_transition_to(SabrinaState.PROCESSING))
+
+        # Try to transition anyway - should fail
+        result = self.state_machine.transition_to(SabrinaState.PROCESSING)
+        self.assertFalse(result)
+        self.assertEqual(self.state_machine.current_state, SabrinaState.READY)
+
+        # Now set condition
+        self.state_machine.context["command"] = "test command"
+
+        # Now transition should be allowed
+        self.assertTrue(self.state_machine.can_transition_to(SabrinaState.PROCESSING))
+
+        # Perform transition
+        result = self.state_machine.transition_to(SabrinaState.PROCESSING)
+        self.assertTrue(result)
+        self.assertEqual(self.state_machine.current_state, SabrinaState.PROCESSING)
+
+    def test_condition_evaluation(self):
+        """Test that conditions are evaluated correctly"""
+        # Create a test condition that tracks calls
+        calls = []
+
+        def tracking_condition(ctx):
+            calls.append(ctx.copy())
+            return "flag" in ctx and ctx["flag"]
+
+        # Clear transitions
+        self.state_machine.global_transitions = []
+
+        # Set current state
+        self.state_machine.current_state = SabrinaState.READY
+
+        # Add global transition with condition
+        self.state_machine.add_global_transition(
+            SabrinaState.ERROR,
+            condition=tracking_condition,
+            description="Test condition tracking",
+        )
+
+        # Set context
+        self.state_machine.context = {"test": 123}
+
+        # Test without flag
+        can_transition = self.state_machine.can_transition_to(SabrinaState.ERROR)
+        self.assertFalse(can_transition)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["test"], 123)
+
+        # Set flag
+        self.state_machine.context["flag"] = True
+
+        # Test with flag
+        can_transition = self.state_machine.can_transition_to(SabrinaState.ERROR)
+        self.assertTrue(can_transition)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(calls[1]["flag"])
 
     def test_context_updates(self):
         """Test context updates during transitions"""
