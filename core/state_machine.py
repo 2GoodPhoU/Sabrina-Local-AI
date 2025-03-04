@@ -397,12 +397,14 @@ class StateMachine:
             if transition.to_state == target_state:
                 # If there's a condition, evaluate it; otherwise transition is allowed
                 if transition.condition:
+                    # FIX: Only return True if condition evaluates to True
                     if transition.can_transition(self.context):
                         return True
-                    # Do not return False here as we need to check other global transitions
+                    # Continue checking other global transitions
                 else:
                     return True
 
+        # If we get here, no valid transition was found
         return False
 
     def transition_to(
