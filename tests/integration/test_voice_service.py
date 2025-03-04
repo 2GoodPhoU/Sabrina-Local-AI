@@ -153,6 +153,8 @@ class TestVoiceServiceIntegration(unittest.TestCase):
             # Mock client should have been configured with settings
             self.mock_voice_client.update_settings.assert_called_once()
 
+        # In test_speech_event_handling
+
     def test_speech_event_handling(self):
         """Test handling of speech events"""
         # Create a speech started event
@@ -184,8 +186,9 @@ class TestVoiceServiceIntegration(unittest.TestCase):
 
         # Check client was called
         if hasattr(self, "mock_voice_client"):
+            self.mock_voice_client.speak.assert_called_once()
             args, kwargs = self.mock_voice_client.speak.call_args
-            self.assertEqual(args[0], "State machine test")
+            self.assertEqual(args[0], "Direct speech test")
 
         # Voice service should update its state
         self.assertEqual(self.voice_service.last_text, "Direct speech test")

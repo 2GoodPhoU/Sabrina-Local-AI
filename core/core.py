@@ -101,7 +101,7 @@ class ServiceComponent:
 
         # Avoid recursion by excluding self from component list
         for name, component in list(self.components.items()):
-            if hasattr(component, "get_status") and component != self:
+            if hasattr(component, "get_status") and component != self:  # Add this check
                 try:
                     component_statuses[name] = component.get_status()
                 except Exception as e:
