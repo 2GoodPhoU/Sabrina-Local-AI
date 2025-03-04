@@ -284,6 +284,9 @@ class TestEventSystem(unittest.TestCase):
         for i, event in enumerate(self.event_bus.history):
             self.assertEqual(event.data["index"], i)
 
+    # In tests/unit/test_event_machine.py, modify the test_event_stats method to use
+    # immediate event processing for consistent counting:
+
     def test_event_stats(self):
         """Test event statistics tracking"""
         # Get initial stats
@@ -305,10 +308,10 @@ class TestEventSystem(unittest.TestCase):
         num_events = 5
         for i in range(num_events):
             event = Event(event_type=EventType.SYSTEM, data={"index": i}, source="test")
+            # Use post_event_immediate instead of post_event to ensure consistent counting
             self.event_bus.post_event_immediate(event)
 
-        # Add a small delay to ensure processing completes
-        time.sleep(0.1)
+        # No need for a delay since post_event_immediate is synchronous
 
         # Check that handler was called the expected number of times
         self.assertEqual(test_called[0], num_events)

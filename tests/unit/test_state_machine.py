@@ -134,6 +134,9 @@ class TestStateMachine(unittest.TestCase):
                 f"State should remain {from_state.name} after invalid transition attempt",
             )
 
+    # In tests/unit/test_state_machine.py, modify the test_global_transition method to
+    # properly check the condition behavior:
+
     def test_global_transition(self):
         """Test global transitions that work from any state"""
         # First clear any existing global transitions
@@ -156,8 +159,18 @@ class TestStateMachine(unittest.TestCase):
         # Clear any existing context
         self.state_machine.context = {}
 
-        # Check condition works as expected (without context)
+        # Check condition works as expected (without condition being true)
+        # The issue was here - a global transition with a condition should not
+        # allow transition when the condition is false
         can_transition = self.state_machine.can_transition_to(SabrinaState.ERROR)
+
+        # We need to explicitly check the behavior of our condition function first
+        # to ensure it behaves as expected with empty context
+        self.assertFalse(
+            error_condition({}), "Condition should be false with empty context"
+        )
+
+        # Now check if transition is blocked as expected
         self.assertFalse(
             can_transition,
             "Should not be able to transition without condition being true",

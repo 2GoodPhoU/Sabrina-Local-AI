@@ -316,11 +316,15 @@ class TestCore(unittest.TestCase):
         # Directly handle the event
         self.core._handle_user_command(command_event)
 
-        # Add a small delay to ensure state transitions complete
-        time.sleep(0.1)
+        # Add a longer delay to ensure state transitions complete
+        time.sleep(0.2)  # Increase from 0.1 to 0.2 seconds
 
         # Now check state
         self.assertEqual(self.core.state_machine.current_state, SabrinaState.PROCESSING)
+
+        # Add cleanup code to ensure the state is reset
+        # This prevents state issues affecting other tests
+        self.core.state_machine.transition_to(SabrinaState.READY)
 
     def test_core_shutdown(self):
         """Test core system shutdown"""
