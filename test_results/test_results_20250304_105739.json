@@ -1,0 +1,36 @@
+{
+  "timestamp": "20250304_105739",
+  "execution_time": 6.215721607208252,
+  "tests_run": 99,
+  "failures": 2,
+  "errors": 0,
+  "skipped": 0,
+  "was_successful": false,
+  "command_line_args": {
+    "unit": false,
+    "integration": false,
+    "e2e": false,
+    "all": false,
+    "component": null,
+    "pattern": null,
+    "verbose": 0,
+    "quiet": false,
+    "junit_xml": null,
+    "coverage": false,
+    "html_report": false,
+    "mock_all": false,
+    "test_config": null,
+    "fail_fast": false
+  },
+  "failure_details": [
+    {
+      "test": "unit.test_state_machine.TestStateMachine.test_condition_evaluation_fixed",
+      "message": "Traceback (most recent call last):\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\tests\\unit\\test_state_machine.py\", line 266, in test_condition_evaluation_fixed\n    self.assertFalse(can_transition, \"Transition should be blocked when condition is false\")\nAssertionError: True is not false : Transition should be blocked when condition is false\n"
+    },
+    {
+      "test": "unit.test_state_machine.TestStateMachine.test_global_transition",
+      "message": "Traceback (most recent call last):\n  File \"C:\\Users\\erics\\OneDrive\\Documents\\GitHub\\Sabrina-Local-AI\\tests\\unit\\test_state_machine.py\", line 166, in test_global_transition\n    self.assertFalse(\nAssertionError: True is not false : Should not be able to transition without condition being true\n"
+    }
+  ],
+  "error_details": []
+}

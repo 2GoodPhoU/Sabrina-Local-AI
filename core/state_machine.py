@@ -68,7 +68,9 @@ class StateTransition:
 
         try:
             context = context or {}
-            return self.condition(context)
+            # FIX: Ensure the condition function is properly evaluated
+            result = self.condition(context)
+            return bool(result)  # Ensure we return a boolean value
         except Exception as e:
             logger.error(f"Error evaluating transition condition: {str(e)}")
             return False
@@ -370,21 +372,30 @@ class StateMachine:
 
         return allowed
 
-    def can_transition_to(self, target_state: SabrinaState) -> bool:
-        """Check if a transition to the target state is currently allowed"""
+    def can_transition_to(self, target_state) -> bool:
+        """
+        Check if a transition to the target state is currently allowed
+
+        Args:
+            target_state: The state to transition to
+
+        Returns:
+            bool: True if the transition is allowed, False otherwise
+        """
         # Check direct transitions
         if self.current_state in self.transitions:
             if target_state in self.transitions[self.current_state]:
                 transition = self.transitions[self.current_state][target_state]
-                if transition.can_transition(self.context):
+                # FIX: Only return True if the condition is met or if there's no condition
+                if not transition.condition or transition.can_transition(self.context):
                     return True
 
         # Check global transitions
         for transition in self.global_transitions:
-            if transition.to_state == target_state and transition.can_transition(
-                self.context
-            ):
-                return True
+            if transition.to_state == target_state:
+                # FIX: Only return True if the condition is met or if there's no condition
+                if not transition.condition or transition.can_transition(self.context):
+                    return True
 
         return False
 

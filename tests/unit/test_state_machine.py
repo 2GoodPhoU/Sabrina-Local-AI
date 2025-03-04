@@ -156,15 +156,13 @@ class TestStateMachine(unittest.TestCase):
         # Clear any existing context
         self.state_machine.context = {}
 
-        # Try transition without the condition being met
-        can_transition = self.state_machine.can_transition_to(SabrinaState.ERROR)
-
-        # Verify the function works as expected
+        # Verify the condition function returns False with empty context
         self.assertFalse(
             error_condition({}), "Condition should be false with empty context"
         )
 
-        # Verify transition is blocked when condition is false
+        # Check if transition is allowed - should be False since condition is not met
+        can_transition = self.state_machine.can_transition_to(SabrinaState.ERROR)
         self.assertFalse(
             can_transition,
             "Should not be able to transition without condition being true",
@@ -178,7 +176,7 @@ class TestStateMachine(unittest.TestCase):
             error_condition(self.state_machine.context), "Condition should now be true"
         )
 
-        # Now check if transition is allowed
+        # Now check if transition is allowed - should be True
         can_transition = self.state_machine.can_transition_to(SabrinaState.ERROR)
         self.assertTrue(
             can_transition, "Should be able to transition with condition true"
@@ -238,7 +236,7 @@ class TestStateMachine(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(self.state_machine.current_state, SabrinaState.PROCESSING)
 
-    def test_condition_evaluation(self):
+    def test_condition_evaluation_fixed(self):
         """Test that conditions are evaluated correctly"""
         # Create a test condition that tracks calls
         calls = []
@@ -263,20 +261,26 @@ class TestStateMachine(unittest.TestCase):
         # Set context
         self.state_machine.context = {"test": 123}
 
-        # Test without flag
+        # Test without flag - should not be able to transition
         can_transition = self.state_machine.can_transition_to(SabrinaState.ERROR)
-        self.assertFalse(can_transition)
-        self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0]["test"], 123)
+        self.assertFalse(
+            can_transition, "Transition should be blocked when condition is false"
+        )
+        self.assertEqual(len(calls), 1, "Condition function should be called once")
+        self.assertEqual(calls[0]["test"], 123, "Context should be passed correctly")
 
         # Set flag
         self.state_machine.context["flag"] = True
 
-        # Test with flag
+        # Test with flag - should be able to transition
         can_transition = self.state_machine.can_transition_to(SabrinaState.ERROR)
-        self.assertTrue(can_transition)
-        self.assertEqual(len(calls), 2)
-        self.assertTrue(calls[1]["flag"])
+        self.assertTrue(
+            can_transition, "Transition should be allowed when condition is true"
+        )
+        self.assertEqual(len(calls), 2, "Condition function should be called twice")
+        self.assertTrue(
+            calls[1]["flag"], "Context with flag should be passed correctly"
+        )
 
     def test_context_updates(self):
         """Test context updates during transitions"""
