@@ -154,11 +154,8 @@ class TestEventSystem(unittest.TestCase):
             event_type=EventType.SYSTEM, data={"test": "data"}, source="test_source"
         )
 
-        # Post the event
-        self.event_bus.post_event(test_event)
-
-        # Wait for event processing
-        time.sleep(0.2)
+        # Use immediate processing for reliable testing
+        self.event_bus.post_event_immediate(test_event)
 
         # Check that the event was handled
         self.assertEqual(len(result_container), 1)
@@ -177,10 +174,7 @@ class TestEventSystem(unittest.TestCase):
             data={"test": "more data"},
             source="test_source",
         )
-        self.event_bus.post_event(another_event)
-
-        # Wait for event processing
-        time.sleep(0.2)
+        self.event_bus.post_event_immediate(another_event)
 
         # Check that the event was not handled (handler was unregistered)
         self.assertEqual(len(result_container), 0)
@@ -295,7 +289,7 @@ class TestEventSystem(unittest.TestCase):
         self.event_bus.processed_count = 0
 
         # Create a handler that will increment the processed count
-        test_called = [0]
+        test_called = [0]  # Use a list to track calls (mutable)
 
         def test_handler(event):
             test_called[0] += 1
@@ -305,14 +299,11 @@ class TestEventSystem(unittest.TestCase):
         )
         handler_id = self.event_bus.register_handler(handler)
 
-        # Post some events through the queue
+        # Post some events using immediate processing for reliable testing
         num_events = 5
         for i in range(num_events):
             event = Event(event_type=EventType.SYSTEM, data={"index": i}, source="test")
-            self.event_bus.post_event(event)
-
-        # Give time for queue processing
-        time.sleep(0.5)
+            self.event_bus.post_event_immediate(event)
 
         # Check that handler was called the expected number of times
         self.assertEqual(

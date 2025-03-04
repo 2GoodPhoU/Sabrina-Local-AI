@@ -433,18 +433,26 @@ class EventBus:
             try:
                 # Get event from queue with timeout
                 try:
-                    _, _, event = self.event_queue.get(timeout=0.1)
+                    # Fix: The queue item is a 4-tuple (priority, timestamp, id, event)
+                    # but we were trying to unpack into 3 variables
+                    queue_item = self.event_queue.get(timeout=0.1)
+                    if queue_item is None:
+                        continue
+
+                    # Properly unpack the 4-tuple
+                    _, _, _, event = queue_item
+
+                    # Process the event
+                    self._process_event(event)
+
+                    # Mark task as done
+                    self.event_queue.task_done()
+
+                    # Update statistics
+                    self.processed_count += 1
+
                 except queue.Empty:
                     continue
-
-                # Process the event
-                self._process_event(event)
-
-                # Mark task as done
-                self.event_queue.task_done()
-
-                # Update statistics
-                self.processed_count += 1
 
             except Exception as e:
                 logger.error(f"Error in event processing thread: {str(e)}")

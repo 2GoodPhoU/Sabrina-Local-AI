@@ -320,6 +320,7 @@ class SabrinaCore:
 
         if is_critical:
             # For critical errors, transition to ERROR state
+            # Add missing context info for the transition
             self.state_machine.transition_to(
                 SabrinaState.ERROR,
                 {

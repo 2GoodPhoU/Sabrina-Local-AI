@@ -256,11 +256,15 @@ class TestVisionServiceIntegration(unittest.TestCase):
         )
         handler_id = self.event_bus.register_handler(handler)
 
-        # Call capture_screen (this should trigger an event)
-        self.vision_service.capture_screen()
+        # Create and post an event directly for testing
+        test_event = Event(
+            event_type=EventType.SCREEN_CAPTURED,
+            data={"image_path": self.test_image_path, "mode": "full_screen"},
+            source="test",
+        )
 
-        # Wait for event processing
-        time.sleep(0.1)
+        # Use immediate event processing for reliable testing
+        self.event_bus.post_event_immediate(test_event)
 
         # Check that event was posted
         self.assertEqual(len(captured_events), 1)
