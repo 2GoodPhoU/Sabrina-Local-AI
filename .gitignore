@@ -63,6 +63,7 @@ data/captures/*.png
 .pytest_cache/
 .coverage
 htmlcov/
+test_results/*.json
 
 # Project Specific
 services/vision/captures/*.png

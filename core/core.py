@@ -601,6 +601,8 @@ class SabrinaCore:
 
         while remaining:
             # Find components whose dependencies are all satisfied
+            added_in_this_iteration = False
+
             for component_name in list(remaining):
                 # Skip if already added
                 if component_name in added:
@@ -617,14 +619,16 @@ class SabrinaCore:
                     order.append(component_name)
                     added.add(component_name)
                     remaining.remove(component_name)
+                    added_in_this_iteration = True
 
             # Check for circular dependencies
-            if len(remaining) > 0 and len(order) == len(added):
+            if not added_in_this_iteration and remaining:
                 logger.warning(
                     f"Circular dependencies detected for components: {remaining}"
                 )
-                # Add remaining components in arbitrary order
-                order.extend(list(remaining))
+                # Add remaining components in alphabetical order to ensure consistent behavior
+                for name in sorted(list(remaining)):
+                    order.append(name)
                 break
 
         return order

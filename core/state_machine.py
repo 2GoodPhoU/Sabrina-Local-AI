@@ -68,9 +68,9 @@ class StateTransition:
 
         try:
             context = context or {}
-            # FIX: Ensure the condition function is properly evaluated
+            # Ensure the condition function is properly evaluated and returns a boolean
             result = self.condition(context)
-            return bool(result)  # Ensure we return a boolean value
+            return bool(result)  # Explicitly convert to boolean
         except Exception as e:
             logger.error(f"Error evaluating transition condition: {str(e)}")
             return False
