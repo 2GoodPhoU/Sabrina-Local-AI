@@ -386,7 +386,7 @@ class StateMachine:
         if self.current_state in self.transitions:
             if target_state in self.transitions[self.current_state]:
                 transition = self.transitions[self.current_state][target_state]
-                # Only return True if the condition is met
+                # If there's a condition, evaluate it; otherwise transition is allowed
                 if transition.condition:
                     return transition.can_transition(self.context)
                 else:
@@ -395,9 +395,11 @@ class StateMachine:
         # Check global transitions
         for transition in self.global_transitions:
             if transition.to_state == target_state:
-                # Only return True if the condition is met
+                # If there's a condition, evaluate it; otherwise transition is allowed
                 if transition.condition:
-                    return transition.can_transition(self.context)
+                    if transition.can_transition(self.context):
+                        return True
+                    # Do not return False here as we need to check other global transitions
                 else:
                     return True
 
