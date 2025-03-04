@@ -87,8 +87,11 @@ class TestCore(unittest.TestCase):
         """Set up mock component classes"""
         self._patchers = []
 
+        # Import the real ServiceComponent class
+        from core.core_integration import ServiceComponent
+
         # Create patchers for component classes
-        component_classes = {
+        component_paths = {
             "VoiceService": "core.component_service_wrappers.VoiceService",
             "AutomationService": "core.component_service_wrappers.AutomationService",
             "VisionService": "core.component_service_wrappers.VisionService",
@@ -100,7 +103,7 @@ class TestCore(unittest.TestCase):
         self.mock_components = {}
         self.mock_component_instances = {}
 
-        for name, path in component_classes.items():
+        for name, path in component_paths.items():
             # Create patcher
             patcher = patch(path)
             self._patchers.append(patcher)
@@ -109,12 +112,18 @@ class TestCore(unittest.TestCase):
             mock_class = patcher.start()
             self.mock_components[name] = mock_class
 
-            # Create mock instance
-            mock_instance = MagicMock()
+            # Create mock instance with proper inheritance
+            mock_instance = MagicMock(spec=ServiceComponent)
             mock_instance.initialize.return_value = True
             mock_instance.status = ComponentStatus.READY
             mock_instance.shutdown.return_value = True
             mock_instance.name = name.replace("Service", "").lower()
+
+            # Ensure get_status returns a dict
+            mock_instance.get_status.return_value = {
+                "name": mock_instance.name,
+                "status": "READY",
+            }
 
             # Set as return value for the class
             mock_class.return_value = mock_instance
@@ -135,9 +144,9 @@ class TestCore(unittest.TestCase):
         self.assertIsNotNone(self.core.state_machine)
         self.assertIsNotNone(self.core.config)
 
-        # Check configuration loading
-        self.assertTrue(self.core.config.get("core", "debug_mode"))
-        self.assertEqual(self.core.config.get("core", "log_level"), "DEBUG")
+        # Check configuration loading - use a nested get for dictionary access
+        self.assertTrue(self.core.config.get("core", {}).get("debug_mode", False))
+        self.assertEqual(self.core.config.get("core", {}).get("log_level"), "DEBUG")
 
         # Check component registry initialization
         self.assertIsInstance(self.core.components, dict)

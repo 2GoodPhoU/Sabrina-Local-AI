@@ -14,6 +14,7 @@ from typing import Dict, Any, List, Optional
 # Import the ServiceComponent base class
 from .core_integration import ServiceComponent, ComponentStatus
 from .enhanced_event_system import Event, EventType, EventPriority
+from core.state_machine import SabrinaState
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -178,11 +179,8 @@ class VoiceService(ServiceComponent):
             self.currently_speaking = False
 
             # Transition state if needed
-            if (
-                self.state_machine.current_state
-                == self.state_machine.SabrinaState.SPEAKING
-            ):
-                self.state_machine.transition_to(self.state_machine.SabrinaState.READY)
+            if self.state_machine.current_state == SabrinaState.SPEAKING:
+                self.state_machine.transition_to(SabrinaState.READY)
 
         elif event_type == EventType.SPEECH_ERROR:
             # Handle error
@@ -193,12 +191,9 @@ class VoiceService(ServiceComponent):
             self.currently_speaking = False
 
             # Transition state if needed
-            if (
-                self.state_machine.current_state
-                == self.state_machine.SabrinaState.SPEAKING
-            ):
+            if self.state_machine.current_state == SabrinaState.SPEAKING:
                 self.state_machine.transition_to(
-                    self.state_machine.SabrinaState.ERROR,
+                    SabrinaState.ERROR,
                     {"error_info": {"message": error, "source": "voice"}},
                 )
 
@@ -452,19 +447,14 @@ class HearingService(ServiceComponent):
             self.currently_listening = False
 
             # Transition state if needed
-            if (
-                self.state_machine.current_state
-                == self.state_machine.SabrinaState.LISTENING
-            ):
-                self.state_machine.transition_to(
-                    self.state_machine.SabrinaState.PROCESSING
-                )
+            if self.state_machine.current_state == SabrinaState.LISTENING:
+                self.state_machine.transition_to(SabrinaState.PROCESSING)
 
         elif event_type == EventType.WAKE_WORD_DETECTED:
             logger.info("Wake word detected")
 
             # Transition to listening state
-            self.state_machine.transition_to(self.state_machine.SabrinaState.LISTENING)
+            self.state_machine.transition_to(SabrinaState.LISTENING)
 
             # Start listening
             self.start_listening()
@@ -1150,11 +1140,8 @@ class AutomationService(ServiceComponent):
             logger.info(f"Automation action '{action}' completed successfully")
 
             # Transition state if needed
-            if (
-                self.state_machine.current_state
-                == self.state_machine.SabrinaState.EXECUTING_TASK
-            ):
-                self.state_machine.transition_to(self.state_machine.SabrinaState.READY)
+            if self.state_machine.current_state == SabrinaState.EXECUTING_TASK:
+                self.state_machine.transition_to(SabrinaState.READY)
 
         elif event_type == EventType.AUTOMATION_ERROR:
             # Extract error from event
@@ -1165,12 +1152,9 @@ class AutomationService(ServiceComponent):
             logger.error(f"Automation error in action '{action}': {error}")
 
             # Transition state if needed
-            if (
-                self.state_machine.current_state
-                == self.state_machine.SabrinaState.EXECUTING_TASK
-            ):
+            if self.state_machine.current_state == SabrinaState.EXECUTING_TASK:
                 self.state_machine.transition_to(
-                    self.state_machine.SabrinaState.ERROR,
+                    SabrinaState.ERROR,
                     {
                         "error_info": {
                             "message": error,
@@ -1301,7 +1285,7 @@ class AutomationService(ServiceComponent):
         """
         # Update state
         self.state_machine.transition_to(
-            self.state_machine.SabrinaState.EXECUTING_TASK,
+            SabrinaState.EXECUTING_TASK,
             {"task_info": {"action": action, "parameters": kwargs}},
         )
 
@@ -1957,7 +1941,7 @@ class SmartHomeService(ServiceComponent):
 
         # Transition to controlling devices state
         self.state_machine.transition_to(
-            self.state_machine.SabrinaState.CONTROLLING_DEVICES,
+            SabrinaState.CONTROLLING_DEVICES,
             {"device_id": device_id, "command": command, "parameters": parameters},
         )
 
@@ -1983,9 +1967,7 @@ class SmartHomeService(ServiceComponent):
                     )
 
                     # Transition back to ready state
-                    self.state_machine.transition_to(
-                        self.state_machine.SabrinaState.READY
-                    )
+                    self.state_machine.transition_to(SabrinaState.READY)
 
                     return result
                 else:
@@ -2020,9 +2002,7 @@ class SmartHomeService(ServiceComponent):
                     )
 
                     # Transition back to ready state
-                    self.state_machine.transition_to(
-                        self.state_machine.SabrinaState.READY
-                    )
+                    self.state_machine.transition_to(SabrinaState.READY)
 
                     return result
                 else:
@@ -2051,9 +2031,7 @@ class SmartHomeService(ServiceComponent):
                     )
 
                     # Transition back to ready state
-                    self.state_machine.transition_to(
-                        self.state_machine.SabrinaState.READY
-                    )
+                    self.state_machine.transition_to(SabrinaState.READY)
 
                     return result
                 else:
@@ -2068,9 +2046,7 @@ class SmartHomeService(ServiceComponent):
                     )
 
                     # Transition back to ready state
-                    self.state_machine.transition_to(
-                        self.state_machine.SabrinaState.READY
-                    )
+                    self.state_machine.transition_to(SabrinaState.READY)
 
                     return result
                 else:
@@ -2084,7 +2060,7 @@ class SmartHomeService(ServiceComponent):
 
             # Transition to error state
             self.state_machine.transition_to(
-                self.state_machine.SabrinaState.ERROR,
+                SabrinaState.ERROR,
                 {"error_info": {"message": str(e), "source": "smart_home_service"}},
             )
 
@@ -2140,7 +2116,7 @@ class SmartHomeService(ServiceComponent):
 
         # Transition to controlling devices state
         self.state_machine.transition_to(
-            self.state_machine.SabrinaState.CONTROLLING_DEVICES,
+            SabrinaState.CONTROLLING_DEVICES,
             {"routine": routine_name},
         )
 
@@ -2149,14 +2125,14 @@ class SmartHomeService(ServiceComponent):
                 result = self.client.execute_routine(routine_name)
 
                 # Transition back to ready state
-                self.state_machine.transition_to(self.state_machine.SabrinaState.READY)
+                self.state_machine.transition_to(SabrinaState.READY)
 
                 return result
             else:
                 logger.warning("Smart home client does not support execute_routine")
 
                 # Transition back to ready state
-                self.state_machine.transition_to(self.state_machine.SabrinaState.READY)
+                self.state_machine.transition_to(SabrinaState.READY)
 
                 return False
 
@@ -2165,7 +2141,7 @@ class SmartHomeService(ServiceComponent):
 
             # Transition to error state
             self.state_machine.transition_to(
-                self.state_machine.SabrinaState.ERROR,
+                SabrinaState.ERROR,
                 {"error_info": {"message": str(e), "source": "smart_home_service"}},
             )
 

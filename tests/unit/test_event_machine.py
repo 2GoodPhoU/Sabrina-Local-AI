@@ -290,13 +290,12 @@ class TestEventSystem(unittest.TestCase):
         # Reset the event bus to clear any previous test effects
         self.event_bus.processed_count = 0
 
-        # Post some events
+        # Post some events and process them immediately
         num_events = 5
         for i in range(num_events):
             # Use post_event_immediate to ensure immediate processing
-            self.event_bus.post_event_immediate(
-                Event(event_type=EventType.SYSTEM, data={"index": i}, source="test")
-            )
+            event = Event(event_type=EventType.SYSTEM, data={"index": i}, source="test")
+            self.event_bus.post_event_immediate(event)
 
         # Add a small delay to ensure processing completes
         time.sleep(0.2)
@@ -304,11 +303,11 @@ class TestEventSystem(unittest.TestCase):
         # Get updated stats
         updated_stats = self.event_bus.get_stats()
 
-        # Check processed_count is at least the number of events we posted
-        self.assertGreaterEqual(
+        # Verify processed count directly
+        self.assertEqual(
             updated_stats["processed_count"],
             num_events,
-            f"Should process at least {num_events} events",
+            f"Should process exactly {num_events} events",
         )
 
     def test_error_handling_in_callbacks(self):

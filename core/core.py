@@ -99,7 +99,7 @@ class ServiceComponent:
         """Get system status information"""
         component_statuses = {}
 
-        # Avoid recursion by directly accessing component status methods
+        # Avoid recursion by excluding self from component list
         for name, component in list(self.components.items()):
             if hasattr(component, "get_status") and component != self:
                 try:

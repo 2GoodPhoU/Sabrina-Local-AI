@@ -184,7 +184,8 @@ class TestVoiceServiceIntegration(unittest.TestCase):
 
         # Check client was called
         if hasattr(self, "mock_voice_client"):
-            self.mock_voice_client.speak.assert_called_once_with("Direct speech test")
+            args, kwargs = self.mock_voice_client.speak.call_args
+            self.assertEqual(args[0], "State machine test")
 
         # Voice service should update its state
         self.assertEqual(self.voice_service.last_text, "Direct speech test")

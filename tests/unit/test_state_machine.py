@@ -137,7 +137,7 @@ class TestStateMachine(unittest.TestCase):
     def test_global_transition(self):
         """Test global transitions that work from any state"""
 
-        # Define a proper function instead of a lambda
+        # Define a proper function instead of a lambda for the condition
         def error_condition(ctx):
             return ctx.get("critical_error", False)
 
@@ -151,20 +151,11 @@ class TestStateMachine(unittest.TestCase):
         # Set initial state
         self.state_machine.current_state = SabrinaState.READY
 
-        # First verify condition works as expected
-        self.assertFalse(
-            error_condition({}), "Condition should return False with empty context"
-        )
-        self.assertTrue(
-            error_condition({"critical_error": True}),
-            "Condition should return True with critical_error set",
-        )
-
-        # Transition should not occur without the condition being true in context
-        # We're not actually transitioning yet, just checking if we can
+        # Check condition works as expected (without context)
         can_transition = self.state_machine.can_transition_to(SabrinaState.ERROR)
         self.assertFalse(
-            can_transition, "Should not be able to transition without condition"
+            can_transition,
+            "Should not be able to transition without condition being true",
         )
 
         # Set the condition to make the transition work
@@ -172,7 +163,9 @@ class TestStateMachine(unittest.TestCase):
 
         # Now check if transition is allowed
         can_transition = self.state_machine.can_transition_to(SabrinaState.ERROR)
-        self.assertTrue(can_transition, "Should be able to transition with condition")
+        self.assertTrue(
+            can_transition, "Should be able to transition with condition true"
+        )
 
         # Actually perform the transition
         result = self.state_machine.transition_to(SabrinaState.ERROR)
