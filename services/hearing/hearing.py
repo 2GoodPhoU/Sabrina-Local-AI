@@ -131,7 +131,7 @@ class Hearing:
         except Exception as e:
             logger.error(f"Error downloading Vosk model: {str(e)}")
 
-    def play_wake_sound(sound_path="assets/wake_sound.mp3"):
+    def play_wake_sound(self, sound_path="assets/wake_sound.mp3"):
         """Plays a wake-up sound (MP3) when the wake word is detected."""
         if not os.path.exists(sound_path):
             logger.warning(f"Wake sound file not found: {sound_path}")

@@ -153,6 +153,13 @@ class TestHearing(unittest.TestCase):
         # Configure mock to simulate hotkey press
         self.mock_keyboard.return_value = True
 
+        # Make sure play_wake_sound is properly mocked
+        # Add a mock for the playsound call if not already done in _setup_patchers
+        if not hasattr(self, "mock_playsound") or self.mock_playsound is None:
+            playsound_patcher = patch("playsound.playsound")
+            self.mock_playsound = playsound_patcher.start()
+            self._patchers.append(playsound_patcher)
+
         # Call the method
         result = self.hearing.listen_for_wake_word()
 
@@ -161,6 +168,9 @@ class TestHearing(unittest.TestCase):
 
         # Verify hotkey was checked
         self.mock_keyboard.assert_called_with(self.hearing.hotkey)
+
+        # Verify play_wake_sound was triggered (via playsound being called)
+        self.mock_playsound.assert_called()
 
     def test_listening_with_timeout(self):
         """Test listening for speech with timeout"""
