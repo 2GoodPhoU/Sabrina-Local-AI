@@ -275,6 +275,16 @@ print(json.dumps(result))
             [sys.executable, str(script_path)], capture_output=True, text=True
         )
 
+        # Check if output is empty or not valid JSON
+        output = result.stdout.strip()
+        if not output:
+            self.fail(f"Empty output from test script. Error: {result.stderr}")
+
+        try:
+            data = json.loads(output)
+        except json.JSONDecodeError:
+            self.fail(f"Invalid JSON output: '{output}'. Error: {result.stderr}")
+
         # Check script output
         output = result.stdout.strip()
         data = json.loads(output)

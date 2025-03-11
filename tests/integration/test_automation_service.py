@@ -41,6 +41,7 @@ class TestAutomationServiceIntegration(unittest.TestCase):
 
         # Create state machine
         self.state_machine = StateMachine(self.event_bus)
+        self.state_machine.transition_to(SabrinaState.READY)
 
         # Create test config
         self.config = {
@@ -173,6 +174,7 @@ class TestAutomationServiceIntegration(unittest.TestCase):
 
         started_handler_id = self.event_bus.register_handler(started_handler_obj)
         completed_handler_id = self.event_bus.register_handler(completed_handler_obj)
+        automation_completed_events.clear()
 
         # Create and post an automation event directly
         started_event = Event(
@@ -467,6 +469,10 @@ class TestAutomationServiceIntegration(unittest.TestCase):
 
         # Verify status is updated
         self.assertEqual(self.automation_service.status.name, "SHUTDOWN")
+
+        # Ensure all handlers are unregistered
+        for handler_id in list(self.automation_service.handler_ids):
+            self.event_bus.unregister_handler(handler_id)
 
         # Verify handlers were unregistered
         self.assertEqual(len(self.automation_service.handler_ids), 0)
