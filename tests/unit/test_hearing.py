@@ -13,7 +13,7 @@ import time
 # Import test utilities
 from tests.test_utils.paths import ensure_project_root_in_sys_path
 
-# Import the class to test
+# Import the class to test - do this after ensuring path
 from services.hearing.hearing import Hearing
 
 # Ensure the project root is in the Python path
@@ -85,42 +85,32 @@ class TestHearing(unittest.TestCase):
         self.mock_playsound = playsound_patcher.start()
         self._patchers.append(playsound_patcher)
 
-        # Mock Vosk model components
-        # We'll use a two-layer approach to mock both the import and the class
+        # Mock Vosk module and classes
+        vosk_module = MagicMock()
 
-        # First mock the import
-        vosk_module_patcher = patch.dict("sys.modules", {"vosk": MagicMock()})
-        vosk_module_patcher.start()
-        self._patchers.append(vosk_module_patcher)
-
-        # Then mock the Model and KaldiRecognizer classes
-        import sys
-
-        if "vosk" not in sys.modules:
-            sys.modules["vosk"] = MagicMock()
-
-        vosk_model_patcher = patch("sys.modules.vosk.Model")
-        self.mock_vosk_model_class = vosk_model_patcher.start()
-        self._patchers.append(vosk_model_patcher)
-
-        vosk_recognizer_patcher = patch("sys.modules.vosk.KaldiRecognizer")
-        self.mock_vosk_recognizer_class = vosk_recognizer_patcher.start()
-        self._patchers.append(vosk_recognizer_patcher)
-
-        # Create mock instances
+        # Create mock Model and KaldiRecognizer classes
         self.mock_vosk_model = MagicMock()
-        self.mock_vosk_model_class.return_value = self.mock_vosk_model
-
         self.mock_vosk_recognizer = MagicMock()
-        self.mock_vosk_recognizer_class.return_value = self.mock_vosk_recognizer
 
-        # Configure mock behavior
+        # Configure Mock KaldiRecognizer class behavior
+        vosk_module.Model.return_value = self.mock_vosk_model
+        vosk_module.KaldiRecognizer.return_value = self.mock_vosk_recognizer
+
+        # Configure mock recognizer behavior
         self.mock_vosk_recognizer.AcceptWaveform.return_value = (
             False  # Default: no speech detected
         )
         self.mock_vosk_recognizer.Result.return_value = (
             '{"text": ""}'  # Default: empty result
         )
+
+        # Patch the vosk module import
+        vosk_patcher = patch.dict("sys.modules", {"vosk": vosk_module})
+        vosk_patcher.start()
+        self._patchers.append(vosk_patcher)
+
+        # Store the mock vosk module for tests to use
+        self.mock_vosk_module = vosk_module
 
     def test_initialization(self):
         """Test initialization of the Hearing class"""
@@ -135,8 +125,10 @@ class TestHearing(unittest.TestCase):
         # Check that Vosk model was loaded
         if hasattr(self.hearing, "vosk_model"):
             self.assertIsNotNone(self.hearing.vosk_model)
-            self.mock_vosk_model_class.assert_called_once_with(self.test_model_path)
-            self.mock_vosk_recognizer_class.assert_called_once()
+            # Check if Model was initialized with correct path
+            self.mock_vosk_module.Model.assert_called_once_with(self.test_model_path)
+            # Check if KaldiRecognizer was initialized
+            self.mock_vosk_module.KaldiRecognizer.assert_called_once()
 
     def test_wake_word_detection_by_voice(self):
         """Test wake word detection through voice input"""
@@ -181,7 +173,7 @@ class TestHearing(unittest.TestCase):
 
         side_effect = side_effect_generator()
         self.mock_vosk_recognizer.AcceptWaveform.side_effect = lambda data: next(
-            side_effect
+            side_effect, False
         )
 
         # Configure result with transcription

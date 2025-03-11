@@ -18,13 +18,6 @@ from typing import Dict, Any, Callable
 from unittest.mock import MagicMock, patch
 import logging
 
-# Import existing helpers file
-from tests.test_utils.helpers import (
-    MockComponent,
-    MockHearingService,
-    MockAutomationService,
-)
-
 # Import the path utilities
 from tests.test_utils.paths import (
     get_project_root,
@@ -37,64 +30,10 @@ ensure_project_root_in_sys_path()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("test_condition_evaluation")
+logger = logging.getLogger("test_helpers")
 
 
-def create_test_config(config_data: Dict[str, Any], format: str = "yaml") -> str:
-    """
-    Create a test configuration file with the specified format.
-
-    Args:
-        config_data: Dictionary containing configuration data
-        format: Format to save in ('yaml' or 'json')
-
-    Returns:
-        str: Path to the created config file
-    """
-    # Create temporary file
-    fd, temp_path = tempfile.mkstemp(suffix=f".{format}")
-    os.close(fd)
-
-    # Write data in the specified format
-    with open(temp_path, "w") as f:
-        if format == "yaml":
-            yaml.dump(config_data, f)
-        elif format == "json":
-            json.dump(config_data, f, indent=2)
-        else:
-            raise ValueError(f"Unsupported format: {format}")
-
-    return temp_path
-
-
-def wait_for_condition(
-    condition_func: Callable[[], bool],
-    timeout: float = 5.0,
-    check_interval: float = 0.1,
-    message: str = "Condition not met within timeout",
-) -> bool:
-    """
-    Wait for a condition to be true within a timeout period.
-
-    Args:
-        condition_func: Function that returns True when condition is met
-        timeout: Maximum time to wait in seconds
-        check_interval: Time between condition checks in seconds
-        message: Error message if timeout is reached
-
-    Returns:
-        bool: True if condition was met, False if timeout was reached
-    """
-    start_time = time.time()
-
-    while time.time() - start_time < timeout:
-        if condition_func():
-            return True
-        time.sleep(check_interval)
-
-    return False
-
-
+# Define base mock class first to avoid circular import issues
 class MockComponent:
     """Base class for mocked components used in testing"""
 
@@ -155,7 +94,7 @@ class MockVisionService(MockComponent):
         self, mode: str = "full_screen", region: Dict[str, int] = None
     ) -> str:
         """Mock capture_screen method"""
-        self.last_capture_path = f"mock_capture_{time.time()}.png"
+        self.last_capture_path = f"mock_capture_{int(time.time())}.png"
         return self.last_capture_path
 
     def extract_text(self, image_path: str = None) -> str:
@@ -170,10 +109,23 @@ class MockAutomationService(MockComponent):
     def __init__(self, **kwargs):
         super().__init__(name="automation", **kwargs)
         self.last_action = None
+        self.mouse_move_duration = 0.2
+        self.typing_interval = 0.1
+        self.failsafe = True
+        self.screen_width = 1920
+        self.screen_height = 1080
+        self.pyautogui_available = False
+        self.shortcuts = {
+            "copy": ["ctrl", "c"],
+            "paste": ["ctrl", "v"],
+            "save": ["ctrl", "s"],
+            "select_all": ["ctrl", "a"],
+        }
 
     def execute_task(self, action: str, **kwargs) -> bool:
         """Mock execute_task method"""
-        self.last_action = (action, kwargs)
+        self.last_action = action
+        logger.info(f"[MOCK] Executed {action} with args: {kwargs}")
         return True
 
     def click_at(self, x: int, y: int, **kwargs) -> bool:
@@ -186,23 +138,156 @@ class MockAutomationService(MockComponent):
         self.last_action = ("type_text", {"text": text, **kwargs})
         return True
 
+    def move_mouse_to(self, x: int, y: int, duration: float = None) -> bool:
+        """Mock move_mouse_to method"""
+        if duration is None:
+            duration = self.mouse_move_duration
+        logger.info(f"[MOCK] Moved mouse to ({x}, {y}) with duration {duration}s")
+        return True
+
+    def click(self, button: str = "left", clicks: int = 1) -> bool:
+        """Mock click method"""
+        logger.info(f"[MOCK] Clicked {button} button {clicks} times")
+        return True
+
+    def drag_mouse(
+        self,
+        start_x: int,
+        start_y: int,
+        end_x: int,
+        end_y: int,
+        duration: float = None,
+        button: str = "left",
+    ) -> bool:
+        """Mock drag_mouse method"""
+        if duration is None:
+            duration = self.mouse_move_duration
+        logger.info(f"[MOCK] Dragged from ({start_x}, {start_y}) to ({end_x}, {end_y})")
+        return True
+
+    def scroll(self, amount: int = None, direction: str = "down") -> bool:
+        """Mock scroll method"""
+        logger.info(f"[MOCK] Scrolled {direction} by {amount} clicks")
+        return True
+
+    def press_key(self, key: str) -> bool:
+        """Mock press_key method"""
+        logger.info(f"[MOCK] Pressed key: {key}")
+        return True
+
+    def hotkey(self, *keys) -> bool:
+        """Mock hotkey method"""
+        logger.info(f"[MOCK] Pressed hotkey: {', '.join(keys)}")
+        return True
+
+    def run_shortcut(self, shortcut_name: str) -> bool:
+        """Mock run_shortcut method"""
+        if shortcut_name not in self.shortcuts:
+            logger.warning(f"[MOCK] Unknown shortcut: {shortcut_name}")
+            return False
+        logger.info(f"[MOCK] Ran shortcut: {shortcut_name}")
+        return True
+
+    def run_common_task(self, task_name: str, **kwargs) -> bool:
+        """Mock run_common_task method"""
+        logger.info(f"[MOCK] Running task: {task_name}")
+        return True
+
+    def get_mouse_position(self) -> tuple:
+        """Mock get_mouse_position method"""
+        return (500, 500)
+
 
 class MockHearingService(MockComponent):
     """Mock hearing service for testing"""
 
     def __init__(self, **kwargs):
         super().__init__(name="hearing", **kwargs)
-        self.last_transcription = ""
         self.currently_listening = False
+        self.last_transcription = ""
+        self.wake_word = "hey sabrina"
+        self.hotkey = "ctrl+shift+s"
+        self.model_path = "models/test-model"
 
     def listen_for_wake_word(self) -> bool:
         """Mock listen_for_wake_word method"""
+        logger.info(f"[MOCK] Listening for wake word: {self.wake_word}")
         return True
 
     def start_listening(self) -> bool:
         """Mock start_listening method"""
         self.currently_listening = True
+        logger.info("[MOCK] Started listening")
         return True
+
+    def listen(self, timeout=10.0) -> str:
+        """Mock listen method"""
+        self.currently_listening = True
+        transcription = "This is a mock transcription"
+        self.last_transcription = transcription
+        self.currently_listening = False
+        logger.info(f"[MOCK] Listened and transcribed: {transcription}")
+        return transcription
+
+    def close(self) -> bool:
+        """Mock close method"""
+        logger.info("[MOCK] Closed hearing service")
+        return True
+
+
+def create_test_config(config_data: Dict[str, Any], format: str = "yaml") -> str:
+    """
+    Create a test configuration file with the specified format.
+
+    Args:
+        config_data: Dictionary containing configuration data
+        format: Format to save in ('yaml' or 'json')
+
+    Returns:
+        str: Path to the created config file
+    """
+    # Create temporary file
+    fd, temp_path = tempfile.mkstemp(suffix=f".{format}")
+    os.close(fd)
+
+    # Write data in the specified format
+    with open(temp_path, "w") as f:
+        if format == "yaml":
+            yaml.dump(config_data, f)
+        elif format == "json":
+            json.dump(config_data, f, indent=2)
+        else:
+            raise ValueError(f"Unsupported format: {format}")
+
+    return temp_path
+
+
+def wait_for_condition(
+    condition_func: Callable[[], bool],
+    timeout: float = 5.0,
+    check_interval: float = 0.1,
+    message: str = "Condition not met within timeout",
+) -> bool:
+    """
+    Wait for a condition to be true within a timeout period.
+
+    Args:
+        condition_func: Function that returns True when condition is met
+        timeout: Maximum time to wait in seconds
+        check_interval: Time between condition checks in seconds
+        message: Error message if timeout is reached
+
+    Returns:
+        bool: True if condition was met, False if timeout was reached
+    """
+    start_time = time.time()
+
+    while time.time() - start_time < timeout:
+        if condition_func():
+            return True
+        time.sleep(check_interval)
+
+    return False
 
 
 def create_mock_event_bus() -> MagicMock:
@@ -382,228 +467,3 @@ class SabrinaTestCase(unittest.TestCase):
             raise FileNotFoundError(f"Test resource not found: {resource_path}")
 
         return str(resource_path)
-
-
-"""
-Test helpers for Automation and Hearing services
-This script updates the test helpers in tests/test_utils/helpers.py to include
-appropriate mocks and helper functions for the newly tested services.
-"""
-
-# Ensure the project root is in the Python path
-script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
-project_root = script_dir.parent  # Go up one level to get project root
-sys.path.insert(0, str(project_root))
-
-
-def update_helpers_file():
-    """Update the helpers.py file with enhanced mock implementations"""
-
-    helpers_path = project_root / "tests" / "test_utils" / "helpers.py"
-
-    if not helpers_path.exists():
-        print(f"Error: helpers.py not found at {helpers_path}")
-        return False
-
-    # Read the current file
-    with open(helpers_path, "r") as f:
-        helpers_content = f.read()
-
-    # Check if our mock classes are already present
-    if (
-        "MockHearingService" in helpers_content
-        and "MockAutomationService" in helpers_content
-    ):
-        print("Mock classes for Hearing and Automation services already exist.")
-
-        # Update the implementations with enhanced versions
-        # Find and replace the existing MockHearingService implementation
-        hearing_start = helpers_content.find("class MockHearingService")
-        if hearing_start > 0:
-            # Find the end of the class definition (next class or end of file)
-            hearing_end = helpers_content.find("class ", hearing_start + 1)
-            if hearing_end == -1:
-                hearing_end = len(helpers_content)
-
-            # Replace the implementation
-            helpers_content = (
-                helpers_content[:hearing_start]
-                + updated_mock_hearing_service()
-                + helpers_content[hearing_end:]
-            )
-
-        # Find and replace the existing MockAutomationService implementation
-        automation_start = helpers_content.find("class MockAutomationService")
-        if automation_start > 0:
-            # Find the end of the class definition (next class or end of file)
-            automation_end = helpers_content.find("class ", automation_start + 1)
-            if automation_end == -1:
-                automation_end = len(helpers_content)
-
-            # Replace the implementation
-            helpers_content = (
-                helpers_content[:automation_start]
-                + updated_mock_automation_service()
-                + helpers_content[automation_end:]
-            )
-    else:
-        # Add the new implementations to the file
-        # Find a good insertion point (after the last class definition)
-        last_class_end = helpers_content.rfind("}")
-        if last_class_end > 0:
-            # Insert the new class implementations
-            helpers_content = (
-                helpers_content[: last_class_end + 1]
-                + "\n\n"
-                + updated_mock_hearing_service()
-                + "\n\n"
-                + updated_mock_automation_service()
-            )
-
-    # Write the updated file
-    with open(helpers_path, "w") as f:
-        f.write(helpers_content)
-
-    print(f"Updated {helpers_path} with enhanced mock implementations")
-    return True
-
-
-def updated_mock_hearing_service():
-    """Return updated MockHearingService implementation"""
-    return
-
-
-class MockHearingService(MockComponent):
-    """Mock hearing service for testing"""
-
-    def __init__(self, **kwargs):
-        super().__init__(name="hearing", **kwargs)
-        self.currently_listening = False
-        self.last_transcription = ""
-        self.wake_word = "hey sabrina"
-        self.hotkey = "ctrl+shift+s"
-        self.model_path = "models/test-model"
-
-    def listen_for_wake_word(self) -> bool:
-        """Mock listen_for_wake_word method"""
-        logger.info(f"[MOCK] Listening for wake word: {self.wake_word}")
-        return True
-
-    def start_listening(self) -> bool:
-        """Mock start_listening method"""
-        self.currently_listening = True
-        logger.info("[MOCK] Started listening")
-        return True
-
-    def listen(self, timeout=10.0) -> str:
-        """Mock listen method"""
-        self.currently_listening = True
-        transcription = "This is a mock transcription"
-        self.last_transcription = transcription
-        self.currently_listening = False
-        logger.info(f"[MOCK] Listened and transcribed: {transcription}")
-        return transcription
-
-    def close(self) -> bool:
-        """Mock close method"""
-        logger.info("[MOCK] Closed hearing service")
-        return True
-
-
-def updated_mock_automation_service():
-    """Return updated MockAutomationService implementation"""
-    return
-
-
-class MockAutomationService(MockComponent):
-    """Mock automation service for testing"""
-
-    def __init__(self, **kwargs):
-        super().__init__(name="automation", **kwargs)
-        self.last_action = None
-        self.last_action_result = None
-        self.mouse_move_duration = 0.2
-        self.typing_interval = 0.1
-        self.failsafe = True
-        self.screen_width = 1920
-        self.screen_height = 1080
-        self.pyautogui_available = False
-        self.shortcuts = {
-            "copy": ["ctrl", "c"],
-            "paste": ["ctrl", "v"],
-            "save": ["ctrl", "s"],
-            "select_all": ["ctrl", "a"],
-        }
-
-    def execute_task(self, action: str, **kwargs) -> bool:
-        """Mock execute_task method"""
-        self.last_action = action
-        self.last_action_result = True
-        logger.info(f"[MOCK] Executed {action} with args: {kwargs}")
-        return True
-
-    def move_mouse_to(self, x: int, y: int, duration: float = None) -> bool:
-        """Mock move_mouse_to method"""
-        if duration is None:
-            duration = self.mouse_move_duration
-        logger.info(f"[MOCK] Moved mouse to ({x}, {y}) with duration {duration}s")
-        return True
-
-    def click(self, button: str = "left", clicks: int = 1) -> bool:
-        """Mock click method"""
-        logger.info(f"[MOCK] Clicked {button} button {clicks} times")
-        return True
-
-    def click_at(self, x: int, y: int, button: str = "left", clicks: int = 1) -> bool:
-        """Mock click_at method"""
-        logger.info(f"[MOCK] Clicked {button} button at ({x}, {y}) {clicks} times")
-        return True
-
-    def type_text(self, text: str, interval: float = None) -> bool:
-        """Mock type_text method"""
-        if interval is None:
-            interval = self.typing_interval
-        logger.info(f"[MOCK] Typed: {text} with interval {interval}s")
-        return True
-
-    def press_key(self, key: str) -> bool:
-        """Mock press_key method"""
-        logger.info(f"[MOCK] Pressed key: {key}")
-        return True
-
-    def hotkey(self, *keys) -> bool:
-        """Mock hotkey method"""
-        logger.info(f"[MOCK] Pressed hotkey: {', '.join(keys)}")
-        return True
-
-    def run_shortcut(self, shortcut_name: str) -> bool:
-        """Mock run_shortcut method"""
-        if shortcut_name not in self.shortcuts:
-            logger.warning(f"[MOCK] Unknown shortcut: {shortcut_name}")
-            return False
-        logger.info(f"[MOCK] Ran shortcut: {shortcut_name}")
-        return True
-
-    def drag_mouse(
-        self,
-        start_x: int,
-        start_y: int,
-        end_x: int,
-        end_y: int,
-        duration: float = None,
-        button: str = "left",
-    ) -> bool:
-        """Mock drag_mouse method"""
-        if duration is None:
-            duration = self.mouse_move_duration
-        logger.info(f"[MOCK] Dragged from ({start_x}, {start_y}) to ({end_x}, {end_y})")
-        return True
-
-    def scroll(self, amount: int = None, direction: str = "down") -> bool:
-        """Mock scroll method"""
-        logger.info(f"[MOCK] Scrolled {direction} by {amount} clicks")
-        return True
-
-    def get_mouse_position(self) -> tuple:
-        """Mock get_mouse_position method"""
-        return (500, 500)
