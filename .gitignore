@@ -68,3 +68,22 @@ test_results/*.json
 # Project Specific
 services/vision/captures/*.png
 services/vision/data/captures/*.png
+services/vision/captures/*.jpg
+services/data/captures/*.png
+services/data/captures/*.jpg
+
+# Runtime state (mutated by the app, not source)
+core/memory.json
+config/presence_config.json
+config/voice_settings.json
+scripts/conversation_history.json
+scripts/default_memory.json
+scripts/voice_settings.json
+
+# Scratch / editor temp
+*.tmp
+.write-test-*
+
+# Sabrina 2.0 - large downloadable assets (fetched by install-piper.ps1)
+sabrina-2/voices/
+sabrina-2/tools/
