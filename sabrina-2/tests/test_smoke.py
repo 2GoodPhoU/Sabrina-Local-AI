@@ -836,3 +836,97 @@ def test_vision_see_module_rejects_missing_api_key(monkeypatch):
 
     with pytest.raises(ValueError):
         _asyncio.run(_run())
+
+
+# --- decision 008: foundational refactor bundle ---
+
+
+def test_schema_version_present_and_current():
+    # The [schema].version field is declared on Settings and defaults to the
+    # module-level CURRENT_SCHEMA_VERSION. Guards against a future rename that
+    # drops the hook or a version bump without a corresponding migration.
+    from sabrina.config import CURRENT_SCHEMA_VERSION, load_settings
+
+    s = load_settings(reload=True)
+    # Python attribute is `schema_` (trailing underscore) because pydantic's
+    # BaseSettings parent class exposes a `schema` attribute. TOML key and
+    # the rest of the codebase still use the unadorned `schema`; see
+    # `config.py` for the alias pattern.
+    assert s.schema_.version == CURRENT_SCHEMA_VERSION
+
+
+def test_logging_redacts_known_secrets():
+    # The redact_secrets structlog processor replaces sensitive values in
+    # place. Covers exact-match keys, case-insensitive match, nested dicts,
+    # and the *_token suffix rule.
+    from sabrina.logging import redact_secrets
+
+    event = {
+        "event": "brain.request",
+        "api_key": "sk-ant-should-never-see-this",
+        "Authorization": "Bearer tok_abc",
+        "headers": {"anthropic_api_key": "nested-secret", "user_agent": "ok"},
+        "refresh_token": "tok_ref",
+        "model": "claude-sonnet-4-6",
+    }
+    result = redact_secrets(None, "info", event)
+    assert result["api_key"] == "***REDACTED***"
+    assert result["Authorization"] == "***REDACTED***"
+    assert result["headers"]["anthropic_api_key"] == "***REDACTED***"
+    assert result["headers"]["user_agent"] == "ok"  # non-sensitive survives
+    assert result["refresh_token"] == "***REDACTED***"  # *_token rule
+    assert result["model"] == "claude-sonnet-4-6"  # non-sensitive survives
+
+
+def test_logging_truncates_long_values():
+    # Values longer than MAX_VALUE_CHARS get truncated with the marker.
+    # Short values pass through untouched.
+    from sabrina.logging import MAX_VALUE_CHARS, TRUNCATION_MARKER, truncate_long_values
+
+    short = "x" * 100
+    long = "y" * (MAX_VALUE_CHARS + 500)
+    event = {"short": short, "long": long, "number": 42}
+    result = truncate_long_values(None, "info", event)
+    assert result["short"] == short
+    assert len(result["long"]) == MAX_VALUE_CHARS
+    assert result["long"].endswith(TRUNCATION_MARKER)
+    assert result["number"] == 42  # non-string untouched
+
+
+def test_logging_file_sink_writes(tmp_path):
+    # setup_logging() creates the log file and writes events through it.
+    # Keeps it fast by not exercising rotation — just proves the sink wires up.
+    # Redaction is tested again here end-to-end to confirm the processor chain
+    # is wired up in the right order (redact before file-tee).
+    import logging as _logging
+
+    import structlog
+
+    from sabrina.logging import setup_logging
+
+    log_path = tmp_path / "sabrina.log"
+    try:
+        setup_logging("INFO", log_file=log_path)
+
+        log = structlog.get_logger("test.bundle")
+        log.info("bundle.probe", api_key="should-be-redacted", value="ok")
+
+        # Flush all handlers so the rotating file handler writes to disk.
+        for h in _logging.getLogger().handlers:
+            h.flush()
+
+        assert log_path.is_file()
+        body = log_path.read_text(encoding="utf-8")
+        assert "bundle.probe" in body
+        assert "should-be-redacted" not in body
+        assert "REDACTED" in body
+    finally:
+        # Clean up so subsequent tests don't inherit our tmp file sink.
+        for h in list(_logging.getLogger().handlers):
+            _logging.getLogger().removeHandler(h)
+            try:
+                h.close()
+            except Exception:
+                pass
+
+

@@ -6,7 +6,7 @@
 **Ambition:** Personal daily-driver. Windows. Local-first, Claude as the brain.
 **Strategy:** Build and prove each component in isolation before integrating. Every component gets a working implementation, a benchmarked alternative set, and a "garbage-removal" pass on the old code.
 
-> **Status:** MVP is alive. Voice loop with PTT + Claude/Ollama + sentence-streaming Piper TTS + SQLite memory (now with semantic retrieval) + vision attach + settings GUI. ~4,000 lines, 48 tests. See [`decisions/007-semantic-memory-shipped.md`](decisions/007-semantic-memory-shipped.md) for the latest component; [`decisions/006-end-of-night-status.md`](decisions/006-end-of-night-status.md) is the previous end-of-night snapshot. Validated on Windows (i7-13700K/4080, Python 3.12) 2026-04-24: sqlite-vec loaded, first-audio 1.62s warm (post-migration DB had 4 msgs; retrieval exercised with thresholds temporarily loosened, then reverted).
+> **Status:** MVP is alive. Voice loop with PTT + Claude/Ollama + sentence-streaming Piper TTS + SQLite memory (now with semantic retrieval) + vision attach + settings GUI. ~4,000 lines, 52 tests. See [`decisions/008-foundational-refactor-bundle.md`](decisions/008-foundational-refactor-bundle.md) for the latest (schema versioning + log redaction + rotating file sink); [`decisions/007-semantic-memory-shipped.md`](decisions/007-semantic-memory-shipped.md) for the previous component. Validated on Windows (i7-13700K/4080, Python 3.12) 2026-04-24: sqlite-vec loaded, first-audio 1.62s warm (post-migration DB had 4 msgs; retrieval exercised with thresholds temporarily loosened, then reverted).
 
 ---
 
@@ -260,3 +260,4 @@ Rebuild is currently ~3,500 lines (source + tests). Target was under
 - [005 — Vision shipped](decisions/005-vision-shipped.md)
 - [006 — End-of-night status](decisions/006-end-of-night-status.md)
 - [007 — Semantic memory shipped](decisions/007-semantic-memory-shipped.md)
+- [008 — Foundational refactor bundle shipped](decisions/008-foundational-refactor-bundle.md)

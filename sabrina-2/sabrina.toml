@@ -2,6 +2,12 @@
 # Environment variables override these. Format: SABRINA_<SECTION>__<KEY>
 # Secrets (API keys) go in .env, not here.
 
+[schema]
+# Config schema version. Do not edit by hand — `sabrina` migrates this
+# field when fields are renamed/moved/removed. See
+# `rebuild/decisions/008-*.md` for the migration chain pattern.
+version = 1
+
 [brain]
 # Which brain to use by default. "claude" | "ollama"
 default = "claude"

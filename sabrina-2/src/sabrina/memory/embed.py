@@ -74,7 +74,16 @@ class SentenceTransformerEmbedder:
 
         log.info("embed.loading", model=self.model_name, device=self._device or "auto")
         self._model = SentenceTransformer(self.model_name, device=self._device)
-        reported = int(self._model.get_sentence_embedding_dimension() or 0)
+        # sentence-transformers 3.x+ uses `get_embedding_dimension`; older
+        # wheels expose `get_sentence_embedding_dimension`. Use hasattr so we
+        # never touch the deprecated attribute on modern installs — accessing
+        # the old name (even without calling it) triggers a FutureWarning on
+        # recent versions.
+        if hasattr(self._model, "get_embedding_dimension"):
+            get_dim = self._model.get_embedding_dimension
+        else:
+            get_dim = self._model.get_sentence_embedding_dimension
+        reported = int(get_dim() or 0)
         if reported and self.dim and reported != self.dim:
             log.warning(
                 "embed.dim_mismatch",

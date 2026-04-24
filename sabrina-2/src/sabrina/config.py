@@ -6,10 +6,21 @@ Env var convention: SABRINA_<SECTION>__<KEY>  (double underscore separates nesti
 Example:
     SABRINA_BRAIN__DEFAULT=ollama
     SABRINA_BRAIN__CLAUDE__MODEL=claude-haiku-4-5-20251001
+
+Contributor conventions (see `rebuild/decisions/008-*.md`):
+- One `BaseModel` per TOML section; every field has a default.
+- New sections that depend on unshipped setup ship `enabled: bool = False`
+  (mirror `[memory.semantic]`, `[wake_word]`).
+- Literal[...] for enumerable string fields so typos fail at load time.
+- Secrets live in `.env` as `SABRINA_<NAME>`, loaded via `SecretStr` —
+  they never appear in `sabrina.toml`.
+- On a rename/move/delete, append a migration to `MIGRATIONS` and bump
+  `CURRENT_SCHEMA_VERSION`. See `apply_migrations` below.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
@@ -134,6 +145,22 @@ class LoggingConfig(BaseModel):
     level: str = "INFO"
 
 
+class SchemaConfig(BaseModel):
+    # Config schema version. Incremented when a field is renamed, moved, or
+    # removed. `apply_migrations()` bumps this on load. Do not edit by hand.
+    version: int = 1
+
+
+# Bump this when a migration is appended. `apply_migrations` compares the
+# on-disk version to this value and runs any pending migrations in order.
+CURRENT_SCHEMA_VERSION = 1
+
+# Each migration: (from_version, fn) where `fn(TOMLDocument) -> TOMLDocument`.
+# Append in order. Empty today — the hook lands before the first real rename
+# so the rename PR isn't also the PR that builds the machinery.
+MIGRATIONS: list[tuple[int, Callable[["TOMLDocument"], "TOMLDocument"]]] = []  # noqa: F821
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="SABRINA_",
@@ -142,8 +169,14 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         toml_file="sabrina.toml",
         extra="ignore",
+        populate_by_name=True,
     )
 
+    # Python attribute is `schema_` because `BaseSettings` still exposes a
+    # `schema` attribute on the parent class (pydantic v2 emits a UserWarning
+    # otherwise). The TOML key stays `[schema]` via the alias — users never
+    # see the underscore. `populate_by_name=True` (above) lets both forms work.
+    schema_: SchemaConfig = Field(default_factory=SchemaConfig, alias="schema")
     brain: BrainConfig = BrainConfig()
     tts: TtsConfig = TtsConfig()
     asr: AsrConfig = AsrConfig()
@@ -180,10 +213,52 @@ class Settings(BaseSettings):
 _cached: Settings | None = None
 
 
+def apply_migrations(toml_path: Path | None = None) -> int:
+    """Run any pending TOML migrations in order; return the final version.
+
+    Minimal hook (per decision 008): reads `[schema].version` via tomlkit,
+    runs each migration whose `from_version` is ≥ current, bumps the field,
+    writes the document back atomically. Returns the resulting version.
+
+    No-op when `MIGRATIONS` is empty or the file is already current.
+    Never raises on a missing file — callers for tests should pass an
+    explicit path or just rely on the default `sabrina.toml` lookup.
+    """
+    # Imported here to avoid a circular import at module load (settings_io
+    # imports from config).
+    from sabrina import settings_io
+
+    path = toml_path or settings_io.toml_path()
+    if not path.is_file():
+        return CURRENT_SCHEMA_VERSION
+
+    doc = settings_io.load_document(path)
+    current = int(doc.get("schema", {}).get("version", 1))
+    pending = [(v, fn) for v, fn in MIGRATIONS if v >= current]
+    if not pending:
+        return current
+
+    for from_version, fn in pending:
+        doc = fn(doc)
+        current = from_version + 1
+
+    # Bump recorded version.
+    if "schema" not in doc:
+        import tomlkit
+
+        doc["schema"] = tomlkit.table()
+    doc["schema"]["version"] = current
+    settings_io.save_document(doc, path)
+    return current
+
+
 def load_settings(reload: bool = False) -> Settings:
     """Load settings once (cached). Pass reload=True to force re-read."""
     global _cached
     if _cached is None or reload:
+        # Run pending migrations against the on-disk TOML before pydantic
+        # reads it. No-op when there are none; see `apply_migrations`.
+        apply_migrations()
         _cached = Settings()
     return _cached
 
