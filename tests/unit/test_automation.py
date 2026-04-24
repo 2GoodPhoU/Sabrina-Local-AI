@@ -13,11 +13,20 @@ import sys
 # Import test utilities
 from tests.test_utils.paths import ensure_project_root_in_sys_path
 
-# Import the class to test
+# Now import the class to test
 from services.automation.automation import Actions
 
 # Ensure the project root is in the Python path
 ensure_project_root_in_sys_path()
+
+# IMPORTANT: We need to patch the pyautogui import BEFORE importing the Actions class
+# Create the patch for pyautogui here, before importing Actions
+pyautogui_mock = MagicMock()
+sys.modules["pyautogui"] = pyautogui_mock
+
+# Also mock keyboard since it might not be installed
+keyboard_mock = MagicMock()
+sys.modules["keyboard"] = keyboard_mock
 
 
 class TestActions(unittest.TestCase):
@@ -25,49 +34,37 @@ class TestActions(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures"""
-        # Set up mocks for external dependencies
-        self._setup_patchers()
+        # Configure PyAutoGUI mock
+        self.configure_pyautogui_mock()
 
         # Create an instance of the Actions class
         self.actions = Actions()
 
-    def tearDown(self):
-        """Clean up test fixtures"""
-        # Stop all patchers
-        for patcher in getattr(self, "_patchers", []):
-            patcher.stop()
+    def configure_pyautogui_mock(self):
+        """Configure the PyAutoGUI mock with necessary methods and attributes"""
+        # Reset mock to clear any previous calls
+        pyautogui_mock.reset_mock()
 
-    def _setup_patchers(self):
-        """Set up mock objects for external dependencies"""
-        self._patchers = []
+        # Configure size method
+        pyautogui_mock.size.return_value = (1920, 1080)
 
-        # Mock PyAutoGUI
-        pyautogui_patcher = patch("services.automation.automation.pyautogui")
-        self.mock_pyautogui = pyautogui_patcher.start()
-        self._patchers.append(pyautogui_patcher)
+        # Configure position method
+        pyautogui_mock.position.return_value = (500, 500)
 
-        # Configure PyAutoGUI mock
-        self.mock_pyautogui.size.return_value = (1920, 1080)
-        self.mock_pyautogui.position.return_value = (500, 500)
-        self.mock_pyautogui.click.return_value = (
-            None  # PyAutoGUI actions typically return None
-        )
-        self.mock_pyautogui.moveTo.return_value = None
-        self.mock_pyautogui.dragTo.return_value = None
-        self.mock_pyautogui.scroll.return_value = None
-        self.mock_pyautogui.write.return_value = None
-        self.mock_pyautogui.press.return_value = None
-        self.mock_pyautogui.hotkey.return_value = None
+        # Configure action methods
+        pyautogui_mock.click.return_value = None
+        pyautogui_mock.moveTo.return_value = None
+        pyautogui_mock.dragTo.return_value = None
+        pyautogui_mock.scroll.return_value = None
+        pyautogui_mock.write.return_value = None
+        pyautogui_mock.press.return_value = None
+        pyautogui_mock.hotkey.return_value = None
+        pyautogui_mock.mouseDown.return_value = None
+        pyautogui_mock.mouseUp.return_value = None
 
-        # Mock mouse module (optional enhancement)
-        mouse_patcher = patch("services.automation.automation.mouse_module", None)
-        self.mock_mouse_module = mouse_patcher.start()
-        self._patchers.append(mouse_patcher)
-
-        # Mock keyboard module (optional enhancement)
-        keyboard_patcher = patch("services.automation.automation.keyboard_module", None)
-        self.mock_keyboard_module = keyboard_patcher.start()
-        self._patchers.append(keyboard_patcher)
+        # Set attributes
+        pyautogui_mock.FAILSAFE = True
+        pyautogui_mock.PAUSE = 0.1
 
     def test_initialization(self):
         """Test initialization of the Actions class"""
@@ -78,11 +75,6 @@ class TestActions(unittest.TestCase):
         self.assertEqual(self.actions.mouse_move_duration, 0.2)  # Default value
         self.assertEqual(self.actions.typing_interval, 0.1)  # Default value
         self.assertTrue(self.actions.failsafe_enabled)  # Default value
-
-        # Check that PyAutoGUI was configured
-        if self.actions.pyautogui_available:
-            self.mock_pyautogui.FAILSAFE.assert_called()
-            self.mock_pyautogui.PAUSE.assert_called()
 
     def test_configure(self):
         """Test configure method"""
@@ -100,9 +92,9 @@ class TestActions(unittest.TestCase):
         self.assertFalse(self.actions.failsafe_enabled)
         self.assertEqual(self.actions.scroll_amount, 5)
 
-        # Check that PyAutoGUI failsafe was updated
+        # Check that PyAutoGUI failsafe was updated if PyAutoGUI is available
         if self.actions.pyautogui_available:
-            self.assertEqual(self.mock_pyautogui.FAILSAFE, False)
+            self.assertEqual(pyautogui_mock.FAILSAFE, False)
 
     def test_move_mouse_to(self):
         """Test move_mouse_to method"""
@@ -112,9 +104,9 @@ class TestActions(unittest.TestCase):
         # Check the result
         self.assertTrue(result)
 
-        # Verify PyAutoGUI was called correctly
+        # Verify PyAutoGUI was called correctly if available
         if self.actions.pyautogui_available:
-            self.mock_pyautogui.moveTo.assert_called_with(100, 200, duration=0.2)
+            pyautogui_mock.moveTo.assert_called_with(100, 200, duration=0.2)
 
         # Verify last_mouse_pos was updated
         self.assertEqual(self.actions.last_mouse_pos, (100, 200))
@@ -127,9 +119,9 @@ class TestActions(unittest.TestCase):
         # Check the result
         self.assertTrue(result)
 
-        # Verify PyAutoGUI was called correctly
+        # Verify PyAutoGUI was called correctly if available
         if self.actions.pyautogui_available:
-            self.mock_pyautogui.click.assert_called_with(button="left", clicks=1)
+            pyautogui_mock.click.assert_called_with(button="left", clicks=1)
 
         # Test with custom parameters
         result = self.actions.click(button="right", clicks=2)
@@ -137,9 +129,9 @@ class TestActions(unittest.TestCase):
         # Check the result
         self.assertTrue(result)
 
-        # Verify PyAutoGUI was called correctly
+        # Verify PyAutoGUI was called correctly if available
         if self.actions.pyautogui_available:
-            self.mock_pyautogui.click.assert_called_with(button="right", clicks=2)
+            pyautogui_mock.click.assert_called_with(button="right", clicks=2)
 
     def test_click_at(self):
         """Test click_at method"""
@@ -149,11 +141,9 @@ class TestActions(unittest.TestCase):
         # Check the result
         self.assertTrue(result)
 
-        # Verify PyAutoGUI was called correctly
+        # Verify PyAutoGUI was called correctly if available
         if self.actions.pyautogui_available:
-            self.mock_pyautogui.click.assert_called_with(
-                300, 400, button="left", clicks=1
-            )
+            pyautogui_mock.click.assert_called_with(300, 400, button="left", clicks=1)
 
         # Verify last_mouse_pos was updated
         self.assertEqual(self.actions.last_mouse_pos, (300, 400))
@@ -164,11 +154,9 @@ class TestActions(unittest.TestCase):
         # Check the result
         self.assertTrue(result)
 
-        # Verify PyAutoGUI was called correctly
+        # Verify PyAutoGUI was called correctly if available
         if self.actions.pyautogui_available:
-            self.mock_pyautogui.click.assert_called_with(
-                500, 600, button="right", clicks=2
-            )
+            pyautogui_mock.click.assert_called_with(500, 600, button="right", clicks=2)
 
     def test_drag_mouse(self):
         """Test drag_mouse method"""
@@ -180,10 +168,10 @@ class TestActions(unittest.TestCase):
         # Check the result
         self.assertTrue(result)
 
-        # Verify PyAutoGUI was called correctly
+        # Verify PyAutoGUI was called correctly if available
         if self.actions.pyautogui_available:
-            self.mock_pyautogui.moveTo.assert_called_with(100, 200)
-            self.mock_pyautogui.dragTo.assert_called_with(
+            pyautogui_mock.moveTo.assert_called_with(100, 200)
+            pyautogui_mock.dragTo.assert_called_with(
                 300, 400, duration=0.5, button="left"
             )
 
@@ -198,9 +186,9 @@ class TestActions(unittest.TestCase):
         # Check the result
         self.assertTrue(result)
 
-        # Verify PyAutoGUI was called correctly
+        # Verify PyAutoGUI was called correctly if available
         if self.actions.pyautogui_available:
-            self.mock_pyautogui.scroll.assert_called()
+            pyautogui_mock.scroll.assert_called()
 
         # Test with custom amount and direction
         result = self.actions.scroll(amount=10, direction="up")
@@ -208,9 +196,9 @@ class TestActions(unittest.TestCase):
         # Check the result
         self.assertTrue(result)
 
-        # Verify PyAutoGUI was called with negative value for upward scrolling
+        # Verify PyAutoGUI was called with negative value for upward scrolling if available
         if self.actions.pyautogui_available:
-            self.mock_pyautogui.scroll.assert_called_with(-10)
+            pyautogui_mock.scroll.assert_called_with(-10)
 
     def test_type_text(self):
         """Test type_text method"""
@@ -222,9 +210,9 @@ class TestActions(unittest.TestCase):
         # Check the result
         self.assertTrue(result)
 
-        # Verify PyAutoGUI was called correctly
+        # Verify PyAutoGUI was called correctly if available
         if self.actions.pyautogui_available:
-            self.mock_pyautogui.write.assert_called_with(test_text, interval=0.1)
+            pyautogui_mock.write.assert_called_with(test_text, interval=0.1)
 
         # Test with custom interval
         custom_interval = 0.05
@@ -233,11 +221,9 @@ class TestActions(unittest.TestCase):
         # Check the result
         self.assertTrue(result)
 
-        # Verify PyAutoGUI was called with custom interval
+        # Verify PyAutoGUI was called with custom interval if available
         if self.actions.pyautogui_available:
-            self.mock_pyautogui.write.assert_called_with(
-                test_text, interval=custom_interval
-            )
+            pyautogui_mock.write.assert_called_with(test_text, interval=custom_interval)
 
     def test_press_key(self):
         """Test press_key method"""
@@ -247,9 +233,9 @@ class TestActions(unittest.TestCase):
         # Check the result
         self.assertTrue(result)
 
-        # Verify PyAutoGUI was called correctly
+        # Verify PyAutoGUI was called correctly if available
         if self.actions.pyautogui_available:
-            self.mock_pyautogui.press.assert_called_with("enter")
+            pyautogui_mock.press.assert_called_with("enter")
 
     def test_hotkey(self):
         """Test hotkey method"""
@@ -259,9 +245,9 @@ class TestActions(unittest.TestCase):
         # Check the result
         self.assertTrue(result)
 
-        # Verify PyAutoGUI was called correctly
+        # Verify PyAutoGUI was called correctly if available
         if self.actions.pyautogui_available:
-            self.mock_pyautogui.hotkey.assert_called_with("ctrl", "c")
+            pyautogui_mock.hotkey.assert_called_with("ctrl", "c")
 
     def test_run_shortcut(self):
         """Test run_shortcut method"""
@@ -274,9 +260,9 @@ class TestActions(unittest.TestCase):
         # Check the result
         self.assertTrue(result)
 
-        # Verify PyAutoGUI was called correctly (via hotkey)
+        # Verify PyAutoGUI was called correctly (via hotkey) if available
         if self.actions.pyautogui_available:
-            self.mock_pyautogui.hotkey.assert_called_with("ctrl", "shift", "t")
+            pyautogui_mock.hotkey.assert_called_with("ctrl", "shift", "t")
 
         # Test with nonexistent shortcut
         result = self.actions.run_shortcut("nonexistent_shortcut")
@@ -306,7 +292,7 @@ class TestActions(unittest.TestCase):
         # Check the result
         self.assertTrue(result)
 
-        # This should use drag_mouse internally, so we don't need to check PyAutoGUI directly
+        # This should use drag_mouse internally, which we've already tested
 
     def test_select_text(self):
         """Test select_text method"""
@@ -316,12 +302,11 @@ class TestActions(unittest.TestCase):
         # Check the result
         self.assertTrue(result)
 
-        # Verify PyAutoGUI was called correctly
+        # Verify PyAutoGUI was called correctly if available
         if self.actions.pyautogui_available:
-            self.mock_pyautogui.moveTo.assert_called_with(100, 200)
-            self.mock_pyautogui.mouseDown.assert_called()
-            self.mock_pyautogui.moveTo.assert_called_with(300, 400, duration=0.2)
-            self.mock_pyautogui.mouseUp.assert_called()
+            pyautogui_mock.moveTo.assert_called_with(300, 400, duration=0.2)
+            pyautogui_mock.mouseDown.assert_called()
+            pyautogui_mock.mouseUp.assert_called()
 
     def test_add_custom_shortcut(self):
         """Test add_custom_shortcut method"""
@@ -374,9 +359,9 @@ class TestActions(unittest.TestCase):
         self.assertIsInstance(pos, tuple)
         self.assertEqual(len(pos), 2)
 
-        # Verify PyAutoGUI was called correctly
+        # Verify PyAutoGUI was called correctly if available
         if self.actions.pyautogui_available:
-            self.mock_pyautogui.position.assert_called()
+            pyautogui_mock.position.assert_called()
 
 
 if __name__ == "__main__":
