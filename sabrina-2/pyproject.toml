@@ -34,6 +34,9 @@ dependencies = [
     # onnxruntime+MiniLM replacement is on the research list.
     "sentence-transformers>=3.0",
     "sqlite-vec>=0.1.6",
+    # Barge-in: Silero VAD via the pip package (ONNX weights ship inside
+    # the wheel; no torch-hub download on first run). See decision 009.
+    "silero-vad>=5.1",
 ]
 
 [project.scripts]

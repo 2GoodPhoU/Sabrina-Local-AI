@@ -1,5 +1,22 @@
 # Sabrina AI Architecture Overview
 
+> **⚠️ Legacy document — pre-rebuild.** This file describes the
+> architecture of the original Sabrina codebase (`core/sabrina_core.py`,
+> `services/voice/`, `services/vision/`, etc.), which is being replaced
+> by the component-first rebuild under
+> [`sabrina-2/`](../sabrina-2/README.md).
+>
+> For the **current** architecture, read:
+> - [`../sabrina-2/README.md`](../sabrina-2/README.md) — layout and
+>   component list for the live codebase.
+> - [`../rebuild/ROADMAP.md`](../rebuild/ROADMAP.md) — component
+>   progress and a current-shape block diagram.
+> - [`../rebuild/decisions/`](../rebuild/decisions/) — one write-up per
+>   shipped component explaining why each design call was made.
+>
+> This legacy file is preserved for historical reference and will be
+> removed when the rebuild hits feature parity.
+
 ## 1. Architectural Vision
 Sabrina AI is designed as a locally-running, privacy-focused AI assistant with a modular, event-driven architecture that emphasizes:
 - Stability

@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator
 
 from ollama import AsyncClient
 
-from sabrina.brain.protocol import Done, Message, StreamEvent, TextDelta
+from sabrina.brain.protocol import CancelToken, Done, Message, StreamEvent, TextDelta
 from sabrina.logging import get_logger
 
 log = get_logger(__name__)
@@ -32,6 +32,7 @@ class OllamaBrain:
         *,
         system: str | None = None,
         max_tokens: int | None = None,
+        cancel_token: CancelToken | None = None,
     ) -> AsyncIterator[StreamEvent]:
         api_messages: list[dict[str, str]] = []
         if system:
@@ -46,6 +47,7 @@ class OllamaBrain:
         in_tokens: int | None = None
         out_tokens: int | None = None
         stop_reason: str | None = None
+        cancelled = False
 
         stream = await self._client.chat(
             model=self._model,
@@ -54,6 +56,9 @@ class OllamaBrain:
             options=options or None,
         )
         async for chunk in stream:
+            if cancel_token is not None and cancel_token.cancelled:
+                cancelled = True
+                break
             piece = (
                 chunk.get("message", {}).get("content")
                 if isinstance(chunk, dict)
@@ -74,5 +79,7 @@ class OllamaBrain:
                     stop_reason = getattr(chunk, "done_reason", None)
 
         yield Done(
-            input_tokens=in_tokens, output_tokens=out_tokens, stop_reason=stop_reason
+            input_tokens=in_tokens,
+            output_tokens=out_tokens,
+            stop_reason="cancelled" if cancelled else stop_reason,
         )

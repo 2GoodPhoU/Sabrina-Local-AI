@@ -141,6 +141,23 @@ class MemoryConfig(BaseModel):
     semantic: SemanticMemoryConfig = SemanticMemoryConfig()
 
 
+class BargeInConfig(BaseModel):
+    # Master switch. Off until you've validated it end-to-end on your mic/speaker.
+    enabled: bool = False
+    # Silero VAD confidence threshold (0.0-1.0). Lower = more sensitive.
+    # 0.5 is Silero's default; noisy environments may want 0.6-0.7.
+    threshold: float = 0.5
+    # Minimum continuous speech (ms) before barge-in fires. Filters coughs,
+    # key clicks, and Sabrina's own voice bleed-through.
+    min_speech_ms: int = 300
+    # Suppress detection for this many ms at the start of each speaking phase
+    # so VAD doesn't trip on the TTS onset bleeding into the mic.
+    dead_zone_ms: int = 300
+    # After interrupt, re-transcribe the captured audio and continue, rather
+    # than waiting for a PTT press. False = just go idle.
+    continue_on_interrupt: bool = True
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
 
@@ -182,6 +199,7 @@ class Settings(BaseSettings):
     asr: AsrConfig = AsrConfig()
     vision: VisionConfig = VisionConfig()
     memory: MemoryConfig = MemoryConfig()
+    barge_in: BargeInConfig = BargeInConfig()
     logging: LoggingConfig = LoggingConfig()
     # Accept either ANTHROPIC_API_KEY (standard Anthropic env var) or the
     # SABRINA_-prefixed form. Loaded from .env or shell environment.

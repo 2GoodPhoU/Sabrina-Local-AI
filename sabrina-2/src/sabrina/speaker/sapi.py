@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import time
 
+from sabrina.brain.protocol import CancelToken
 from sabrina.logging import get_logger
 from sabrina.speaker.protocol import SpeakResult
 
@@ -83,15 +84,46 @@ class SapiSpeaker:
         except Exception:  # noqa: BLE001
             return "default"
 
-    async def speak(self, text: str, *, voice: str | None = None) -> SpeakResult:
+    async def speak(
+        self,
+        text: str,
+        *,
+        voice: str | None = None,
+        cancel_token: CancelToken | None = None,
+    ) -> SpeakResult:
         if not text.strip():
             return SpeakResult(engine=self.name, duration_s=0.0)
+
+        # Poll cancel_token; on cancel, stop() purges the SAPI queue which
+        # unblocks the synchronous Speak() in the worker thread. See the
+        # same pattern in piper.py — duplicated here to keep the speaker
+        # backends self-contained.
+        poll_task: asyncio.Task[None] | None = None
+        if cancel_token is not None:
+
+            async def _poll() -> None:
+                try:
+                    while not cancel_token.cancelled:
+                        await asyncio.sleep(0.03)
+                    await self.stop()
+                except asyncio.CancelledError:
+                    raise
+
+            poll_task = asyncio.create_task(_poll())
+
         start = time.monotonic()
         try:
             await asyncio.to_thread(self._speak_sync, text, voice)
         except asyncio.CancelledError:
             await self.stop()
             raise
+        finally:
+            if poll_task is not None:
+                poll_task.cancel()
+                try:
+                    await poll_task
+                except (asyncio.CancelledError, Exception):
+                    pass
         return SpeakResult(engine=self.name, duration_s=time.monotonic() - start)
 
     def _speak_sync(self, text: str, voice: str | None) -> None:

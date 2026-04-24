@@ -19,11 +19,14 @@ import asyncio
 
 from rich.console import Console
 
-from sabrina.brain.protocol import Brain, Done, Image, Message, TextDelta
+import numpy as np
+
+from sabrina.brain.protocol import Brain, CancelToken, Done, Image, Message, TextDelta
 from sabrina.bus import EventBus
 from sabrina.config import Settings
 from sabrina.events import (
     AssistantReply,
+    BargeInDetected,
     SpeakFinished,
     SpeakStarted,
     ThinkingFinished,
@@ -32,6 +35,7 @@ from sabrina.events import (
 )
 from sabrina.listener.protocol import Listener
 from sabrina.listener.ptt import PushToTalk
+from sabrina.listener.vad import AudioMonitor, SileroVAD
 from sabrina.logging import get_logger
 from sabrina.memory.embed import Embedder, build_embedder
 from sabrina.memory.store import MemoryStore, SearchHit, new_session_id
@@ -143,6 +147,21 @@ async def run_voice_loop(
 
         warmup_task = asyncio.create_task(_warm())
 
+    # --- barge-in wiring (optional) -----------------------------------------
+    # When enabled, a Silero VAD monitors the mic during each speaking phase.
+    # If the user starts talking mid-reply, the CancelToken trips, the brain
+    # stream exits early, the speaker is stopped, and (if continue_on_interrupt)
+    # the captured audio becomes the next user turn without a PTT press.
+    barge_enabled = (
+        settings is not None and settings.barge_in.enabled
+    )
+    vad: SileroVAD | None = None
+    if barge_enabled:
+        vad = SileroVAD(
+            threshold=settings.barge_in.threshold,
+            min_speech_ms=settings.barge_in.min_speech_ms,
+        )
+
     ptt = PushToTalk(hotkey, input_device=input_device)
     ptt.start()
 
@@ -194,12 +213,22 @@ async def run_voice_loop(
         if pieces:
             console.print(f"[dim]vision: {' or '.join(pieces)} (trigger={trig})[/]")
 
+    # Audio buffered from a barge-in that will feed the next turn instead
+    # of waiting for a PTT press. Set at end of speaking when cancel fired.
+    pending_barge_audio: np.ndarray | None = None
+
     try:
         while True:
             # ---- 1. listen --------------------------------------------------
-            await sm.transition("listening", reason="ptt_wait")
-            console.print("[dim](hold to talk)[/]", end="\r")
-            audio = await ptt.record_while_held()
+            if pending_barge_audio is not None and pending_barge_audio.size > 0:
+                audio = pending_barge_audio
+                pending_barge_audio = None
+                console.print("[dim](barge-in audio captured; re-transcribing...)[/]")
+            else:
+                pending_barge_audio = None
+                await sm.transition("listening", reason="ptt_wait")
+                console.print("[dim](hold to talk)[/]", end="\r")
+                audio = await ptt.record_while_held()
             if audio.size == 0:
                 console.print("[dim](no audio captured)[/]                  ")
                 await sm.transition("idle", reason="empty_audio")
@@ -344,18 +373,40 @@ async def run_voice_loop(
             in_tok: int | None = None
             out_tok: int | None = None
 
+            # Per-turn cancel machinery. The token threads through brain.chat
+            # and speaker.speak; the monitor starts on first spoken sentence
+            # so its dead-zone timer aligns with actual TTS onset.
+            cancel_token = CancelToken()
+            monitor: AudioMonitor | None = None
+            if vad is not None and settings is not None:
+                monitor = AudioMonitor(
+                    vad,
+                    cancel_token,
+                    device=input_device,
+                    dead_zone_ms=settings.barge_in.dead_zone_ms,
+                )
+
             async def _speaker_worker() -> None:
-                """Consume sentences from the queue, speak them in order."""
+                """Consume sentences from the queue, speak them in order.
+
+                On cancel, drain remaining queue items without speaking them.
+                Start the barge-in monitor when the first sentence goes out so
+                its dead-zone aligns with real TTS onset (not with thinking).
+                """
                 first_sentence = True
                 while True:
                     item = await speak_queue.get()
                     if item is None:
                         return
+                    if cancel_token.cancelled:
+                        continue  # drain remaining queued sentences silently
                     if first_sentence:
                         await sm.transition("speaking", reason="first_sentence")
+                        if monitor is not None:
+                            monitor.start()
                         first_sentence = False
                     await bus.publish(SpeakStarted(engine=speaker.name, text=item))
-                    result = await speaker.speak(item)
+                    result = await speaker.speak(item, cancel_token=cancel_token)
                     await bus.publish(
                         SpeakFinished(engine=speaker.name, duration_s=result.duration_s)
                     )
@@ -363,7 +414,9 @@ async def run_voice_loop(
             speaker_task = asyncio.create_task(_speaker_worker())
 
             try:
-                async for ev in turn_brain.chat(history, system=turn_system):
+                async for ev in turn_brain.chat(
+                    history, system=turn_system, cancel_token=cancel_token
+                ):
                     if isinstance(ev, TextDelta):
                         console.print(ev.text, end="", highlight=False, soft_wrap=True)
                         reply_parts.append(ev.text)
@@ -379,16 +432,50 @@ async def run_voice_loop(
                 console.print(f"\n[red]brain error:[/] {exc}")
                 await speak_queue.put(None)
                 await speaker_task
+                if monitor is not None:
+                    monitor.stop()
                 if sm.state != "idle":
                     await sm.transition("idle", reason="brain_error")
                 continue
 
-            # Flush any trailing text that never hit a terminator.
+            # Flush any trailing text that never hit a terminator (unless
+            # cancelled — we want to stop speaking, not queue more).
             tail = buf.strip()
-            if tail:
+            if tail and not cancel_token.cancelled:
                 await speak_queue.put(tail)
             await speak_queue.put(None)
             await speaker_task
+
+            # Stop the monitor and grab whatever audio it captured. Returns
+            # None unless VAD actually fired.
+            barge_audio = monitor.stop() if monitor is not None else None
+
+            # --- barge-in path -------------------------------------------
+            if cancel_token.cancelled:
+                # Belt-and-suspenders: ensure speaker is quiet. The poll
+                # task inside speaker.speak should already have called
+                # stop(), but calling it again is harmless.
+                try:
+                    await speaker.stop()
+                except Exception as exc:  # noqa: BLE001
+                    log.debug("speaker.stop_failed", err=str(exc))
+                await bus.publish(BargeInDetected())
+                log.info("bargein.handled", captured_samples=int(barge_audio.size) if barge_audio is not None else 0)
+                console.print("\n[yellow](interrupted)[/]")
+                # Drop the partial reply — don't add to history or memory.
+                # Stale partials are bad context for the next turn.
+                if (
+                    settings is not None
+                    and settings.barge_in.continue_on_interrupt
+                    and barge_audio is not None
+                    and barge_audio.size > 0
+                ):
+                    pending_barge_audio = barge_audio
+                if sm.state == "speaking":
+                    await sm.transition("idle", reason="barge_in")
+                # Skip the rest of the normal end-of-turn bookkeeping
+                # (history/memory writes, token log). Loop continues.
+                continue
 
             console.print()  # newline after stream
             reply = "".join(reply_parts)

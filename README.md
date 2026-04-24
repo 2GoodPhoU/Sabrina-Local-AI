@@ -1,180 +1,51 @@
-# TODO
-- integration
-   - add LLM
-   - add standardized formats and framework for LLM input/output to communicate to core.py
-   - LLM short term memory storage
-   - training feedback loop
-   - presence+task integration
-- vision
-   - implement yolov8 again
-- presence
-   - fix clickthrough, implement position saving
-   - implement acutal animations
-- improve automation
-   - add click and drag fuctionality
-   - add scroll functionality
-   - add shortcuts for common PC actions
-- general
-   - auto download requirements
-   - startup via .exe
+# Sabrina AI
 
-# Sabrina AI - Enhanced Local AI Assistant
+Personal daily-driver voice assistant for Windows. Local-first (Ollama +
+Qwen 2.5) with Claude as the cloud reasoning tier.
 
-## 🚀 Project Overview
+This repository holds two generations of the project:
 
-Sabrina AI is a privacy-focused, locally-running AI assistant that combines advanced voice interaction, screen awareness, automation, and smart home control into a comprehensive, intelligent system.
+- **`sabrina-2/`** — the current rebuild. Nine decisions shipped, ~4,200
+  lines, 57 tests, MVP voice loop alive. Read
+  [`sabrina-2/README.md`](sabrina-2/README.md) for component status and
+  quickstart; read [`rebuild/ROADMAP.md`](rebuild/ROADMAP.md) for the
+  component-by-component progress notes and the "what's next" menu.
+- **Everything else at this level** — the original codebase (`core/`,
+  `services/`, `docs/`, `tests/`, etc.). Pre-rebuild; kept in tree as
+  reference while the rebuild catches up to feature parity. Marked with
+  `## Legacy` headers on the docs. Will be pruned when `sabrina-2/`
+  closes the last two components (avatar, automation) and the
+  supervisor + autostart infra ships.
 
-## 📂 Project Structure
+## Start here
 
-```
-/SABRINA-LOCAL-AI
-│-- /core
-│   │-- core.py  # Main AI Orchestration Engine
-│   │-- memory.py  # Memory & recall system
-│   │-- config.py  # Configuration settings
-│-- /services  # AI Services & Modules
-│   │-- /hearing  # Voice recognition
-│   │   │-- hearing.py  # Whisper ASR-based recognition
-│   │-- /vision  # AI-powered screen analysis
-│   │   │-- constants.py
-│   │   │-- vision_core.py  # Screen capture & tracking
-│   │   │-- vision_ocr.py  # Text extraction
-│   │   │-- vision_detection.py  # UI element detection
-│   │-- /automation  # PC automation
-│   │   │-- automation.py  # Keyboard & mouse control
-│   │-- /smart_home  # Home automation
-│   │   │-- smart_home.py  # Google Home & Home Assistant control
-│   │-- /voice  # Voice synthesis
-│   │   │-- voice.py  # TTS-based voice output
-│-- /models  # AI models & training data
-│   │-- /vosk-model  # Voice recognition models
-│   │-- /yolov8  # Object detection models
-│-- /scripts  # Utility scripts
-│   │-- start_services.py  # Starts AI services
-│   │-- setup_env.py  # Environment setup
-│-- /config  # Configuration files
-│   │-- settings.yaml  # System configuration
-│   │-- api_keys.env  # External API credentials
-│-- /data  # Storage for logs, databases
-│   │-- logs/  # System logs
-│   │-- db/  # Database files
-│-- /tests  # Unit and integration tests
-│-- README.md  # Project documentation
-│-- requirements.txt  # Project dependencies
+```powershell
+cd sabrina-2
+uv sync
+copy .env.template .env   # then fill in ANTHROPIC_API_KEY
+uv run sabrina voice      # hold right-Shift to talk, Ctrl+C to quit
 ```
 
-## ✨ Key Features
+Full quickstart, CLI cheat sheet, layout, and design rules in
+[`sabrina-2/README.md`](sabrina-2/README.md).
 
-### 🗣️ Voice Interaction
-- Wake word detection with Vosk
-- Speech recognition using Whisper ASR
-- Text-to-speech with Jenny TTS
-- Configurable voice settings
+## If you're picking this up in a new session
 
-### 👀 Vision & Screen Awareness
-- Advanced screen capture
-- Optical Character Recognition (OCR)
-- UI element detection with YOLOv8
-- Active window tracking and analysis
+Read [`CLAUDE.md`](CLAUDE.md) at the root of this repo — it's the
+short-form bootstrap that points Claude (or any agent) at the right
+docs in the right order. Then [`rebuild/when-you-return.md`](rebuild/when-you-return.md)
+for the current session state.
 
-### 💻 PC Automation
-- Cross-application keyboard/mouse control
-- Task automation
-- Workflow recording and playback
-- Context-aware UI interaction
+## Why two generations
 
-### 🏡 Smart Home Integration
-- Google Home API integration
-- Home Assistant support
-- Device control and routine management
-- Cross-platform smart home automation
+The original project "died of over-abstraction" — `core.py` grew past
+700 lines, a `component_service_wrappers.py` hit 2000, and the state
+machine lived in a 600-line file. The rebuild's equivalents are ~80 to
+~300 lines; every abstraction has to justify itself with a second
+caller before it earns its own file. Component-first, decision-doc
+per ship, validation procedure per component. See
+[`rebuild/`](rebuild/) for the detailed approach and guardrails.
 
-### 🤖 AI Presence
-- Animated avatar with dynamic expressions
-- Context-aware interactions
-- Mood-based visual feedback
+## License
 
-## 🛠️ Technology Stack
-
-### Core Technologies
-- **Language**: Python 3.10+
-- **Frameworks**:
-  - FastAPI
-  - PyTorch
-  - PyQt5
-- **Machine Learning**:
-  - Whisper
-  - YOLOv8
-  - Vosk
-
-### Speech Processing
-- **ASR**: Whisper
-- **TTS**: Jenny TTS
-- **Wake Word**: Vosk
-
-### Computer Vision
-- **Image Processing**: OpenCV
-- **Object Detection**: YOLOv8
-- **OCR**: Tesseract, PaddleOCR
-
-### Automation
-- **Input Control**: PyAutoGUI
-- **Window Management**: PyGetWindow
-
-## 🔧 Installation & Setup
-
-### Prerequisites
-- Python 3.10+
-- Docker (recommended)
-- CUDA-capable GPU (optional, for accelerated processing)
-
-### Quick Setup
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/sabrina-ai.git
-cd sabrina-ai
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run setup script
-python scripts/setup_env.py
-```
-
-### Running Sabrina AI
-```bash
-# Start voice service
-python services/voice/voice_api.py
-
-# Run main system
-python scripts/start_sabrina.py
-```
-
-## 📋 Command Line Options
-- `--config`: Specify configuration file
-- `--debug`: Enable debug mode
-- `--no-voice`: Disable voice output
-- `--no-vision`: Disable vision processing
-
-## 🤝 Contributing
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/your-feature`
-3. Commit changes: `git commit -m 'Add your feature'`
-4. Push branch: `git push origin feature/your-feature`
-5. Submit a pull request
-
-## 🔬 Current Development Focus
-- Improved conversational memory
-- Enhanced AI reasoning
-- VR/AR integration
-- Continuous learning mechanisms
-
-## 📄 License
-MIT License
-
-## 🌟 Project Vision
-Sabrina AI aims to create a fully embodied, privacy-first AI assistant that seamlessly integrates with your digital and physical environment.
+MIT.

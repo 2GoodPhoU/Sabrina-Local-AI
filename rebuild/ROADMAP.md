@@ -6,7 +6,7 @@
 **Ambition:** Personal daily-driver. Windows. Local-first, Claude as the brain.
 **Strategy:** Build and prove each component in isolation before integrating. Every component gets a working implementation, a benchmarked alternative set, and a "garbage-removal" pass on the old code.
 
-> **Status:** MVP is alive. Voice loop with PTT + Claude/Ollama + sentence-streaming Piper TTS + SQLite memory (now with semantic retrieval) + vision attach + settings GUI. ~4,000 lines, 52 tests. See [`decisions/008-foundational-refactor-bundle.md`](decisions/008-foundational-refactor-bundle.md) for the latest (schema versioning + log redaction + rotating file sink); [`decisions/007-semantic-memory-shipped.md`](decisions/007-semantic-memory-shipped.md) for the previous component. Validated on Windows (i7-13700K/4080, Python 3.12) 2026-04-24: sqlite-vec loaded, first-audio 1.62s warm (post-migration DB had 4 msgs; retrieval exercised with thresholds temporarily loosened, then reverted).
+> **Status:** MVP is alive. Voice loop with PTT + Claude/Ollama + sentence-streaming Piper TTS + SQLite memory (semantic retrieval) + vision attach + settings GUI + barge-in (off by default pending validation). ~4,200 lines, 57 tests. See [`decisions/009-barge-in-shipped.md`](decisions/009-barge-in-shipped.md) for the latest (Silero VAD + CancelToken through Brain/Speaker); [`decisions/008-foundational-refactor-bundle.md`](decisions/008-foundational-refactor-bundle.md) for the prior refactor (schema versioning + log redaction + rotating file sink). Decision 007 validated on Windows (i7-13700K/4080, Python 3.12) 2026-04-24: sqlite-vec loaded, first-audio 1.62s warm. Decision 009 needs `rebuild/validate-barge-in.md` next.
 
 ---
 
@@ -145,28 +145,36 @@ destructive-action allow-list) still stands.
 | Custom "Sabrina" wake word? | Deferred with wake word itself. |
 | Piper voice choice | `libritts_r-medium` spk 0 picked; could A/B more speakers. |
 | PTT as fallback | ✅ Promoted to primary. |
+| Barge-in approach | ✅ Decided and shipped. Silero VAD + `CancelToken` through Brain/Speaker. [decision 009] |
 | Monthly budget target | Decided: $0 target, $10 warn, $100 ceiling. Tracker **not built yet**. |
 | Local-tier hardware | Decided: i7-13700K + RTX 4080 16GB + 32GB / Win11. [decision 001] |
-| **Component 5 focus — wake word or local VLM?** | **New, unresolved.** Decide next session. |
-| **Upgrade ASR to medium.en?** | **New, unresolved.** Trivial change, measurable impact. |
-| **Build brain router or skip?** | **New, unresolved.** ~200 lines; delivers offline-first mode. |
+| **Next infra vs. character step?** | **Unresolved.** Wake-word / supervisor on the infra path; personality / onboarding on the character path. Both plans are draft-complete. |
+| **Upgrade ASR to medium.en?** | **Unresolved.** Trivial config change, measurable impact. Recommendation attached in `drafts/asr-upgrade-plan.md`. |
+| **Build brain router or skip?** | **Unresolved.** ~200 lines; delivers offline-first mode. Recommendation attached in `drafts/router-plan.md`. |
 
 ---
 
 ## Next session — pick one
 
-Semantic memory shipped in this session (decision 007). Revised menu:
+Barge-in shipped this session (decision 009; in-tree, needs Windows
+validation). Menu post-009:
 
-1. **Barge-in (Silero VAD + cancellable TTS)** — closes the biggest
-   daily-driver gap. Prerequisite: cancel-token in the Brain protocol.
-2. **Wake word (openWakeWord)** — frees hands from PTT.
-3. **Local VLM fallback** — llava / Qwen2.5-VL / Moondream behind
-   the same `Message.images` interface. Privacy + offline.
-4. **Budget tracker + prompt caching** — small lift, immediate cost
+1. **Validate decision 009 on Windows** (`rebuild/validate-barge-in.md`).
+   Gating step before anything else ships — ship-one-validate-next.
+2. **Wake word (openWakeWord)** — infra path. Reuses the `AudioMonitor`
+   primitive from decision 009. Frees hands from PTT.
+3. **Supervisor + autostart** — infra path. OS-level process
+   management; no audio. Closes the last two daily-driver gaps along
+   with wake-word.
+4. **Personality calibration** — character path. Needs Eric input on the
+   "inferred vs. stated" voice block before any code lands.
+5. **Local VLM fallback** — llava / Qwen2.5-VL / Moondream behind the
+   same `Message.images` interface. Privacy + offline.
+6. **Budget tracker + prompt caching** — small lift, immediate cost
    reduction, observability win.
-5. **Summary compaction + semantic-memory GUI (007b)** — natural
-   follow-ups to this session. Long histories still grow unbounded;
-   the GUI doesn't expose the new semantic knobs yet.
+7. **Summary compaction + semantic-memory GUI (007b)** — natural
+   follow-ups to 007. Long histories still grow unbounded; the GUI
+   doesn't expose the semantic knobs yet.
 
 ---
 
@@ -177,13 +185,14 @@ Eric's stated goal is daily-driver. Honest gap list:
 - [ ] Wake word OR reliable global PTT hotkey
 - [ ] Auto-start on login (OS-level, not Python)
 - [ ] Crash-recovery supervisor
-- [ ] Barge-in (interrupt mid-reply)
+- [x] Barge-in (interrupt mid-reply) — shipped 2026-04-24, decision 009; enable via `[barge_in].enabled = true` after `validate-barge-in.md`.
 - [ ] Budget observability (`sabrina budget` command)
 - [ ] (nice-to-have) Avatar
 - [ ] (nice-to-have) Automation
 
-Four of those — wake-word/PTT, autostart, crash recovery, barge-in —
-are the real gap. The rest is polish or scope expansion.
+Three of those — wake-word/PTT, autostart, crash recovery — are the
+real remaining gap. Barge-in shipped 2026-04-24; the rest is polish or
+scope expansion.
 
 ---
 
@@ -207,8 +216,10 @@ aspirational (if/when we delete the old repo, this is the ledger).
 | `services/presence/` | ~2000 (17 modules) | Keep assets + animation manager for future avatar. |
 | Empty stubs + empty tests | 0 | Delete. |
 
-Rebuild is currently ~3,500 lines (source + tests). Target was under
-3K for MVP, under 6K for full feature parity. On track.
+Rebuild is currently ~4,200 lines (source + tests) through decision
+009. Target was under 3K for MVP, under 6K for full feature parity.
+On track; running ~70% of the 6K budget with 8 of 9 planned components
+shipped plus the foundational refactor and barge-in bonuses.
 
 ---
 
@@ -222,7 +233,7 @@ Rebuild is currently ~3,500 lines (source + tests). Target was under
    ✅ Held; `voice_loop.py` is our longest at ~300 lines.
 4. **Weekly dogfood.** 🟡 Just now started — dogfooding week begins.
 5. **Commits are atomic per component step.** ✅ Held.
-6. **Decisions log.** ✅ 001–006 written.
+6. **Decisions log.** ✅ 001–009 written.
 
 ---
 
@@ -238,11 +249,16 @@ Rebuild is currently ~3,500 lines (source + tests). Target was under
   PTT ──▶ Listener ──▶ Voice Loop ──▶ Brain ─── Claude
   (pynput) (whisper)   (asyncio)      │     └── Ollama
                           │           │
-             Vision ──────┤           └──▶ Memory (SQLite)
-             (mss+Claude) │           │
-                          ▼           ▼
+             Vision ──────┤           └──▶ Memory (SQLite + sqlite-vec
+             (mss+Claude) │                  + MiniLM-L6 semantic hits)
+                          ▼
                         Speaker ──▶ sounddevice
-                        (Piper / SAPI, sentence-streaming)
+                        (Piper / SAPI, sentence-streaming,
+                         cooperative CancelToken)
+                          │
+                          ▲
+  AudioMonitor ──▶ Silero VAD ──▶ CancelToken  (barge-in, during speaking)
+  (sounddevice)                   (Brain + Speaker)
                           │
                           ▼
                        Event Bus ──▶ State Machine
@@ -261,3 +277,4 @@ Rebuild is currently ~3,500 lines (source + tests). Target was under
 - [006 — End-of-night status](decisions/006-end-of-night-status.md)
 - [007 — Semantic memory shipped](decisions/007-semantic-memory-shipped.md)
 - [008 — Foundational refactor bundle shipped](decisions/008-foundational-refactor-bundle.md)
+- [009 — Barge-in shipped](decisions/009-barge-in-shipped.md)

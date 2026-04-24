@@ -115,5 +115,20 @@ max_distance = 0.5
 # surface stuff already in `load_recent`. Match it to load_recent above.
 min_age_turns = 20
 
+[barge_in]
+# Detect the user interrupting during a reply (Silero VAD) and cancel the
+# in-flight TTS + brain stream. See decision 009. Off by default until
+# validated on your mic/speaker setup (`rebuild/validate-barge-in.md`).
+enabled = false
+# Silero VAD threshold (0.0-1.0). Lower = more sensitive. Noisy rooms want 0.6-0.7.
+threshold = 0.5
+# Continuous speech duration (ms) before barge-in fires. Filters coughs + clicks.
+min_speech_ms = 300
+# Suppress detection for this many ms at the start of each speaking phase —
+# otherwise VAD trips on TTS onset bleeding into the mic.
+dead_zone_ms = 300
+# After interrupt, re-transcribe the captured audio and continue. False = go idle.
+continue_on_interrupt = true
+
 [logging]
 level = "INFO"

@@ -6,62 +6,66 @@ first. Then act.
 
 ## State of play
 
-Decision 007 (semantic memory) was validated on Windows earlier this
-session (first-audio 1.62s warm). Decision 008 (foundational refactor
-bundle) was shipped later the same session — `[schema].version` hook
-with empty migration chain + redacting structlog processor + 512-char
-value cap + rotating file sink at `logs/sabrina.log` (5 MB × 3). Tests
-were added but the code has NOT been smoke-tested end-to-end on Eric's
-Windows box yet. That's the first thing to do on return.
+Decisions 007 and 008 are validated and committed on this branch:
+
+- **007 (semantic memory)** — Windows-validated 2026-04-24, first-audio
+  1.62 s warm.
+- **008 (foundational refactor bundle)** — `[schema].version` hook +
+  redacting structlog processor + rotating file sink. Tests green
+  (52 passed); committed.
+
+**Decision 009 (barge-in)** is the current tip. Silero VAD + a
+`CancelToken` threading through `Brain.chat` and `Speaker.speak`,
+wired into the voice loop's speaking state with `pending_barge_audio`
+to hand the captured audio back to the next turn. Five new unit tests
+(57 total; suite green in ~3 s). **Not yet end-to-end validated on
+real hardware** — `[barge_in].enabled` ships as `false` until the
+`rebuild/validate-barge-in.md` procedure passes.
 
 ## First-time-you-sit-down sequence
 
-**Step 1 — Verify decision 008 in-repo.** From `sabrina-2/`:
+**Step 1 — Smoke 009 in-repo.** From `sabrina-2/`:
 
 ```powershell
-uv run pytest -q
-uv run sabrina voice   # briefly; Ctrl+C
-Test-Path .\logs\sabrina.log
-Get-Content .\logs\sabrina.log -Tail 5
+uv sync                        # picks up silero-vad>=5.1
+uv run pytest -q               # expect 57 passed, 0 skipped
 ```
 
-Expected: tests pass (52 now; was 48), voice loop starts, log file
-exists and contains JSON-per-line events. Bonus spot check: if any
-line contains `api_key` as a key, its value should be `***REDACTED***`.
+If pytest passes, the code is sound. If anything fails, skip to the
+"If 009 smoke fails" table at the bottom.
 
-If anything fails, see "If decision 008 validation fails" at the
-bottom.
-
-**Step 2 — Commit 008 once green.** The code landed this session but
-hasn't been committed yet (Eric wasn't at the keyboard).
+**Step 2 — Commit 009.** Bundle the barge-in files + the doc updates:
 
 ```powershell
-git add src/sabrina/config.py src/sabrina/logging.py src/sabrina/memory/embed.py sabrina.toml tests/test_smoke.py ..\rebuild\decisions\008-foundational-refactor-bundle.md ..\rebuild\ROADMAP.md ..\rebuild\when-you-return.md
+git add src/sabrina/brain/protocol.py src/sabrina/brain/claude.py src/sabrina/brain/ollama.py `
+        src/sabrina/speaker/protocol.py src/sabrina/speaker/piper.py src/sabrina/speaker/sapi.py `
+        src/sabrina/listener/vad.py src/sabrina/listener/__init__.py `
+        src/sabrina/voice_loop.py src/sabrina/events.py src/sabrina/config.py `
+        sabrina.toml pyproject.toml uv.lock tests/test_smoke.py `
+        ..\rebuild\decisions\009-barge-in-shipped.md ..\rebuild\ROADMAP.md ..\rebuild\when-you-return.md
 git status   # verify — nothing else unexpected
-git commit --no-verify -m "feat(refactor): schema version + log redaction + rotating file sink (decision 008)"
+git commit --no-verify -m "feat: barge-in (Silero VAD + CancelToken through Brain/Speaker) — decision 009"
 ```
 
-`--no-verify` because `pre-commit` isn't installed in the venv yet —
-noted as a thin spot; cheap fix is `uv add --dev pre-commit && uv run
-pre-commit install`.
+**Step 3 — Validate 009 on real hardware.** Run
+`rebuild/validate-barge-in.md` top-to-bottom. Nine steps, each with a
+success signal and a failure-triage row. If all green, bump the
+`ROADMAP.md` "Status" line per the doc's final section and commit
+(`validate: barge-in on Windows (M ms cut, T threshold)`).
 
-**Step 3 — Delete the now-stale contingency draft.** `rebuild/drafts/
-008-sqlite-vec-on-windows.md` was a pre-written fallback in case
-`enable_load_extension` was missing on Eric's Python. Validation went
-green on 2026-04-24, so its own header says "delete this file."
+If validation uncovers a bug that's not worth its own decision (e.g.
+cancel-token check too coarse in Piper), fix in-place and annotate the
+decision 009 doc with a "validation revealed X, fixed in commit Y"
+footnote. Anti-sprawl.
 
-```powershell
-Remove-Item ..\rebuild\drafts\008-sqlite-vec-on-windows.md
-```
+**Step 4 — Pick next component.** Menu from decision 009's tail:
 
-**Step 4 — Pick next component.** Natural ordering from the master
-index (unchanged from last session's menu):
-
-- **Infra-first path:** barge-in → wake-word → supervisor+autostart.
-  Shared `AudioMonitor` primitive between barge-in and wake-word is
-  why they belong adjacent.
-- **Character-first path:** personality → onboarding. Lock in voice +
-  first-run state machine before the avatar arc starts.
+- **Infra-first path:** wake-word → supervisor+autostart. Wake-word
+  reuses the `AudioMonitor` primitive shipped this session; supervisor
+  is OS-level, no audio.
+- **Character-first path:** personality → onboarding. Lock voice before
+  the avatar arc. Personality plan's "inferred vs. stated" section
+  needs Eric input before any code lands.
 
 Don't prescribe. Ask Eric which path; both are ready.
 
@@ -85,57 +89,68 @@ anti-sprawl premise and decision-doc tone rather than stated by Eric.
 Calibrate that section with Eric before shipping — upstream of every
 brain prompt and the avatar cue track, so drift here is expensive.
 
-## Thin spots from decision 008 worth tracking
+## Thin spots from decision 009 worth tracking
 
-- `pre-commit` hook not installed in venv (bypassed with
-  `--no-verify`). Cheap fix as above.
-- `Settings.model_config` still has `extra="ignore"`; the audit
-  recommended flipping to `"allow"` + warn-log. Deferred to the first
-  deprecation that needs it.
-- `memory/embed.py` previously emitted a `FutureWarning` about the
-  sentence-transformers rename. Fixed in this session (switched to
-  `hasattr` so we never touch the deprecated attribute on modern
-  installs); unrelated to the bundle but tiny and safe to bundle with
-  or ship separately.
-- GUI will auto-render the new `[schema]` section as a tab next time
-  `gui/settings.py` is edited — needs an explicit blacklist entry.
+- **No log-and-degrade for silero-vad import.** A broken install crashes
+  the voice loop on first speaking phase. Mirror semantic memory's
+  `_try_enable_vec` graceful-degrade pattern.
+- **`AudioMonitor` captures TTS bleed before user speech.** On
+  `continue_on_interrupt`, whatever audio was buffered (potentially
+  including Sabrina's own voice) gets re-transcribed. Whisper usually
+  handles it, but on a speakerphone setup it's garbage. Trim-to-VAD-start
+  or document "headset required" based on what validation shows.
+- **No per-frame VAD probability logging.** Tuning `threshold` during
+  step 7 of the validation is blind without a DEBUG path that logs
+  `vad.prob`. Trivial addition.
+- **Speaker cancellation granularity is per-sentence.** If Piper is mid-
+  synth on a long sentence, the cancel has to wait for synth to finish
+  before stop() can interrupt playback. ~1 s worst case.
+- `pre-commit` hook not installed in venv (still bypassed with
+  `--no-verify`). Cheap fix: `uv add --dev pre-commit && uv run
+  pre-commit install`.
 
-## If decision 008 validation fails
+## If 009 smoke fails
 
 | Symptom | Likely cause | What to check |
 |---|---|---|
-| `test_schema_version_present_and_current` fails | TOML `[schema]` block not picked up by pydantic-settings, or `SchemaConfig` default drifted from `CURRENT_SCHEMA_VERSION` | `uv run sabrina config-show \| findstr schema`; should print the block. Python attribute is `settings.schema_` with `alias="schema"` on the Field — `BaseSettings` parent still reserves `schema`, so the trailing underscore is required to suppress the UserWarning. |
-| `test_logging_redacts_known_secrets` fails | Processor not registered, or event_dict mutation order changed | Read `logging.py`; check that `redact_secrets` is in the `structlog.configure(processors=...)` list. |
-| `test_logging_file_sink_writes` fails (no file) | `setup_logging` didn't create `logs/`; dir permissions on `tmp_path` | `mkdir` logic in `setup_logging` line ~130. |
-| `test_logging_file_sink_writes` fails (file empty) | Tee processor didn't fire, or file handler didn't flush | Confirm `_make_file_tee` is in the chain **before** `ConsoleRenderer`. |
-| Voice loop crashes at startup | Circular import (config → settings_io → config) | `apply_migrations` imports `settings_io` lazily; verify. |
-| Fresh `logs/sabrina.log` file never gets written at runtime | Root logger handlers cleared without re-attach | `setup_logging`'s handler clear-and-add block. |
+| `ImportError: silero_vad` during pytest collection | `uv sync` skipped the dep | `uv pip list \| findstr silero` |
+| `test_cancel_token_*` fails | Protocol addition regressed | Diff `brain/protocol.py` against decision 009 doc |
+| `test_vad_state_machine_ignores_below_min_speech_ms` fails | Speech-samples reset logic broken in `SileroVAD.feed` | Re-read `listener/vad.py:80-100` |
+| Voice loop crashes on start with barge-in off | Import-time side effect in `listener/vad.py` | Lazy-load `silero_vad` inside `_ensure_loaded` only |
+| `uv run pytest` uses wrong venv | Windows console-script stub baked in old path | `Remove-Item .venv -Recurse -Force; uv sync` |
 
 ## Where everything lives
 
 ```
 rebuild/
 ├── ROADMAP.md                              # roadmap + progress-at-a-glance
-├── decisions/001–008-*.md                  # shipped decisions
+├── decisions/001–009-*.md                  # shipped decisions
 ├── validate-*.md                           # per-component Windows validation procedures
 ├── drafts/
 │   ├── remaining-components-plan.md        # master planning index
 │   ├── *-plan.md                           # per-component plans
-│   ├── avatar-animation-graph.svg
-│   └── old-repo-migration-audit.md
+│   └── avatar-animation-graph.svg
+sabrina-2/
+├── README.md                               # current-state README (read this before diving)
+├── src/sabrina/                            # the code
+└── tests/test_smoke.py                     # all 57 tests
+CLAUDE.md                                   # Claude-agent bootstrap (repo root)
 ```
 
 ## If you're a new Claude assistant reading this
 
-1. Read the memory index (`MEMORY.md`) and the files it links.
-2. Read `rebuild/drafts/remaining-components-plan.md` — the master
-   index.
-3. Follow Eric's working style below. Don't ask him to re-explain
-   context that's in memory or the master index.
+1. Read `CLAUDE.md` at the repo root first — it has the short-form
+   bootstrap, working-style cues, and pointers to everything else.
+2. Read the memory index (`MEMORY.md`) and the files it links.
+3. Read `sabrina-2/README.md` for the current-state component snapshot.
+4. Read `rebuild/drafts/remaining-components-plan.md` for the master
+   planning index.
+5. Don't ask Eric to re-explain context that's in memory, `CLAUDE.md`,
+   or the master index.
 
 ## Working-style reminders
 
-- **Decision doc per shipped component.** Match the voice of 002–008:
+- **Decision doc per shipped component.** Match the voice of 002–009:
   terse prose, bullets sparingly, "thin spots" section at end,
   alternatives-to-research list.
 - **Anti-sprawl.** No new abstraction until the second caller exists.
@@ -146,8 +161,8 @@ rebuild/
   before Eric calls it done on Windows.
 - **Recommendations-attached pattern** for drafts with open questions
   — rationale + override path makes review cheap.
-- **Additive protocol extensions** over new protocols — `Message.images`
-  and `system_suffix` are the patterns.
+- **Additive protocol extensions** over new protocols — `Message.images`,
+  `system_suffix`, and now `cancel_token` are the patterns.
 - **Memory guardrails.** Don't save code patterns, git history, or
   conventions derivable from the repo. Do save surprises, corrections,
   and validated non-obvious calls.

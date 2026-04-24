@@ -1,5 +1,17 @@
 # Sabrina AI Project Roadmap
 
+> **⚠️ Legacy document — pre-rebuild.** This file describes the
+> original Sabrina project's phased plan, which was abandoned in favor
+> of the component-first rebuild under [`sabrina-2/`](../sabrina-2/).
+>
+> For the **current** roadmap, read
+> [`../rebuild/ROADMAP.md`](../rebuild/ROADMAP.md). It tracks which of
+> the 0–9 components have shipped, what's drafted, and the
+> "pick one" menu for the next session.
+>
+> This legacy file is preserved for historical reference and will be
+> removed when the rebuild hits feature parity.
+
 ## Project Vision
 Sabrina AI aims to create a comprehensive, privacy-focused AI assistant that evolves from a basic interaction tool to a fully embodied, intelligent companion.
 

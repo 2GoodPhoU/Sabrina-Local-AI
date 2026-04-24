@@ -55,25 +55,25 @@ onnxruntime transitive. `uv.lock` mtime bumps.
 uv run pytest -q
 ```
 
-**Success:** all existing tests still pass (70+ from decision 007), plus
-the new barge-in block — roughly 6–8 new tests:
+**Success:** all existing tests still pass (57 shipped up through
+decision 008: 48 base + 4 bundle + 5 barge-in = 57), plus the new
+barge-in block already mixed into that count:
 
 - `test_cancel_token_basic`
 - `test_cancel_token_propagates_through_stub_brain`
 - `test_cancel_token_stops_stub_speaker`
 - `test_vad_state_machine_ignores_below_min_speech_ms`
-- `test_vad_fires_on_sustained_speech` (may skip if silero-vad isn't
-  importable at collection time — that's OK via `pytest.importorskip`)
-- `test_voice_loop_interrupt_stops_reply_and_captures_audio`
+- `test_vad_fires_on_sustained_speech` (both VAD tests mock the Silero
+  model so they don't require onnxruntime to run; this keeps the suite
+  fast and deterministic)
 
-Wall time under ~6 s.
+Wall time under ~6 s. The original plan listed a 6th integration test
+(`test_voice_loop_interrupt_stops_reply_and_captures_audio`) — dropped in
+favor of the manual end-to-end smoke in steps 5–8 below; unit-mocking the
+full voice-loop-state-machine interplay would have added more brittleness
+than confidence.
 
-**Failure signal A — skips on the VAD-gated tests.** `pytest -q -rs`
-will show the skip reason. If it's `silero-vad not importable`, step 0
-should have caught it — re-check. If it's something else, capture.
-**Failure signal B — real assertion failures.** Capture the full
-traceback, especially on `test_voice_loop_interrupt_stops_reply_and_captures_audio`
-(the tricky integration test).
+**Failure signal:** real assertion failures. Capture the full traceback.
 
 ---
 

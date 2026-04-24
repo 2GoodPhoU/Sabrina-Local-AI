@@ -90,6 +90,15 @@ class SpeakAborted(_EventBase):
     reason: str
 
 
+# --- Barge-in events ---
+
+
+class BargeInDetected(_EventBase):
+    """VAD fired during speaking; brain stream + TTS were cancelled."""
+
+    kind: Literal["barge_in_detected"] = "barge_in_detected"
+
+
 # Union of all events. Add to this list when adding an event type.
 Event = (
     UserMessage
@@ -101,4 +110,5 @@ Event = (
     | SpeakStarted
     | SpeakFinished
     | SpeakAborted
+    | BargeInDetected
 )

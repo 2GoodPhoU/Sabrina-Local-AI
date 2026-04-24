@@ -930,3 +930,153 @@ def test_logging_file_sink_writes(tmp_path):
                 pass
 
 
+# --- decision 009: barge-in ---
+
+
+def test_cancel_token_basic():
+    # Monotonic boolean flag. `.cancel()` sticks; `.cancelled` reports truthfully.
+    from sabrina.brain.protocol import CancelToken
+
+    t = CancelToken()
+    assert t.cancelled is False
+    t.cancel()
+    assert t.cancelled is True
+    # Idempotent — calling cancel twice is a no-op, not an error.
+    t.cancel()
+    assert t.cancelled is True
+
+
+async def test_cancel_token_propagates_through_stub_brain():
+    # Stub brain that yields deltas until the token trips, then emits a
+    # final Done. Confirms the protocol contract: "check between yields;
+    # bail promptly with stop_reason='cancelled'."
+    from collections.abc import AsyncIterator
+
+    from sabrina.brain.protocol import (
+        CancelToken,
+        Done,
+        Message,
+        StreamEvent,
+        TextDelta,
+    )
+
+    class StubBrain:
+        name = "stub"
+
+        async def chat(
+            self,
+            messages: list[Message],
+            *,
+            system: str | None = None,
+            max_tokens: int | None = None,
+            cancel_token: CancelToken | None = None,
+        ) -> AsyncIterator[StreamEvent]:
+            for i in range(5):
+                if cancel_token is not None and cancel_token.cancelled:
+                    yield Done(stop_reason="cancelled")
+                    return
+                yield TextDelta(text=f"chunk{i} ")
+            yield Done(stop_reason="end_turn")
+
+    token = CancelToken()
+    brain = StubBrain()
+    events: list[StreamEvent] = []
+    async for ev in brain.chat([], cancel_token=token):
+        events.append(ev)
+        if isinstance(ev, TextDelta) and ev.text == "chunk1 ":
+            token.cancel()
+
+    # We should see chunk0, chunk1, then Done(cancelled). No chunk2+.
+    texts = [e.text for e in events if isinstance(e, TextDelta)]
+    assert texts == ["chunk0 ", "chunk1 "]
+    done = [e for e in events if isinstance(e, Done)]
+    assert len(done) == 1
+    assert done[0].stop_reason == "cancelled"
+
+
+async def test_cancel_token_stops_stub_speaker():
+    # Stub speaker that loops sleeping-and-checking. Cancelling the token
+    # must break its loop within a bounded time; verify the polling
+    # pattern the real speakers use actually works.
+    import asyncio as _asyncio
+
+    from sabrina.brain.protocol import CancelToken
+    from sabrina.speaker.protocol import SpeakResult
+
+    class StubSpeaker:
+        name = "stub"
+
+        async def speak(
+            self,
+            text: str,
+            *,
+            voice: str | None = None,
+            cancel_token: CancelToken | None = None,
+        ) -> SpeakResult:
+            # Simulate chunked playback. Check the token between chunks.
+            for _ in range(50):  # would take 5s if we waited
+                if cancel_token is not None and cancel_token.cancelled:
+                    break
+                await _asyncio.sleep(0.01)
+            return SpeakResult(engine=self.name, duration_s=0.0)
+
+        async def stop(self) -> None:
+            return None
+
+    token = CancelToken()
+    sp = StubSpeaker()
+    # Cancel 30ms in; speak should return promptly after the next chunk check.
+    task = _asyncio.create_task(sp.speak("hello", cancel_token=token))
+    await _asyncio.sleep(0.03)
+    token.cancel()
+    result = await _asyncio.wait_for(task, timeout=0.5)
+    assert result.engine == "stub"
+
+
+def test_vad_state_machine_ignores_below_min_speech_ms(monkeypatch):
+    # Feed a burst of "speech" shorter than min_speech_ms, then silence.
+    # VAD should never fire. Mocks the model so the test doesn't require
+    # loading Silero's ONNX weights — isolates the state-machine logic.
+    import numpy as np
+
+    from sabrina.listener.vad import SileroVAD, _FRAME_SAMPLES
+
+    class _Prob:
+        def __init__(self, v: float) -> None:
+            self._v = v
+
+        def item(self) -> float:
+            return self._v
+
+    vad = SileroVAD(threshold=0.5, min_speech_ms=300)
+    # 300 ms at 16 kHz = 4800 samples = ~9.4 frames of 512. So we need
+    # 10+ consecutive high-prob frames to fire.
+    probs = iter([0.9, 0.9, 0.9, 0.1] * 10)  # bursts of 3 high then silence
+    vad._model = lambda _frame, _sr: _Prob(next(probs))
+
+    # Feed 12 frames — speech-silence-speech-silence pattern means each
+    # burst is only 3 frames before resetting. Never reaches 10 in a row.
+    samples = np.ones(_FRAME_SAMPLES * 12, dtype=np.float32)
+    assert vad.feed(samples) is False
+
+
+def test_vad_fires_on_sustained_speech(monkeypatch):
+    # Same rig, but the model returns high prob for long enough to clear
+    # min_speech_ms. Confirms the gate actually opens on sustained speech.
+    import numpy as np
+
+    from sabrina.listener.vad import SileroVAD, _FRAME_SAMPLES
+
+    class _Prob:
+        def __init__(self, v: float) -> None:
+            self._v = v
+
+        def item(self) -> float:
+            return self._v
+
+    vad = SileroVAD(threshold=0.5, min_speech_ms=300)
+    vad._model = lambda _frame, _sr: _Prob(0.95)  # always "speech"
+
+    # 15 frames of constant speech — well past the 10-frame / 300 ms gate.
+    samples = np.ones(_FRAME_SAMPLES * 15, dtype=np.float32)
+    assert vad.feed(samples) is True

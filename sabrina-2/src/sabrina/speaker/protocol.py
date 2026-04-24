@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from sabrina.brain.protocol import CancelToken
+
 
 @dataclass(frozen=True, slots=True)
 class SpeakResult:
@@ -24,10 +26,19 @@ class Speaker(Protocol):
 
     name: str  # e.g. "piper:en_US-amy-medium"
 
-    async def speak(self, text: str, *, voice: str | None = None) -> SpeakResult:
+    async def speak(
+        self,
+        text: str,
+        *,
+        voice: str | None = None,
+        cancel_token: CancelToken | None = None,
+    ) -> SpeakResult:
         """Synthesize `text` and play it. Returns after playback finishes.
 
         Cancellation (asyncio.CancelledError) must stop playback promptly.
+        If ``cancel_token`` is provided and fires during playback,
+        implementations should stop playback and return a best-effort
+        ``SpeakResult`` with whatever duration/samples elapsed before cancel.
         """
         ...
 

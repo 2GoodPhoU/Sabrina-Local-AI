@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 import sounddevice as sd
 
+from sabrina.brain.protocol import CancelToken
 from sabrina.logging import get_logger
 from sabrina.speaker.protocol import SpeakResult
 
@@ -27,6 +28,33 @@ log = get_logger(__name__)
 
 class PiperNotInstalled(RuntimeError):
     pass
+
+
+async def _poll_and_stop(token: CancelToken, speaker: "PiperSpeaker") -> None:
+    """Poll a CancelToken every ~30ms; call speaker.stop() when it fires.
+
+    Lives at module scope (vs. inline in speak()) so it's unit-testable.
+    Shared by both Piper and SAPI; the 8-line duplication is smaller than
+    introducing a new shared module purely for this helper.
+    """
+    try:
+        while not token.cancelled:
+            await asyncio.sleep(0.03)
+        await speaker.stop()
+    except asyncio.CancelledError:
+        # Expected teardown path when speak() finishes normally.
+        raise
+
+
+async def _cleanup_poll_task(task: "asyncio.Task[None] | None") -> None:
+    """Cancel and drain the cancel-token poll task. Swallows CancelledError."""
+    if task is None:
+        return
+    task.cancel()
+    try:
+        await task
+    except (asyncio.CancelledError, Exception):
+        pass
 
 
 class PiperSpeaker:
@@ -85,11 +113,24 @@ class PiperSpeaker:
                 )
         return json.loads(cfg.read_text(encoding="utf-8"))
 
-    async def speak(self, text: str, *, voice: str | None = None) -> SpeakResult:
+    async def speak(
+        self,
+        text: str,
+        *,
+        voice: str | None = None,
+        cancel_token: CancelToken | None = None,
+    ) -> SpeakResult:
         if not text.strip():
             return SpeakResult(
                 engine=self.name, duration_s=0.0, sample_rate=self._sample_rate
             )
+
+        # Spawn a background poller that calls self.stop() as soon as the
+        # cancel_token is tripped. Cheap — one asyncio task per speak() call
+        # that sleeps 30ms between checks. Torn down in `finally`.
+        poll_task: asyncio.Task[None] | None = None
+        if cancel_token is not None:
+            poll_task = asyncio.create_task(_poll_and_stop(cancel_token, self))
 
         start = time.monotonic()
         args = [
@@ -123,8 +164,19 @@ class PiperSpeaker:
         audio = np.frombuffer(stdout, dtype=np.int16)
         if audio.size == 0:
             log.warning("piper.empty_output", text=text[:60])
+            await _cleanup_poll_task(poll_task)
             return SpeakResult(
                 engine=self.name, duration_s=0.0, sample_rate=self._sample_rate
+            )
+
+        # If cancel fired before playback started, skip it.
+        if cancel_token is not None and cancel_token.cancelled:
+            await _cleanup_poll_task(poll_task)
+            return SpeakResult(
+                engine=self.name,
+                duration_s=time.monotonic() - start,
+                sample_rate=self._sample_rate,
+                samples=int(audio.size),
             )
 
         try:
@@ -135,6 +187,8 @@ class PiperSpeaker:
         except asyncio.CancelledError:
             sd.stop()
             raise
+        finally:
+            await _cleanup_poll_task(poll_task)
 
         return SpeakResult(
             engine=self.name,

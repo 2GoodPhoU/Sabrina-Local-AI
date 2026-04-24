@@ -1,5 +1,20 @@
 # Sabrina AI - LLM Integration Guide
 
+> **⚠️ Legacy document — pre-rebuild.** Describes the LLM integration
+> surface of the original Sabrina codebase (`core/llm_input_framework.py`,
+> etc.). The rebuild replaces that ~1000-line framework with the 50-line
+> `Brain` protocol in [`../sabrina-2/src/sabrina/brain/protocol.py`](../sabrina-2/src/sabrina/brain/protocol.py).
+>
+> For the **current** LLM integration, read:
+> - `Brain` protocol: [`../sabrina-2/src/sabrina/brain/protocol.py`](../sabrina-2/src/sabrina/brain/protocol.py)
+> - Claude backend: [`../sabrina-2/src/sabrina/brain/claude.py`](../sabrina-2/src/sabrina/brain/claude.py)
+> - Ollama backend: [`../sabrina-2/src/sabrina/brain/ollama.py`](../sabrina-2/src/sabrina/brain/ollama.py)
+> - Decision 003: [`../rebuild/decisions/003-voice-loop-shipped.md`](../rebuild/decisions/003-voice-loop-shipped.md)
+>   — the "why" behind the new protocol.
+>
+> This legacy file is preserved for historical reference and will be
+> removed when the rebuild hits feature parity.
+
 This guide explains how to integrate large language models (LLMs) with Sabrina AI's core systems, enabling powerful AI-driven capabilities while maintaining local execution and privacy.
 
 ## Table of Contents
