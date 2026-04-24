@@ -1,0 +1,113 @@
+# Sabrina AI - main configuration.
+# Environment variables override these. Format: SABRINA_<SECTION>__<KEY>
+# Secrets (API keys) go in .env, not here.
+
+[brain]
+# Which brain to use by default. "claude" | "ollama"
+default = "claude"
+
+[brain.claude]
+model = "claude-sonnet-4-6"
+fast_model = "claude-haiku-4-5-20251001"
+max_tokens = 1024
+
+[brain.ollama]
+host = "http://localhost:11434"
+model = "qwen2.5:14b"
+fast_model = "qwen2.5:7b"
+
+[tts]
+# Default speaker engine. "piper" | "sapi"
+default = "piper"
+
+# Output audio device. null = system default. Use `sabrina test-audio` to list.
+# Either integer index or name substring (matched case-insensitively).
+output_device = ""
+
+[tts.piper]
+# Path to the piper.exe binary. Leave blank to auto-discover on PATH.
+binary = ""
+# Path to the voice model .onnx file. Relative paths resolve to project root.
+# libritts_r is a multi-speaker model; Piper defaults to speaker 0, which is
+# Sabrina's chosen voice. Change `speaker_id` below to pick a different one.
+voice_model = "voices/en_US-libritts_r-medium.onnx"
+# For multi-speaker models only. 0 is the first speaker; leave null for
+# single-speaker voices like amy/lessac.
+speaker_id = 0
+# Speed multiplier: 1.0 = default. 0.9 = slightly slower, more natural.
+length_scale = 1.0
+
+[tts.sapi]
+# Voice name substring (case-insensitive). Empty = system default (Zira / David).
+voice = ""
+# Words per minute. SAPI's native baseline is ~200. Range roughly 35-365.
+rate = 200
+
+[asr]
+# Only one backend shipped today; the field is here for future alternatives.
+default = "faster-whisper"
+# Input audio device. null = system default. Use `sabrina test-audio` to list.
+input_device = ""
+
+[asr.faster_whisper]
+# Model size. tiny | base | small | medium | large-v3. Append .en for
+# English-only models (smaller + faster on English speech).
+# First use downloads the model to the HF cache.
+#   tiny.en    ~75 MB    fastest, noticeably worse
+#   base.en   ~140 MB    good default
+#   small.en  ~460 MB    better accuracy, 2-3x slower than base
+#   medium.en ~1.5 GB    near-human WER on clean audio
+model = "base.en"
+# "cuda" targets GPU 0; "cpu" works everywhere; "auto" picks cuda if available.
+device = "auto"
+# int8_float16 is the speed/quality sweet spot on RTX 4080.
+# Use "float16" for max quality, "int8" for CPU-only runs.
+compute_type = "float16"
+# 1 = greedy (fastest), 5 = OpenAI default.
+beam_size = 5
+# ISO-639-1 code; empty string = auto-detect (costs ~50 ms on short clips).
+language = "en"
+
+[vision]
+# How the user invokes "look at my screen" from the voice loop.
+# "voice_phrase" | "hotkey" | "both" | "off"
+trigger = "both"
+# Hotkey binding (pynput GlobalHotKeys syntax).
+hotkey = "<ctrl>+<shift>+v"
+# Claude model for vision turns. Empty = use brain.claude.fast_model.
+model = ""
+# mss monitor index: 0 = all monitors combined, 1 = primary, 2+ = extras.
+monitor = 1
+# Longest-edge pixel cap for screenshot downscaling. 0 = send at native resolution.
+# Claude's vision sweet spot is ~1500-1600 px on the long edge.
+max_edge_px = 1568
+
+[memory]
+# Persist conversation across restarts into a local SQLite file.
+enabled = true
+# Relative paths resolve to the project root.
+db_path = "data/sabrina.db"
+# How many past messages to preload into context on startup.
+# Dangling assistant replies are trimmed; real context ends up <= this.
+load_recent = 20
+
+[memory.semantic]
+# Retrieval-augmented memory. When on, each user turn is embedded and
+# the top-k most relevant *older* turns get injected into the system
+# prompt. Off by default until you've run `sabrina memory-reindex`.
+enabled = true
+# Sentence-transformers model. The default is all-MiniLM-L6-v2 (384 dims,
+# ~80 MB). If you change this, run `sabrina memory-reindex --drop` to
+# rebuild the index with the new dim.
+embedding_model = "sentence-transformers/all-MiniLM-L6-v2"
+# How many retrieved turns to inject per user message.
+top_k = 5
+# Cosine distance cutoff. 0 = identical, 1 = orthogonal. 0.5 = "meaningfully
+# related", 0.35 = "closely related". Raise if recall feels thin.
+max_distance = 0.5
+# Exclude the N most-recent turns from semantic results so we don't
+# surface stuff already in `load_recent`. Match it to load_recent above.
+min_age_turns = 20
+
+[logging]
+level = "INFO"

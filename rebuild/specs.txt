@@ -1,0 +1,49 @@
+=== SABRINA AI SPECS PROBE ===
+Generated: 2026-04-22 20:06:51
+
+--- Operating System ---
+OS:           Microsoft Windows 11 Pro (64-bit)
+Version:      10.0.26200 / Build 26200
+Install date: 08/28/2025 13:07:37
+
+--- CPU ---
+Model:        13th Gen Intel(R) Core(TM) i7-13700K
+Cores:        16 physical / 24 logical
+Max clock:    3.4 GHz
+
+--- Memory ---
+Total RAM:    31.8 GB
+Speed(s):     6000 MT/s
+Sticks:       2
+
+--- GPU (WMI) ---
+Name:         NVIDIA GeForce RTX 4080
+VRAM (WMI):   4 GB  (WMI caps around 4GB; see nvidia-smi below)
+Driver:       32.0.15.9186
+Resolution:   3840 x 2160
+
+Name:         Intel(R) UHD Graphics 770
+VRAM (WMI):   2 GB  (WMI caps around 4GB; see nvidia-smi below)
+Driver:       32.0.101.7082
+Resolution:   2560 x 1440
+
+--- GPU (nvidia-smi) ---
+name, memory.total [MiB], memory.free [MiB], driver_version
+NVIDIA GeForce RTX 4080, 16376 MiB, 13414 MiB, 591.86
+
+--- Disks ---
+C:  930.6 GB total / 297.7 GB free
+
+--- Audio devices ---
+- Realtek High Definition Audio  [OK]
+- USB Audio Device  [OK]
+- USB Audio Device  [OK]
+- NVIDIA High Definition Audio  [OK]
+- NVIDIA Virtual Audio Device (Wave Extensible) (WDM)  [OK]
+
+--- Relevant tooling ---
+python:       Python 3.10.11  @ C:\Users\erics\.pyenv\pyenv-win\shims\python.bat
+python3:
+uv:           not installed
+ollama:       not installed
+git:          git version 2.43.0.windows.1
