@@ -533,3 +533,137 @@ None. `pywin32` already in deps. Memory/embedder already present.
 - Tool streaming (some tools might stream partial results; not needed
   for the initial three).
 - GUI surface for tool invocations.
+
+## MCP compatibility (added 2026-04-25 per overnight research)
+
+The April 2026 stack survey found MCP has won as the cross-vendor
+standard for tool surfaces (Anthropic, OpenAI, Google DeepMind, Microsoft
+Copilot all consume MCP-defined tools natively; 97 M installs by March
+2026 per Anthropic's own blog; see
+`rebuild/drafts/research/2026-04-25-stack-alternatives-survey.md`
+section 9). This plan ships Anthropic native first (Q2 above) — that
+hasn't changed. What this section adds: a deliberate "design once, swap
+transport later" check so v1's tool surface translates to MCP without a
+schema rewrite when we move tools out-of-process.
+
+### What's already MCP-compatible
+
+- **JSON Schema for `input_schema`.** MCP's `inputSchema` field uses the
+  same JSON Schema draft. No change.
+- **Sequential dispatch.** MCP is request/response per tool call;
+  parallel-execution is out of scope (matches "Out:" above). No change.
+- **`BUILTIN_TOOLS` registry.** MCP servers expose `list_tools`; our
+  `BUILTIN_TOOLS` list is the local equivalent. The data structures
+  line up.
+- **`CancelToken` semantics.** MCP defines cancellation via the
+  `notifications/cancelled` JSON-RPC method. Our token sets a flag the
+  loop polls; an MCP transport adapter would translate that into the
+  notification. No protocol-shape change required.
+
+### What diverges (and the trivial change to fix)
+
+1. **Field naming: `input_schema` (snake_case) vs `inputSchema` (camelCase).**
+   MCP's wire format is camelCase. Internally we keep snake_case
+   (Pythonic). Add `ToolSpec.to_mcp_dict()` and `ToolSpec.to_anthropic_dict()`
+   helpers so serialization is per-transport without changing the Python
+   surface. Cost: ~10 lines.
+
+2. **Tool result shape: free-form `Any` vs typed `content[]` blocks.**
+   Today's plan has handlers return `Any` and Claude's `tool_result`
+   takes whatever (auto-serialized). MCP requires:
+   ```json
+   {"content": [{"type": "text", "text": "..."}], "isError": false}
+   ```
+   Trivial fix: wrap any non-list handler return as
+   `[{"type": "text", "text": json.dumps(result)}]` at the transport
+   boundary. Don't change handler signatures; the wrapping lives in the
+   adapter. Cost: ~15 lines (one helper, used in both Anthropic + future
+   MCP paths).
+
+3. **Error shape: `error: str | None` vs `isError: bool` + error text in
+   content.** `ToolUseDone.error` already carries the string. Add an
+   `is_error` property = `error is not None`. The MCP adapter sets
+   `isError = is_error` and puts the error string into a text content
+   block. The Anthropic adapter does the same with `is_error=True` on
+   the tool_result content block (it already accepts that). Cost: ~5
+   lines.
+
+### Concrete protocol delta vs the spec above
+
+```python
+# brain/protocol.py (additive, MCP-friendly)
+
+@dataclass(frozen=True, slots=True)
+class ToolSpec:
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+    handler: Callable[..., Awaitable[Any]]
+
+    def to_mcp_dict(self) -> dict:
+        """Serialize for MCP's `tools/list` response (camelCase wire format)."""
+        return {
+            "name": self.name,
+            "description": self.description,
+            "inputSchema": self.input_schema,
+        }
+
+    def to_anthropic_dict(self) -> dict:
+        """Serialize for Anthropic native tool-use API (snake_case)."""
+        return {
+            "name": self.name,
+            "description": self.description,
+            "input_schema": self.input_schema,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ToolUseDone:
+    tool_id: str
+    name: str
+    result: Any
+    error: str | None = None
+
+    @property
+    def is_error(self) -> bool:
+        return self.error is not None
+```
+
+These are the only schema-level changes needed for MCP-readiness. The
+transport (HTTP+JSON-RPC vs in-process) is purely an adapter swap when
+the time comes. No internal call sites change.
+
+### What this rules out vs. what it doesn't
+
+**Rules out:** silently picking a non-MCP tool surface for v1 and then
+having to rename fields/restructure result shapes when MCP migration
+lands. The diff would be larger and would touch every handler.
+
+**Does not rule out:** Anthropic native as v1's transport. The
+recommendation in Q2 above stands. MCP-shaped *schemas* + Anthropic
+native *transport* is the lowest-friction path to "ship soon, migrate
+cheaply later." Migration cost is then ~50 lines of MCP-server boilerplate
+(stdio JSON-RPC server) plus moving `BUILTIN_TOOLS` into the server's
+`list_tools` handler. The handlers themselves don't change.
+
+### What remains an open question for the MCP migration session
+
+(Listed here so the implementation session that ships MCP doesn't have
+to re-derive these.)
+
+- **In-process MCP server vs separate process.** Anthropic's reference
+  MCP servers are subprocesses spawned on demand. For Sabrina the
+  voice-loop and the tools live in the same process today; an
+  in-process MCP-shaped registry is fine and avoids subprocess
+  ceremony. The decision becomes interesting if Sabrina starts hosting
+  *external* MCP servers (e.g. filesystem, Slack) — that's a separate
+  decision (likely decision 0XX-mcp-host).
+- **MCP's resources/prompts surfaces.** MCP defines three primitives:
+  `tools`, `resources`, `prompts`. We only need `tools` for v1.
+  `resources` would be a clean fit later for Sabrina's memory store
+  ("the assistant can browse past sessions"), but that's a different
+  scope.
+- **Tool-result streaming.** MCP added incremental tool-result content
+  in early 2026; the spec is settled but not all clients consume it.
+  Skip in v1; revisit if a streaming tool (web search, large file read)
+  lands.
