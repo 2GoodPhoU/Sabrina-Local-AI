@@ -2,11 +2,11 @@
 
 **Author:** Eric
 **Started:** April 2026
-**Last updated:** April 24, 2026
+**Last updated:** April 25, 2026
 **Ambition:** Personal daily-driver. Windows. Local-first, Claude as the brain.
 **Strategy:** Build and prove each component in isolation before integrating. Every component gets a working implementation, a benchmarked alternative set, and a "garbage-removal" pass on the old code.
 
-> **Status:** MVP is alive. Voice loop with PTT + Claude/Ollama + sentence-streaming Piper TTS + SQLite memory (semantic retrieval) + vision attach + settings GUI + barge-in (off by default pending validation). ~4,200 lines, 57 tests. See [`decisions/009-barge-in-shipped.md`](decisions/009-barge-in-shipped.md) for the latest (Silero VAD + CancelToken through Brain/Speaker); [`decisions/008-foundational-refactor-bundle.md`](decisions/008-foundational-refactor-bundle.md) for the prior refactor (schema versioning + log redaction + rotating file sink). Decision 007 validated on Windows (i7-13700K/4080, Python 3.12) 2026-04-24: sqlite-vec loaded, first-audio 1.62s warm. Decision 009 needs `rebuild/validate-barge-in.md` next.
+> **Status:** MVP is alive. Voice loop with PTT + Claude/Ollama + sentence-streaming Piper TTS + SQLite memory (semantic retrieval) + vision attach + settings GUI + barge-in (validated 2026-04-25; on by default in sabrina.toml). ~4,200 lines, 59 tests. See [`decisions/009-barge-in-shipped.md`](decisions/009-barge-in-shipped.md) for the latest (Silero VAD + CancelToken through Brain/Speaker); [`decisions/008-foundational-refactor-bundle.md`](decisions/008-foundational-refactor-bundle.md) for the prior refactor (schema versioning + log redaction + rotating file sink). Decision 007 validated on Windows (i7-13700K/4080, Python 3.12) 2026-04-24: sqlite-vec loaded, first-audio 1.62s warm. Decision 009 validated on Windows (i7-13700K/4080, Python 3.12) 2026-04-25: VAD loaded (OnnxWrapper), 264 ms cut latency observed, no noise false-positives at threshold=0.5, first-audio regression ~0 ms (1.839 s vs. 1.85 s baseline). 009a thin-spot bundle landed pre-validation.
 
 ---
 
@@ -156,23 +156,21 @@ destructive-action allow-list) still stands.
 
 ## Next session — pick one
 
-Barge-in shipped this session (decision 009; in-tree, needs Windows
-validation). Menu post-009:
+Barge-in shipped + validated this week (decision 009 + 009a thin-spots,
+validated 2026-04-25 on the i7-13700K/4080 box). Menu post-009:
 
-1. **Validate decision 009 on Windows** (`rebuild/validate-barge-in.md`).
-   Gating step before anything else ships — ship-one-validate-next.
-2. **Wake word (openWakeWord)** — infra path. Reuses the `AudioMonitor`
+1. **Wake word (openWakeWord)** — infra path. Reuses the `AudioMonitor`
    primitive from decision 009. Frees hands from PTT.
-3. **Supervisor + autostart** — infra path. OS-level process
+2. **Supervisor + autostart** — infra path. OS-level process
    management; no audio. Closes the last two daily-driver gaps along
    with wake-word.
-4. **Personality calibration** — character path. Needs Eric input on the
+3. **Personality calibration** — character path. Needs Eric input on the
    "inferred vs. stated" voice block before any code lands.
-5. **Local VLM fallback** — llava / Qwen2.5-VL / Moondream behind the
+4. **Local VLM fallback** — llava / Qwen2.5-VL / Moondream behind the
    same `Message.images` interface. Privacy + offline.
-6. **Budget tracker + prompt caching** — small lift, immediate cost
+5. **Budget tracker + prompt caching** — small lift, immediate cost
    reduction, observability win.
-7. **Summary compaction + semantic-memory GUI (007b)** — natural
+6. **Summary compaction + semantic-memory GUI (007b)** — natural
    follow-ups to 007. Long histories still grow unbounded; the GUI
    doesn't expose the semantic knobs yet.
 
@@ -185,7 +183,7 @@ Eric's stated goal is daily-driver. Honest gap list:
 - [ ] Wake word OR reliable global PTT hotkey
 - [ ] Auto-start on login (OS-level, not Python)
 - [ ] Crash-recovery supervisor
-- [x] Barge-in (interrupt mid-reply) — shipped 2026-04-24, decision 009; enable via `[barge_in].enabled = true` after `validate-barge-in.md`.
+- [x] Barge-in (interrupt mid-reply) — shipped 2026-04-24, validated 2026-04-25 (decision 009 + 009a thin-spots). 264 ms cut latency, threshold 0.5.
 - [ ] Budget observability (`sabrina budget` command)
 - [ ] (nice-to-have) Avatar
 - [ ] (nice-to-have) Automation

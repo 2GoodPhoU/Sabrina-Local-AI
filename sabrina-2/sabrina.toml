@@ -119,7 +119,7 @@ min_age_turns = 20
 # Detect the user interrupting during a reply (Silero VAD) and cancel the
 # in-flight TTS + brain stream. See decision 009. Off by default until
 # validated on your mic/speaker setup (`rebuild/validate-barge-in.md`).
-enabled = false
+enabled = true
 # Silero VAD threshold (0.0-1.0). Lower = more sensitive. Noisy rooms want 0.6-0.7.
 threshold = 0.5
 # Continuous speech duration (ms) before barge-in fires. Filters coughs + clicks.

@@ -1,6 +1,6 @@
 # When you return — Sabrina rebuild quickstart
 
-**Date:** 2026-04-24
+**Date:** 2026-04-25
 **Purpose:** single entry-point for starting a new chat session. Read this
 first. Then act.
 
@@ -26,9 +26,15 @@ Decisions 007, 008, and 009 are committed on this branch:
   Footnoted on decision 009; no new decision doc. **Not yet committed**
   — Eric runs `pre-commit install` + `git commit` on his Windows box.
 
-**Next up: validation.** Decision 009 (now including the 009a patches)
-is not yet end-to-end validated on real hardware; `[barge_in].enabled`
-ships as `false` until `rebuild/validate-barge-in.md` passes.
+**009 + 009a validated 2026-04-25** on the i7-13700K/4080 box: 264 ms
+cut latency on the "stop nevermind" interrupt, threshold 0.5 holds
+against keyboard/mouse noise, no first-audio regression (1.839 s vs.
+~1.85 s baseline). `[barge_in].enabled = true` is now committed in
+`sabrina.toml`.
+
+**Next up: pick the next component** (see "First-time-you-sit-down
+sequence" Step 4 below — infra-first vs. character-first menu). Eric's
+call. Both paths are draft-complete.
 
 ## First-time-you-sit-down sequence
 
@@ -82,16 +88,10 @@ git commit -m "fix: barge-in thin-spots (graceful degrade, VAD log, trim, poll t
 (If `pre-commit install` is still deferred, swap the `git commit` for
 `git commit --no-verify`.)
 
-**Step 3 — Validate 009 on real hardware.** Run
-`rebuild/validate-barge-in.md` top-to-bottom. Nine steps, each with a
-success signal and a failure-triage row. If all green, bump the
-`ROADMAP.md` "Status" line per the doc's final section and commit
-(`validate: barge-in on Windows (M ms cut, T threshold)`).
-
-If validation uncovers a bug that's not worth its own decision (e.g.
-cancel-token check too coarse in Piper), fix in-place and annotate the
-decision 009 doc with a "validation revealed X, fixed in commit Y"
-footnote. Anti-sprawl.
+**Step 3 — (done; no action needed.)** Decision 009 + 009a were
+validated on Windows 2026-04-25; ROADMAP carries the stamp. Re-run
+`rebuild/validate-barge-in.md` only if barge-in regresses or new
+hardware enters the picture.
 
 **Step 4 — Pick next component.** Menu from decision 009's tail:
 
