@@ -3,15 +3,23 @@
 Two tables:
 
   messages       - one row per user/assistant/system turn. Existed pre-007.
+                   Schema v1 (decision pending) adds:
+                     kind          TEXT NOT NULL DEFAULT 'turn'   ('turn'|'summary')
+                     summarized_at TEXT NULL                      (provenance only)
   vec_messages   - vec0 virtual table from sqlite-vec, one row per embedding.
                    Keyed by message_id (1:1 with messages.id).
 
 Access patterns:
   - append(session_id, role, content, embedding=None)   per turn
+  - append_summary(session_id, content)                 from compaction
   - insert_embedding(message_id, vec)                   async-friendly
   - load_recent(limit)                                  at startup
+  - load_summaries(limit)                               at startup (compaction read)
   - search(query_vec, k, max_distance, exclude_ids)     per turn (semantic)
+                                                        filters out kind='summary'
   - backfill_embeddings(embedder)                       one-shot reindex
+  - mark_summarized(ids, when)                          from compaction
+  - count_uncompacted() / total_turn_chars()            for compaction trigger
   - clear()                                             user reset
 
 Thread / async safety: SQLite writes use the single connection's
@@ -51,6 +59,17 @@ CREATE INDEX IF NOT EXISTS idx_messages_ts ON messages(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
 """
 
+# Migration to schema v1: add `kind` (turn|summary) + `summarized_at` columns
+# so compaction (see `rebuild/drafts/semantic-memory-gui-plan.md`) can write
+# summary rows that retrieval skips, and mark originals as folded.
+# `ALTER TABLE ... ADD COLUMN` is O(1) on SQLite. Idempotent via
+# `PRAGMA user_version`.
+_MIGRATION_V1 = """
+ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'turn';
+ALTER TABLE messages ADD COLUMN summarized_at TEXT NULL;
+CREATE INDEX IF NOT EXISTS idx_messages_kind ON messages(kind);
+"""
+
 
 def _vec_schema(dim: int) -> str:
     """vec0 virtual table DDL. Dim is fixed at creation."""
@@ -87,7 +106,7 @@ class SearchHit:
 
 
 def new_session_id() -> str:
-    """Fresh UUID per process — lets us group "this run's" messages."""
+    """Fresh UUID per process - lets us group "this run's" messages."""
     return uuid.uuid4().hex[:12]
 
 
@@ -96,16 +115,13 @@ class MemoryStore:
         db_path = db_path.expanduser().resolve()
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._path = db_path
-        # `check_same_thread=False` so callers can dispatch embeddings and
-        # search through `asyncio.to_thread` without ProgrammingError. We
-        # still hold one connection for the store's lifetime and rely on
-        # SQLite's internal per-statement mutex for concurrency.
         self._conn = sqlite3.connect(
             str(db_path),
             isolation_level=None,  # autocommit
             check_same_thread=False,
         )
         self._conn.executescript(_SCHEMA)
+        self._migrate()
 
         self._embedding_dim: int | None = None
         self._vec_enabled = False
@@ -119,16 +135,29 @@ class MemoryStore:
             dim=self._embedding_dim,
         )
 
-    def _try_enable_vec(self, dim: int) -> None:
-        """Attempt to load sqlite-vec and create the vec table. Swallow failures.
+    def _migrate(self) -> None:
+        """Run pending schema migrations idempotently via PRAGMA user_version.
 
-        Failure modes we've seen:
-          - sqlite_vec not installed              -> ImportError
-          - Python built without load_extension   -> AttributeError / OperationalError
-          - sqlite-vec binary missing for platform-> OperationalError
-        In every case we log once and fall back to text-only mode so the
-        voice loop keeps running.
+        v0 -> v1: add kind + summarized_at columns. See `_MIGRATION_V1`.
         """
+        row = self._conn.execute("PRAGMA user_version").fetchone()
+        v = int(row[0]) if row else 0
+        if v < 1:
+            try:
+                self._conn.executescript(_MIGRATION_V1)
+            except sqlite3.OperationalError as exc:
+                # Re-running on a DB that already has the columns (e.g. an
+                # earlier run that crashed mid-migration but left them in
+                # place) shouldn't re-fail. ALTER TABLE ADD COLUMN raises
+                # `duplicate column name` in that case; accept and bump.
+                if "duplicate column" not in str(exc).lower():
+                    raise
+                log.debug("memory.migrate.duplicate_column_ok", err=str(exc))
+            self._conn.execute("PRAGMA user_version = 1")
+            log.info("memory.migrated", to_version=1)
+
+    def _try_enable_vec(self, dim: int) -> None:
+        """Attempt to load sqlite-vec and create the vec table. Swallow failures."""
         try:
             import sqlite_vec  # type: ignore[import-not-found]
 
@@ -168,19 +197,13 @@ class MemoryStore:
         *,
         embedding: list[float] | None = None,
     ) -> int:
-        """Insert a message row. Returns the new row id.
-
-        If `embedding` is supplied and the vec table is enabled, the vector
-        goes in the same no-isolation "transaction" (SQLite autocommit per
-        statement; this is best-effort atomicity — a crash between the two
-        statements means the embedding is missing, which `backfill_embeddings`
-        can repair).
-        """
+        """Insert a turn row. Returns the new row id."""
         if role not in {"user", "assistant", "system"}:
             raise ValueError(f"Unknown role: {role!r}")
         ts = datetime.now(timezone.utc).isoformat()
         cur = self._conn.execute(
-            "INSERT INTO messages (session_id, ts, role, content) VALUES (?, ?, ?, ?)",
+            "INSERT INTO messages (session_id, ts, role, content, kind) "
+            "VALUES (?, ?, ?, ?, 'turn')",
             (session_id, ts, role, content),
         )
         msg_id = int(cur.lastrowid)
@@ -188,12 +211,47 @@ class MemoryStore:
             self._insert_vec(msg_id, embedding)
         return msg_id
 
-    def insert_embedding(self, message_id: int, embedding: list[float]) -> None:
-        """Attach an embedding to an existing message row.
+    def append_summary(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        ts: datetime | None = None,
+    ) -> int:
+        """Insert a summary row (kind='summary'). Returns the new id.
 
-        Used by the voice loop (embed after append, off-thread) and by
-        `backfill_embeddings` (retrofit old rows).
+        Summary rows are excluded from semantic search and from
+        `recent_ids` / `messages_missing_embeddings` (no embedding is
+        ever computed for them). They surface only via `load_summaries`.
         """
+        ts_iso = (ts or datetime.now(timezone.utc)).isoformat()
+        cur = self._conn.execute(
+            "INSERT INTO messages (session_id, ts, role, content, kind) "
+            "VALUES (?, ?, 'system', ?, 'summary')",
+            (session_id, ts_iso, content),
+        )
+        return int(cur.lastrowid)
+
+    def mark_summarized(self, ids: Iterable[int], *, when: datetime | None = None) -> int:
+        """Set summarized_at on the given ids. Returns rows updated."""
+        ts_iso = (when or datetime.now(timezone.utc)).isoformat()
+        ids_list = list(ids)
+        if not ids_list:
+            return 0
+        # Avoid IN (?, ?, ...) overflow by chunking; SQLite default is 999.
+        updated = 0
+        for i in range(0, len(ids_list), 500):
+            chunk = ids_list[i : i + 500]
+            placeholders = ",".join(["?"] * len(chunk))
+            cur = self._conn.execute(
+                f"UPDATE messages SET summarized_at = ? "
+                f"WHERE id IN ({placeholders}) AND kind = 'turn'",
+                (ts_iso, *chunk),
+            )
+            updated += cur.rowcount or 0
+        return updated
+
+    def insert_embedding(self, message_id: int, embedding: list[float]) -> None:
         if not self._vec_enabled:
             raise RuntimeError(
                 "sqlite-vec is not enabled; cannot store embeddings. "
@@ -215,24 +273,72 @@ class MemoryStore:
     # -- reads ---------------------------------------------------------------
 
     def load_recent(self, limit: int = 20) -> list[StoredMessage]:
-        """Return the last `limit` messages across all sessions, oldest-first.
+        """Return the last `limit` turn messages (kind='turn'), oldest-first."""
+        if limit <= 0:
+            return []
+        rows = self._conn.execute(
+            "SELECT id, session_id, ts, role, content FROM messages "
+            "WHERE kind = 'turn' "
+            "ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        messages = [_row_to_stored(row) for row in reversed(rows)]
+        while messages and messages[0].role == "assistant":
+            messages.pop(0)
+        return messages
 
-        If `limit` lands mid-turn (i.e. the oldest loaded message is an
-        assistant reply with no matching user prompt), we drop it so the
-        brain doesn't see dangling assistant context.
+    def load_summaries(self, *, limit: int = 50) -> list[StoredMessage]:
+        """Most recent N summary rows, oldest-first.
+
+        Summaries are injected at the head of the brain's system prompt.
+        Limit guards against runaway count once the user has lots of
+        history; default 50 is generous (~50 sessions).
         """
         if limit <= 0:
             return []
         rows = self._conn.execute(
             "SELECT id, session_id, ts, role, content FROM messages "
+            "WHERE kind = 'summary' "
             "ORDER BY id DESC LIMIT ?",
             (limit,),
         ).fetchall()
-        messages = [_row_to_stored(row) for row in reversed(rows)]
-        # Trim leading "assistant" so the history starts on a user turn.
-        while messages and messages[0].role == "assistant":
-            messages.pop(0)
-        return messages
+        return [_row_to_stored(row) for row in reversed(rows)]
+
+    def count_uncompacted(self) -> int:
+        """Turn rows that haven't been folded into a summary yet."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE kind = 'turn' AND summarized_at IS NULL"
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+    def total_turn_chars(self, *, only_uncompacted: bool = True) -> int:
+        """Sum of content character counts across turn rows.
+
+        Used by the compaction trigger as a cheap proxy for token count.
+        Set `only_uncompacted=False` to count everything (e.g. for stats).
+        """
+        clause = "WHERE kind = 'turn'"
+        if only_uncompacted:
+            clause += " AND summarized_at IS NULL"
+        row = self._conn.execute(
+            f"SELECT COALESCE(SUM(LENGTH(content)), 0) FROM messages {clause}"
+        ).fetchone()
+        return int(row[0]) if row else 0
+
+    def oldest_uncompacted_turns(self, *, limit: int) -> list[StoredMessage]:
+        """The `limit` oldest turn rows that are still un-compacted.
+
+        Compaction folds these into a summary. Excludes summary rows.
+        """
+        if limit <= 0:
+            return []
+        rows = self._conn.execute(
+            "SELECT id, session_id, ts, role, content FROM messages "
+            "WHERE kind = 'turn' AND summarized_at IS NULL "
+            "ORDER BY id ASC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [_row_to_stored(row) for row in rows]
 
     def search(
         self,
@@ -242,14 +348,10 @@ class MemoryStore:
         max_distance: float | None = None,
         exclude_ids: Iterable[int] = (),
     ) -> list[SearchHit]:
-        """Top-k nearest messages by cosine distance.
+        """Top-k nearest *turn* messages by cosine distance.
 
-        `max_distance` drops hits above the threshold (0 = identical, 1 = orthogonal,
-        ~2 = opposite). Typical values: 0.35 is tight, 0.6 is loose.
-
-        `exclude_ids` is useful to avoid returning the same turns already
-        loaded via `load_recent` — callers pass the ids they already have.
-        We over-fetch by the size of exclude_ids so filtering still yields k.
+        Summary rows (kind='summary') are filtered out -- they're injected
+        at the head of the system prompt, not retrieved per-turn.
         """
         if not self._vec_enabled:
             raise RuntimeError(
@@ -262,11 +364,6 @@ class MemoryStore:
             )
 
         exclude_set = set(exclude_ids)
-        # k-NN happens inside the vec0 virtual table; we subquery it and
-        # then join to `messages` for the text. The `k = ?` binding is
-        # vec0's hidden input — keeping it inside the inner SELECT
-        # avoids any ambiguity with the outer-scope column names.
-        # Over-fetch by |exclude| so filtering still yields k results.
         fetch_k = k + len(exclude_set)
         rows = self._conn.execute(
             """
@@ -277,6 +374,7 @@ class MemoryStore:
                 WHERE embedding MATCH ? AND k = ?
             ) AS v
             JOIN messages m ON m.id = v.message_id
+            WHERE m.kind = 'turn'
             ORDER BY v.distance
             """,
             (_pack_vec(query_vec), fetch_k),
@@ -306,13 +404,19 @@ class MemoryStore:
         row = self._conn.execute("SELECT COUNT(*) FROM messages").fetchone()
         return int(row[0]) if row else 0
 
+    def count_summaries(self) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE kind = 'summary'"
+        ).fetchone()
+        return int(row[0]) if row else 0
+
     def recent_ids(self, n: int) -> list[int]:
-        """The `n` most-recent message ids. Used by semantic search to
-        exclude turns already in the hot window."""
+        """The `n` most-recent turn-row ids (excludes summaries)."""
         if n <= 0:
             return []
         rows = self._conn.execute(
-            "SELECT id FROM messages ORDER BY id DESC LIMIT ?",
+            "SELECT id FROM messages WHERE kind = 'turn' "
+            "ORDER BY id DESC LIMIT ?",
             (n,),
         ).fetchall()
         return [int(r[0]) for r in rows]
@@ -326,17 +430,16 @@ class MemoryStore:
     def messages_missing_embeddings(
         self, *, limit: int | None = None
     ) -> list[StoredMessage]:
-        """Rows in `messages` with no matching `vec_messages` entry.
+        """Turn rows in `messages` with no matching `vec_messages` entry.
 
-        Returns oldest-first so callers can stream progress.
+        Excludes summary rows -- they're never embedded by design.
         """
         if not self._vec_enabled:
-            # No vec table => every row is "missing"; but backfill is a no-op.
             return []
         q = (
             "SELECT m.id, m.session_id, m.ts, m.role, m.content FROM messages m "
             "LEFT JOIN vec_messages v ON v.message_id = m.id "
-            "WHERE v.message_id IS NULL "
+            "WHERE v.message_id IS NULL AND m.kind = 'turn' "
             "ORDER BY m.id ASC"
         )
         params: tuple[object, ...] = ()
@@ -353,11 +456,6 @@ class MemoryStore:
         batch_size: int = 32,
         progress=None,  # optional callable(done, total) for CLI spinner
     ) -> int:
-        """Embed every message that doesn't yet have a vector. Returns count written.
-
-        Synchronous on purpose — callers (CLI `memory-reindex`) are happy
-        to block. The voice loop never calls this directly.
-        """
         if not self._vec_enabled:
             raise RuntimeError("sqlite-vec not enabled; cannot backfill.")
         missing = self.messages_missing_embeddings()
@@ -376,16 +474,13 @@ class MemoryStore:
         return done
 
     def drop_vectors(self) -> None:
-        """Drop the vec_messages table. Used by `memory-reindex --drop`."""
         if not self._vec_enabled:
             return
         self._conn.execute("DROP TABLE IF EXISTS vec_messages")
-        # Recreate so the caller can immediately insert_embedding again.
         if self._embedding_dim is not None:
             self._conn.executescript(_vec_schema(self._embedding_dim))
 
     def clear(self) -> int:
-        """Delete every message (and its embedding). Returns rows removed from `messages`."""
         n = 0
         cur = self._conn.execute("DELETE FROM messages")
         n = cur.rowcount or 0

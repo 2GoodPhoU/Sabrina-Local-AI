@@ -115,6 +115,14 @@ max_distance = 0.5
 # surface stuff already in `load_recent`. Match it to load_recent above.
 min_age_turns = 20
 
+[memory.semantic.embedder]
+# Implementation backend. "onnx" (default) runs the embedder directly
+# under onnxruntime + HF tokenizers — no torch, ~80 MB model + ~10 MB
+# wheels. "sentence-transformers" is the legacy fallback; requires
+# `uv sync --extra legacy-embedder` to install torch+sentence-transformers.
+# See decisions/drafts/011-onnx-embedder.md.
+backend = "onnx"
+
 [barge_in]
 # Detect the user interrupting during a reply (Silero VAD) and cancel the
 # in-flight TTS + brain stream. See decision 009. Off by default until
@@ -132,3 +140,51 @@ continue_on_interrupt = true
 
 [logging]
 level = "INFO"
+
+[wake_word]
+# Hands-free trigger via openWakeWord. Off by default until you've
+# tuned threshold on your mic + room. See decision (pending) and
+# `rebuild/drafts/wake-word-plan.md`. The default model `hey_jarvis`
+# is openWakeWord's bundled placeholder; custom "Hey Sabrina" is a
+# follow-up (see `tools/wake-training/`, not yet shipped).
+enabled = false
+# Bundled openWakeWord id OR path to a custom .onnx file. Bundled set:
+# "alexa", "hey_jarvis", "hey_mycroft", "hey_rhasspy". Path is
+# resolved relative to the project root.
+model = "hey_jarvis"
+# Inference threshold (0.0-1.0). Lower = more sensitive.
+threshold = 0.5
+# Cooldown after a fire (ms). Stops a single phrase from triggering
+# multiple times.
+cooldown_ms = 2000
+# Input audio device override. Empty = reuse `asr.input_device`.
+device = ""
+
+[supervisor]
+# Process supervisor + autostart. "task_scheduler" (default) registers a
+# Windows Task Scheduler entry that runs Sabrina at login. "service"
+# wraps the entry point with nssm.exe and registers it as a Windows
+# Service (more robust crash recovery, more install ceremony).
+# See `rebuild/drafts/supervisor-autostart-plan.md`.
+mode = "task_scheduler"
+# Identifier for the registered task / service. Change only if multiple
+# Sabrina installs share a host.
+task_name = "SabrinaAI"
+# At most `restart_max` restarts inside `restart_window_s`, then back off.
+restart_max = 5
+restart_window_s = 300
+# Path to nssm.exe (used only when mode = "service"). Empty = PATH lookup.
+nssm_binary = ""
+
+[memory.compaction]
+# Auto-compact old turns into summary entries when memory exceeds
+# `threshold_tokens`. mode="manual" disables auto-compaction; the
+# CLI verb (`sabrina memory-compact`) and GUI button still work.
+mode = "auto"
+# Token count above which auto-compaction triggers at startup. ~80 tokens
+# per short turn; 50k = ~600 turns of headroom.
+threshold_tokens = 50000
+# How many oldest turns to fold into one summary on each pass.
+batch_size = 200
+# Char-per-token estimate for the cheap token counter (OpenAI rule of thumb).
+chars_per_token = 4.0

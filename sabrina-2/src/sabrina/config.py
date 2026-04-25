@@ -12,7 +12,7 @@ Contributor conventions (see `rebuild/decisions/008-*.md`):
 - New sections that depend on unshipped setup ship `enabled: bool = False`
   (mirror `[memory.semantic]`, `[wake_word]`).
 - Literal[...] for enumerable string fields so typos fail at load time.
-- Secrets live in `.env` as `SABRINA_<NAME>`, loaded via `SecretStr` —
+- Secrets live in `.env` as `SABRINA_<NAME>`, loaded via `SecretStr` --
   they never appear in `sabrina.toml`.
 - On a rename/move/delete, append a migration to `MIGRATIONS` and bump
   `CURRENT_SCHEMA_VERSION`. See `apply_migrations` below.
@@ -54,8 +54,6 @@ class BrainConfig(BaseModel):
 class PiperConfig(BaseModel):
     binary: str = ""  # empty = use `piper` on PATH
     voice_model: str = "voices/en_US-libritts_r-medium.onnx"
-    # Multi-speaker models (libritts_r, etc.) need a speaker index. None means
-    # "let Piper pick its default" — fine for single-speaker voices.
     speaker_id: int | None = 0
     length_scale: float = 1.0
 
@@ -73,89 +71,118 @@ class TtsConfig(BaseModel):
 
 
 class FasterWhisperConfig(BaseModel):
-    # Model size: tiny | base | small | medium | large-v3.
-    # Also accepts a path to a local CT2-converted model directory.
     model: str = "base.en"
-    # "cuda" | "cpu" | "auto". cuda pins to GPU 0; set explicitly if multi-GPU.
     device: Literal["cuda", "cpu", "auto"] = "auto"
-    # "float16" | "int8_float16" | "int8" | "float32". int8_float16 is a
-    # great speed/quality trade on Ampere+; float16 is the quality ceiling.
     compute_type: str = "float16"
-    # Beam search width. 1 = greedy (fastest), 5 = openai default (slower, a bit better).
     beam_size: int = 5
-    # ISO-639-1 language code, or empty for auto-detect.
     language: str = "en"
 
 
 class AsrConfig(BaseModel):
     default: Literal["faster-whisper"] = "faster-whisper"
-    # Input audio device for `asr-record`. Same rules as tts.output_device.
     input_device: str = ""
     faster_whisper: FasterWhisperConfig = FasterWhisperConfig()
 
 
 class VisionConfig(BaseModel):
-    # How the user invokes a screen-look from the voice loop.
-    #   "voice_phrase" - speak a trigger phrase ("look at my screen", etc.)
-    #   "hotkey"       - press a dedicated key combo
-    #   "both"         - either works
-    #   "off"          - disabled
     trigger: Literal["voice_phrase", "hotkey", "both", "off"] = "both"
-    # Pynput-style hotkey string. Ignored unless trigger includes "hotkey".
     hotkey: str = "<ctrl>+<shift>+v"
-    # Which Claude model to use for vision turns. Empty = use brain.claude.fast_model.
     model: str = ""
-    # Monitor index to capture. 0 = virtual "all monitors" screen in mss,
-    # 1 = primary, 2+ = secondary displays.
     monitor: int = 1
-    # Downscale large screenshots before sending, to keep token cost sane.
-    # Longest-edge pixel cap; 0 disables scaling.
     max_edge_px: int = 1568
 
 
+class EmbedderConfig(BaseModel):
+    # Implementation backend. "onnx" (default) runs the model directly
+    # under onnxruntime + HF tokenizers (no torch). "sentence-transformers"
+    # is the legacy fallback; requires the optional `legacy-embedder`
+    # install extra. See `rebuild/decisions/drafts/011-onnx-embedder.md`.
+    backend: Literal["onnx", "sentence-transformers"] = "onnx"
+
+
 class SemanticMemoryConfig(BaseModel):
-    # Master switch for retrieval augmentation. Off by default so a fresh
-    # checkout without sentence-transformers installed still runs.
     enabled: bool = False
-    # sentence-transformers model id. Default is the roadmap pick: 384 dims,
-    # ~80 MB, ~20 ms/sentence CPU / ~5 ms on a 4080.
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    # How many retrieved turns to inject per user message.
     top_k: int = 5
-    # Cosine distance cutoff — hits further than this are dropped. 0 = identical,
-    # ~1 = orthogonal. 0.5 is "meaningfully related", 0.35 is "closely related".
     max_distance: float = 0.5
-    # Don't retrieve any of the load_recent turns already in history.
-    # Set a floor so semantic memory only surfaces things that *aren't* right there.
-    # Counted in number of most-recent turns to exclude (matches load_recent by default).
     min_age_turns: int = 20
+    embedder: EmbedderConfig = EmbedderConfig()
+
+
+class CompactionConfig(BaseModel):
+    # Auto-compact old turns into summaries once memory token count
+    # exceeds `threshold_tokens`. mode="manual" disables auto; the
+    # `sabrina memory-compact` CLI verb (and the GUI button) still work.
+    # See `rebuild/drafts/semantic-memory-gui-plan.md`.
+    mode: Literal["auto", "manual"] = "auto"
+    # Token count above which auto-compaction triggers at startup. ~80
+    # tokens per short turn; 50k = ~600 turns of headroom before the
+    # context-window cost of even partial loads becomes annoying.
+    threshold_tokens: int = 50000
+    # How many of the oldest turns to fold into a single summary on
+    # each compaction pass. Smaller = more frequent passes, finer-
+    # grained summaries. Larger = batch efficiency but coarser memory.
+    batch_size: int = 200
+    # Approx character-per-token ratio used for the cheap token estimator.
+    # 4.0 is the OpenAI rule of thumb; close enough for thresholding.
+    chars_per_token: float = 4.0
 
 
 class MemoryConfig(BaseModel):
     enabled: bool = True
-    # Relative paths resolve to project root.
     db_path: str = "data/sabrina.db"
-    # How many past messages to load on startup (most recent).
     load_recent: int = 20
-    # Semantic retrieval (sqlite-vec + sentence-transformers). See below.
     semantic: SemanticMemoryConfig = SemanticMemoryConfig()
+    compaction: CompactionConfig = CompactionConfig()
+
+
+class WakeWordConfig(BaseModel):
+    # Master switch. Off until you've trained / tuned a model on your
+    # mic + room. Scaffolded with openWakeWord's bundled "hey_jarvis"
+    # placeholder; custom "Hey Sabrina" model is a follow-up (see
+    # `rebuild/drafts/wake-word-plan.md` and `tools/wake-training/`).
+    enabled: bool = False
+    # Either a bundled openWakeWord model id ("hey_jarvis", "alexa",
+    # "hey_mycroft") OR a path to a custom .onnx file. Paths resolve
+    # relative to the project root.
+    model: str = "hey_jarvis"
+    # Score threshold (0.0-1.0). Lower = more sensitive. openWakeWord
+    # ships with 0.5 as a balanced default; use `sabrina wake-test`
+    # (when shipped) to tune for your environment.
+    threshold: float = 0.5
+    # Suppress repeated triggers for this many ms after a fire. Stops
+    # the tail of "hey sabrina" from re-triggering mid-utterance.
+    cooldown_ms: int = 2000
+    # Input audio device override. Empty = use asr.input_device.
+    device: str = ""
 
 
 class BargeInConfig(BaseModel):
-    # Master switch. Off until you've validated it end-to-end on your mic/speaker.
     enabled: bool = False
-    # Silero VAD confidence threshold (0.0-1.0). Lower = more sensitive.
-    # 0.5 is Silero's default; noisy environments may want 0.6-0.7.
     threshold: float = 0.5
-    # Minimum continuous speech (ms) before barge-in fires. Filters coughs,
-    # key clicks, and Sabrina's own voice bleed-through.
     min_speech_ms: int = 300
-    # Suppress detection for this many ms at the start of each speaking phase
-    # so VAD doesn't trip on the TTS onset bleeding into the mic.
     dead_zone_ms: int = 300
-    # After interrupt, re-transcribe the captured audio and continue, rather
-    # than waiting for a PTT press. False = just go idle.
     continue_on_interrupt: bool = True
+
+
+class SupervisorConfig(BaseModel):
+    # Process supervisor + autostart wiring (see
+    # `rebuild/drafts/supervisor-autostart-plan.md`). Two backends:
+    #   "task_scheduler" - Windows Task Scheduler, default. Login-time
+    #                       trigger, no Windows Service plumbing.
+    #   "service"        - nssm-wrapped Windows Service. More robust
+    #                       but more setup.
+    mode: Literal["task_scheduler", "service"] = "task_scheduler"
+    # The name registered with Task Scheduler / nssm. Only changed if
+    # multiple Sabrina installs need to coexist.
+    task_name: str = "SabrinaAI"
+    # Crash recovery budget: at most `restart_max` restarts within
+    # `restart_window_s`. Beyond that, supervisor backs off and emits
+    # `supervisor.budget_exceeded`.
+    restart_max: int = 5
+    restart_window_s: int = 300
+    # Path to nssm.exe (mode = "service" only). Empty = look on PATH.
+    nssm_binary: str = ""
 
 
 class LoggingConfig(BaseModel):
@@ -163,18 +190,11 @@ class LoggingConfig(BaseModel):
 
 
 class SchemaConfig(BaseModel):
-    # Config schema version. Incremented when a field is renamed, moved, or
-    # removed. `apply_migrations()` bumps this on load. Do not edit by hand.
     version: int = 1
 
 
-# Bump this when a migration is appended. `apply_migrations` compares the
-# on-disk version to this value and runs any pending migrations in order.
 CURRENT_SCHEMA_VERSION = 1
 
-# Each migration: (from_version, fn) where `fn(TOMLDocument) -> TOMLDocument`.
-# Append in order. Empty today — the hook lands before the first real rename
-# so the rename PR isn't also the PR that builds the machinery.
 MIGRATIONS: list[tuple[int, Callable[["TOMLDocument"], "TOMLDocument"]]] = []  # noqa: F821
 
 
@@ -189,20 +209,16 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
-    # Python attribute is `schema_` because `BaseSettings` still exposes a
-    # `schema` attribute on the parent class (pydantic v2 emits a UserWarning
-    # otherwise). The TOML key stays `[schema]` via the alias — users never
-    # see the underscore. `populate_by_name=True` (above) lets both forms work.
     schema_: SchemaConfig = Field(default_factory=SchemaConfig, alias="schema")
     brain: BrainConfig = BrainConfig()
     tts: TtsConfig = TtsConfig()
     asr: AsrConfig = AsrConfig()
     vision: VisionConfig = VisionConfig()
     memory: MemoryConfig = MemoryConfig()
+    wake_word: WakeWordConfig = WakeWordConfig()
     barge_in: BargeInConfig = BargeInConfig()
+    supervisor: SupervisorConfig = SupervisorConfig()
     logging: LoggingConfig = LoggingConfig()
-    # Accept either ANTHROPIC_API_KEY (standard Anthropic env var) or the
-    # SABRINA_-prefixed form. Loaded from .env or shell environment.
     anthropic_api_key: SecretStr | None = Field(
         default=None,
         validation_alias=AliasChoices("ANTHROPIC_API_KEY", "SABRINA_ANTHROPIC_API_KEY"),
@@ -217,8 +233,6 @@ class Settings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        # Precedence (highest to lowest):
-        #   init kwargs > env vars > .env file > sabrina.toml > field defaults
         return (
             init_settings,
             env_settings,
@@ -235,15 +249,11 @@ def apply_migrations(toml_path: Path | None = None) -> int:
     """Run any pending TOML migrations in order; return the final version.
 
     Minimal hook (per decision 008): reads `[schema].version` via tomlkit,
-    runs each migration whose `from_version` is ≥ current, bumps the field,
+    runs each migration whose `from_version` is >= current, bumps the field,
     writes the document back atomically. Returns the resulting version.
 
     No-op when `MIGRATIONS` is empty or the file is already current.
-    Never raises on a missing file — callers for tests should pass an
-    explicit path or just rely on the default `sabrina.toml` lookup.
     """
-    # Imported here to avoid a circular import at module load (settings_io
-    # imports from config).
     from sabrina import settings_io
 
     path = toml_path or settings_io.toml_path()
@@ -260,7 +270,6 @@ def apply_migrations(toml_path: Path | None = None) -> int:
         doc = fn(doc)
         current = from_version + 1
 
-    # Bump recorded version.
     if "schema" not in doc:
         import tomlkit
 
@@ -274,8 +283,21 @@ def load_settings(reload: bool = False) -> Settings:
     """Load settings once (cached). Pass reload=True to force re-read."""
     global _cached
     if _cached is None or reload:
-        # Run pending migrations against the on-disk TOML before pydantic
-        # reads it. No-op when there are none; see `apply_migrations`.
+        apply_migrations()
+        _cached = Settings()
+    return _cached
+
+
+def project_root() -> Path:
+    """Best-effort project root (where sabrina.toml lives)."""
+    cwd = Path.cwd()
+    for candidate in [cwd, *cwd.parents]:
+        if (candidate / "sabrina.toml").is_file():
+            return candidate
+    return cwd
+ings once (cached). Pass reload=True to force re-read."""
+    global _cached
+    if _cached is None or reload:
         apply_migrations()
         _cached = Settings()
     return _cached

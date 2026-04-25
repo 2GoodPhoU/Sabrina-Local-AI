@@ -77,7 +77,10 @@ def _open_memory() -> MemoryStore | None:
             # Unknown model — instantiate eagerly so the store knows the dim.
             from sabrina.memory.embed import build_embedder
 
-            emb = build_embedder(settings.memory.semantic.embedding_model)
+            emb = build_embedder(
+                settings.memory.semantic.embedding_model,
+                backend=settings.memory.semantic.embedder.backend,
+            )
             emb.warmup()
             dim = emb.dim or DEFAULT_DIM
     return MemoryStore(path, embedding_dim=dim)
@@ -744,7 +747,10 @@ def memory_reindex(
 
         from sabrina.memory.embed import build_embedder
 
-        emb = build_embedder(settings.memory.semantic.embedding_model)
+        emb = build_embedder(
+            settings.memory.semantic.embedding_model,
+            backend=settings.memory.semantic.embedder.backend,
+        )
         typer.echo(f"Loading embedder: {emb.model_name} ...")
         emb.warmup()
         typer.echo(f"  dim={emb.dim}")
@@ -765,6 +771,34 @@ def memory_reindex(
         typer.echo(f"Done. Wrote {written} embedding(s).")
     finally:
         memory.close()
+
+
+@app.command("download-models")
+def download_models(
+    target: str = typer.Argument(
+        "embedder",
+        help=(
+            "Which model(s) to download. 'embedder' fetches the ONNX MiniLM "
+            "model + tokenizer to data/embedder/. 'all' = all download targets."
+        ),
+    ),
+) -> None:
+    """Pre-fetch model weights so first runtime use isn't blocked on a network call."""
+    settings = load_settings()
+    setup_logging(settings.logging.level)
+    if target not in {"embedder", "all"}:
+        typer.secho(f"Unknown target {target!r}. Try 'embedder' or 'all'.", fg=typer.colors.RED)
+        raise typer.Exit(code=2)
+
+    if target in {"embedder", "all"}:
+        from sabrina.memory.embed import ensure_onnx_assets
+
+        model_id = settings.memory.semantic.embedding_model
+        typer.echo(f"Fetching ONNX embedder assets for {model_id} ...")
+        onnx_path, tok_path = ensure_onnx_assets(model_id)
+        typer.echo(f"  model: {onnx_path}")
+        typer.echo(f"  tokenizer: {tok_path}")
+    typer.echo("Done.")
 
 
 @app.command("memory-search")
@@ -794,7 +828,10 @@ def memory_search(
     try:
         from sabrina.memory.embed import build_embedder
 
-        emb = build_embedder(settings.memory.semantic.embedding_model)
+        emb = build_embedder(
+            settings.memory.semantic.embedding_model,
+            backend=settings.memory.semantic.embedder.backend,
+        )
         emb.warmup()
         qvec = emb.embed(query)
         hits = memory.search(qvec, k=k, max_distance=max_distance)
@@ -810,6 +847,238 @@ def memory_search(
             )
     finally:
         memory.close()
+
+
+# ---------------------------------------------------------------------------
+# memory compaction (decision pending; see semantic-memory-gui-plan.md)
+# ---------------------------------------------------------------------------
+
+
+def _make_brain_summarizer(brain):
+    """Adapt a Brain into the Compaction Summarizer protocol.
+
+    The brain's `chat()` is an async generator of TextDelta/Done events;
+    we collect deltas into the summary string. System prompt is the
+    module-level SUMMARIZATION_SYSTEM_PROMPT — keeps the prompt
+    diffable and out of CLI ergonomics.
+    """
+    from sabrina.brain.protocol import Done, Message, TextDelta
+    from sabrina.memory.compaction import (
+        SUMMARIZATION_SYSTEM_PROMPT,
+        make_callable_summarizer,
+    )
+
+    async def _summarize(transcript: str) -> str:
+        # One-shot turn: hand the brain the transcript as the user
+        # message; the system prompt does the work. We pass an empty
+        # cancel_token so this never gets killed mid-flight by a
+        # voice-loop barge-in.
+        from sabrina.brain.protocol import CancelToken
+
+        msg = Message(role="user", content=transcript)
+        parts: list[str] = []
+        async for ev in brain.chat(
+            [msg], system=SUMMARIZATION_SYSTEM_PROMPT, cancel_token=CancelToken()
+        ):
+            if isinstance(ev, TextDelta):
+                parts.append(ev.text)
+            elif isinstance(ev, Done):
+                pass
+        return "".join(parts).strip()
+
+    return make_callable_summarizer(_summarize)
+
+
+@app.command("memory-compact")
+def memory_compact(
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help=(
+            "Run even if the un-compacted token count is below "
+            "[memory.compaction].threshold_tokens."
+        ),
+    ),
+    brain_backend: str = typer.Option(
+        None,
+        "--brain",
+        "-b",
+        help="Brain to use as summarizer ('claude' or 'ollama'). Default from sabrina.toml.",
+    ),
+    fast: bool = typer.Option(
+        True,
+        "--fast/--full",
+        help="Use the brain's fast model (cheaper). --full uses the default model.",
+    ),
+) -> None:
+    """Compact old turns into summaries via the brain.
+
+    Pulls the oldest `[memory.compaction].batch_size` un-compacted turn
+    rows, hands them to the brain with SUMMARIZATION_SYSTEM_PROMPT, and
+    writes one summary row + marks the originals folded. Idempotent;
+    safe to run repeatedly. The summary feeds `voice_loop`'s system
+    prompt on the next turn (see voice_loop._SYSTEM and load_summaries).
+    """
+    settings = load_settings()
+    setup_logging(settings.logging.level)
+    chosen = brain_backend or settings.brain.default
+    if chosen == "claude":
+        model = (
+            settings.brain.claude.fast_model
+            if fast
+            else settings.brain.claude.model
+        )
+    elif chosen == "ollama":
+        model = (
+            settings.brain.ollama.fast_model
+            if fast
+            else settings.brain.ollama.model
+        )
+    else:
+        typer.secho(f"Unknown brain backend {chosen!r}", fg=typer.colors.RED)
+        raise typer.Exit(code=2)
+
+    try:
+        brain = _build_brain(chosen, model)
+    except ValueError as e:
+        typer.secho(str(e), fg=typer.colors.RED)
+        raise typer.Exit(code=1) from None
+
+    memory = _open_memory()
+    if memory is None:
+        typer.echo("Memory is disabled in config.")
+        raise typer.Exit(code=1)
+
+    summarizer = _make_brain_summarizer(brain)
+    from sabrina.memory.compaction import compact
+
+    try:
+        result = asyncio.run(
+            compact(memory, summarizer, settings.memory.compaction, force=force)
+        )
+    finally:
+        memory.close()
+
+    if result.skipped_reason:
+        typer.echo(f"Compaction skipped: {result.skipped_reason}")
+    else:
+        typer.echo(
+            f"Compacted {result.turns_compacted} turn(s) into "
+            f"{result.summaries_written} summary row(s)."
+        )
+
+
+# ---------------------------------------------------------------------------
+# supervisor + autostart -- decision pending; see
+# `rebuild/drafts/supervisor-autostart-plan.md`. Off by default; activated
+# by `sabrina autostart enable`.
+# ---------------------------------------------------------------------------
+
+
+@app.command("run")
+def run() -> None:
+    """Spawn `sabrina voice` under the supervisor (crash-recovery loop)."""
+    from sabrina.supervisor import default_child_argv, run_supervised
+
+    settings = load_settings()
+    setup_logging(settings.logging.level)
+    rc = run_supervised(default_child_argv(), settings.supervisor)
+    raise typer.Exit(code=rc)
+
+
+@app.command("autostart")
+def autostart(
+    action: str = typer.Argument(..., help="enable | disable | status"),
+) -> None:
+    """Register / remove the at-logon autostart entry (Task Scheduler or nssm)."""
+    from sabrina.supervisor import (
+        build_nssm_install_commands,
+        build_nssm_uninstall_commands,
+        find_nssm,
+        install_task_scheduler_task,
+        render_task_scheduler_xml,
+        uninstall_task_scheduler_task,
+        write_task_scheduler_xml,
+    )
+
+    settings = load_settings()
+    setup_logging(settings.logging.level)
+    cfg = settings.supervisor
+    root = project_root()
+    if cfg.mode == "task_scheduler":
+        if action == "enable":
+            xml_path = root / "logs" / f"{cfg.task_name}.task.xml"
+            import os, sys
+
+            user_id = os.environ.get(
+                "USERDOMAIN_ROAMINGPROFILE",
+                os.environ.get("USERDOMAIN", ""),
+            )
+            user_id = (
+                f"{user_id}\\{os.environ['USERNAME']}"
+                if user_id and "USERNAME" in os.environ
+                else os.environ.get("USERNAME", "")
+            )
+            xml = render_task_scheduler_xml(
+                python_executable=sys.executable,
+                project_root=root,
+                user_id=user_id,
+            )
+            write_task_scheduler_xml(xml_path, xml)
+            rc = install_task_scheduler_task(
+                task_name=cfg.task_name, xml_path=xml_path
+            )
+            raise typer.Exit(code=rc)
+        if action == "disable":
+            rc = uninstall_task_scheduler_task(task_name=cfg.task_name)
+            raise typer.Exit(code=rc)
+        if action == "status":
+            import subprocess
+
+            rc = subprocess.call(
+                ["schtasks", "/query", "/tn", cfg.task_name, "/fo", "LIST"]
+            )
+            raise typer.Exit(code=rc)
+        typer.echo(f"unknown action: {action}")
+        raise typer.Exit(code=1)
+    if cfg.mode == "service":
+        nssm = find_nssm(cfg)
+        if nssm is None:
+            typer.echo(
+                "nssm.exe not found. Install via tools/nssm/ or set "
+                "supervisor.nssm_binary in sabrina.toml. See "
+                "rebuild/drafts/supervisor-autostart-plan.md."
+            )
+            raise typer.Exit(code=2)
+        import sys
+
+        log_path = root / "logs" / "service.log"
+        if action == "enable":
+            cmds = build_nssm_install_commands(
+                task_name=cfg.task_name,
+                python_executable=sys.executable,
+                project_root=root,
+                nssm_binary=nssm,
+                log_path=log_path,
+            )
+        elif action == "disable":
+            cmds = build_nssm_uninstall_commands(
+                task_name=cfg.task_name, nssm_binary=nssm
+            )
+        else:
+            typer.echo(f"action {action} not implemented for mode=service")
+            raise typer.Exit(code=1)
+        import subprocess
+
+        for cmd in cmds:
+            rc = subprocess.call(cmd)
+            if rc != 0:
+                typer.echo(f"command failed (rc={rc}): {' '.join(cmd)}")
+                raise typer.Exit(code=rc)
+        typer.echo("ok")
+        raise typer.Exit(code=0)
+    typer.echo(f"supervisor.mode={cfg.mode!r} not supported")
+    raise typer.Exit(code=2)
 
 
 if __name__ == "__main__":

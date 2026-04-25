@@ -23,7 +23,7 @@ def record_clip(
 ) -> np.ndarray:
     """Block for `duration_s`, return (N,) float32 mono PCM at 16 kHz."""
     n_frames = int(round(duration_s * SAMPLE_RATE))
-    log.info("rec.start", duration_s=duration_s, device=str(device))
+    log.info("asr.rec.started", duration_s=duration_s, device=str(device))
     audio = sd.rec(
         n_frames,
         samplerate=SAMPLE_RATE,
@@ -32,5 +32,5 @@ def record_clip(
         device=device,
     )
     sd.wait()
-    log.info("rec.done", samples=int(audio.size))
+    log.info("asr.rec.done", samples=int(audio.size))
     return audio.reshape(-1)

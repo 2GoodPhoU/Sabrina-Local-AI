@@ -29,14 +29,32 @@ dependencies = [
     # Vision component: screen capture + image resize/encode
     "mss>=9.0",
     "pillow>=10.0",
-    # Semantic memory: sentence embeddings + sqlite-vec index.
-    # sentence-transformers pulls torch (~700MB) transitively. A leaner
-    # onnxruntime+MiniLM replacement is on the research list.
-    "sentence-transformers>=3.0",
+    # Semantic memory: ONNX-only embedder + sqlite-vec index.
+    # Default backend is `onnxruntime + tokenizers` for all-MiniLM-L6-v2
+    # (~80 MB model + ~10 MB wheels, no torch). Legacy
+    # `sentence-transformers` backend lives in the optional
+    # `legacy-embedder` extra. See decisions/drafts/011-onnx-embedder.md.
+    "onnxruntime>=1.19",
+    "tokenizers>=0.20",
     "sqlite-vec>=0.1.6",
     # Barge-in: Silero VAD via the pip package (ONNX weights ship inside
     # the wheel; no torch-hub download on first run). See decision 009.
     "silero-vad>=5.1",
+    # Wake-word: openWakeWord ships several pretrained ONNX models
+    # ("hey_jarvis", "alexa", etc.) and supports custom-trained ones.
+    # onnxruntime comes transitively (already in deps above).
+    # See `rebuild/drafts/wake-word-plan.md`.
+    "openwakeword>=0.6",
+]
+
+[project.optional-dependencies]
+# Only install if you want to pin the legacy sentence-transformers backend
+# instead of the ONNX default. Pulls torch (~700 MB). Activate with:
+#   uv sync --extra legacy-embedder
+# then set `[memory.semantic.embedder] backend = "sentence-transformers"`
+# in sabrina.toml.
+legacy-embedder = [
+    "sentence-transformers>=3.0",
 ]
 
 [project.scripts]
@@ -66,3 +84,14 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.uv]
+# Sabrina is Windows-only (per rebuild/ROADMAP.md). Restrict uv's
+# resolution to Windows so we don't drag in Linux-only transitive
+# branches that lack cp312 wheels. Concretely: openwakeword 0.6
+# hard-depends on tflite-runtime>=2.8 with a Linux-platform marker,
+# and tflite-runtime has no cp312 wheels. Without `environments`
+# scoping, uv solves cross-platform and refuses the graph; with
+# `["sys_platform == 'win32'"]` it skips the Linux branch entirely.
+# Re-evaluate when Sabrina grows a Linux/macOS target.
+environments = ["sys_platform == 'win32'"]

@@ -37,7 +37,7 @@ class FasterWhisperListener:
         from faster_whisper import WhisperModel  # noqa: PLC0415
 
         log.info(
-            "fw.loading",
+            "asr.loading",
             model=model,
             device=device,
             compute_type=compute_type,
@@ -55,7 +55,7 @@ class FasterWhisperListener:
         self._beam_size = beam_size
         self._language = language or None
         self.name = f"faster-whisper:{model}@{resolved_device}"
-        log.info("fw.loaded", name=self.name, took_s=round(time.monotonic() - t0, 3))
+        log.info("asr.loaded", name=self.name, took_s=round(time.monotonic() - t0, 3))
 
     async def transcribe(
         self,
@@ -115,5 +115,5 @@ def _detect_device() -> str:
         if ctranslate2.get_cuda_device_count() > 0:
             return "cuda"
     except Exception as exc:  # noqa: BLE001
-        log.debug("fw.cuda_detect_failed", err=str(exc))
+        log.debug("asr.cuda_detect_failed", err=str(exc))
     return "cpu"

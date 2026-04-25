@@ -11,8 +11,10 @@ from sabrina.memory.embed import (
     DEFAULT_DIM,
     DEFAULT_MODEL,
     Embedder,
+    OnnxMiniLMEmbedder,
     SentenceTransformerEmbedder,
     build_embedder,
+    ensure_onnx_assets,
 )
 from sabrina.memory.store import MemoryStore, SearchHit, StoredMessage
 
@@ -21,8 +23,10 @@ __all__ = [
     "DEFAULT_MODEL",
     "Embedder",
     "MemoryStore",
+    "OnnxMiniLMEmbedder",
     "SearchHit",
     "SentenceTransformerEmbedder",
     "StoredMessage",
     "build_embedder",
+    "ensure_onnx_assets",
 ]

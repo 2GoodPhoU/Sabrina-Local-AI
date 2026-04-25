@@ -527,6 +527,88 @@ def test_semantic_config_round_trip():
     assert sem.embedding_model.endswith("all-MiniLM-L6-v2")
     assert sem.top_k >= 1
     assert 0.0 < sem.max_distance <= 2.0
+    # Embedder backend default is ONNX (decision 011).
+    assert sem.embedder.backend == "onnx"
+
+
+def test_embedder_factory_routes_by_backend():
+    """`build_embedder(..., backend=...)` returns the right concrete class."""
+    from sabrina.memory.embed import (
+        OnnxMiniLMEmbedder,
+        SentenceTransformerEmbedder,
+        build_embedder,
+    )
+
+    onnx = build_embedder(backend="onnx")
+    assert isinstance(onnx, OnnxMiniLMEmbedder)
+    legacy = build_embedder(backend="sentence-transformers")
+    assert isinstance(legacy, SentenceTransformerEmbedder)
+    with pytest.raises(ValueError):
+        build_embedder(backend="garbage")
+
+
+def test_embedder_dim_constant_is_384_for_default():
+    """Default model is 384-dim — sqlite-vec table is created with this dim."""
+    from sabrina.memory.embed import DEFAULT_DIM, DEFAULT_MODEL, OnnxMiniLMEmbedder
+
+    assert DEFAULT_DIM == 384
+    assert "MiniLM-L6" in DEFAULT_MODEL
+    e = OnnxMiniLMEmbedder()  # cheap; no model load
+    assert e.dim == 384
+
+
+def test_onnx_embedder_round_trip(tmp_path, monkeypatch):
+    """Cosine similarity sanity check against a known pair.
+
+    We skip when onnxruntime / tokenizers / the model file are unavailable
+    (CI may not have network access). The test guards Eric's "drop-in
+    replacement" claim: similar sentences score higher than dissimilar ones,
+    and embeddings are L2-normalized so cosine == dot product.
+    """
+    pytest.importorskip("onnxruntime")
+    pytest.importorskip("tokenizers")
+    from sabrina.memory.embed import OnnxMiniLMEmbedder, ensure_onnx_assets
+
+    # Force the cache into the test dir so we don't pollute the dev tree.
+    monkeypatch.setenv("SABRINA_EMBEDDER_CACHE_DIR", str(tmp_path / "embedder_cache"))
+    try:
+        ensure_onnx_assets()
+    except Exception as exc:  # noqa: BLE001 - network-gated test
+        pytest.skip(f"can't fetch ONNX assets: {exc}")
+
+    e = OnnxMiniLMEmbedder()
+    a = e.embed("the cat sat on the mat")
+    b = e.embed("a feline rested on the rug")
+    c = e.embed("python list comprehensions are concise")
+    assert len(a) == len(b) == len(c) == 384
+    # L2-normalized: ||v|| approx 1.
+    import math
+
+    for v in (a, b, c):
+        assert abs(sum(x * x for x in v) ** 0.5 - 1.0) < 1e-3
+    # Synonyms should be much closer than unrelated sentences.
+    sim_ab = sum(x * y for x, y in zip(a, b))
+    sim_ac = sum(x * y for x, y in zip(a, c))
+    assert sim_ab > sim_ac + 0.10, (
+        f"expected synonyms (ab={sim_ab:.3f}) to outscore unrelated "
+        f"(ac={sim_ac:.3f}) by >= 0.10"
+    )
+
+
+def test_embed_module_no_torch_import():
+    """The default embedder path must NOT import torch at module load.
+
+    Regression guard for decision 011: if someone re-introduces a top-level
+    `import torch` (or sentence_transformers, which pulls torch), `pytest -q`
+    will fail before the legacy-embedder extra is installed.
+    """
+    import importlib
+    import sys
+
+    sys.modules.pop("sabrina.memory.embed", None)
+    importlib.import_module("sabrina.memory.embed")
+    assert "torch" not in sys.modules
+    assert "sentence_transformers" not in sys.modules
 
 
 def test_voice_loop_format_retrieved_compact():
@@ -1151,3 +1233,634 @@ def test_audio_monitor_trims_capture_to_speech_onset():
     # through the post-fire chunk (which is 1.0 in this setup).
     assert out[0] == 0.0
     assert out[-1] == 1.0
+
+
+# --- step 1 (overnight): logging-vocabulary completion ---
+
+
+def test_turn_id_binds_during_simulated_turn(tmp_path):
+    """A log event emitted while turn_id is bound must carry it; outside, must not.
+
+    Mirrors the voice-loop pattern: bind at top of iteration, unbind in finally.
+    Uses a tmp file sink + the real structlog config so the contextvars
+    processor is exercised end-to-end.
+    """
+    import json
+    import logging as _logging
+
+    import structlog
+
+    from sabrina.logging import setup_logging
+
+    log_path = tmp_path / "sabrina.log"
+    try:
+        setup_logging("INFO", log_file=log_path)
+        log = structlog.get_logger("test.turnid")
+
+        log.info("turn.outside_before")  # no turn_id bound
+        structlog.contextvars.bind_contextvars(turn_id="abc12345")
+        try:
+            log.info("turn.started")
+        finally:
+            structlog.contextvars.unbind_contextvars("turn_id")
+        log.info("turn.outside_after")  # turn_id should be cleared
+
+        for h in _logging.getLogger().handlers:
+            h.flush()
+
+        # File sink writes JSON-per-line via _make_file_tee. Each event becomes
+        # one line; assert presence/absence of turn_id per line.
+        body = log_path.read_text(encoding="utf-8")
+        lines = [ln for ln in body.splitlines() if ln.strip()]
+        events = [json.loads(ln) for ln in lines if ln.lstrip().startswith("{")]
+
+        before = next(e for e in events if e["event"] == "turn.outside_before")
+        started = next(e for e in events if e["event"] == "turn.started")
+        after = next(e for e in events if e["event"] == "turn.outside_after")
+
+        assert "turn_id" not in before
+        assert started.get("turn_id") == "abc12345"
+        assert "turn_id" not in after
+    finally:
+        for h in list(_logging.getLogger().handlers):
+            _logging.getLogger().removeHandler(h)
+            try:
+                h.close()
+            except Exception:
+                pass
+
+
+def test_voice_loop_imports_structlog_and_uuid_for_turn_correlation():
+    """Sanity-check that the voice loop module wires the correlation pieces.
+
+    The plan calls for `structlog.contextvars.bind_contextvars(turn_id=...)`
+    on turn-start and `unbind_contextvars` on turn-end. We grep the module
+    source rather than spinning up an asyncio loop here -- the integration
+    test above exercises the end-to-end contextvar flow.
+    """
+    from pathlib import Path as _Path
+
+    src = _Path(__file__).resolve().parents[1] / "src" / "sabrina" / "voice_loop.py"
+    body = src.read_text(encoding="utf-8")
+    assert "import structlog" in body
+    assert "import uuid" in body
+    assert "bind_contextvars(turn_id=" in body
+    assert 'unbind_contextvars("turn_id")' in body
+    # And the canonical turn.* event names are emitted.
+    assert '"turn.started"' in body
+    assert '"turn.done"' in body
+    assert '"turn.first_audio_ms"' in body
+
+
+def test_logging_vocabulary_renames_landed():
+    """Renames per the logging-vocabulary plan: fw.* -> asr.*, rec.* -> asr.rec.*."""
+    from pathlib import Path as _Path
+
+    pkg = _Path(__file__).resolve().parents[1] / "src" / "sabrina"
+    fw = (pkg / "listener" / "faster_whisper.py").read_text(encoding="utf-8")
+    rec = (pkg / "listener" / "record.py").read_text(encoding="utf-8")
+    vl = (pkg / "voice_loop.py").read_text(encoding="utf-8")
+
+    # Old names must be gone from these files.
+    assert '"fw.loading"' not in fw
+    assert '"fw.loaded"' not in fw
+    assert '"fw.cuda_detect_failed"' not in fw
+    assert '"rec.start"' not in rec
+    assert '"rec.done"' not in rec
+    assert '"embedder.ready"' not in vl
+    assert '"embedder.warmup_failed"' not in vl
+
+    # Canonical names present.
+    assert '"asr.loading"' in fw
+    assert '"asr.loaded"' in fw
+    assert '"asr.cuda_detect_failed"' in fw
+    assert '"asr.rec.started"' in rec
+    assert '"asr.rec.done"' in rec
+    assert '"embed.ready"' in vl
+    assert '"embed.warmup_failed"' in vl
+    assert '"brain.error"' in vl
+
+
+# --- step 2 (overnight): wake-word scaffolding ---
+
+
+class _StubOpenWakeWordModel:
+    """In-memory stand-in for openwakeword.model.Model."""
+
+    def __init__(self, scores: dict[str, float] | None = None) -> None:
+        self._scores = scores or {"hey_jarvis": 0.0}
+        self.predict_calls: list = []
+        self.reset_calls = 0
+
+    def predict(self, frame_i16):  # noqa: ANN001
+        self.predict_calls.append(int(getattr(frame_i16, "size", 0)))
+        return dict(self._scores)
+
+    def reset(self) -> None:
+        self.reset_calls += 1
+
+
+def _wake_with_stub(monkeypatch, scores):
+    """Build a WakeWordDetector wired to the stub model."""
+    from sabrina.listener import wake_word
+
+    stub = _StubOpenWakeWordModel(scores=scores)
+    # wake_word imports openwakeword inside `_ensure_loaded`; replace
+    # the lookup so neither the real package nor onnxruntime is needed.
+    fake_module = type(
+        "fake_owww_model_module", (), {"Model": lambda **_kwargs: stub}
+    )
+    fake_pkg = type("fake_owww_pkg", (), {"model": fake_module})
+    monkeypatch.setitem(__import__("sys").modules, "openwakeword", fake_pkg)
+    monkeypatch.setitem(__import__("sys").modules, "openwakeword.model", fake_module)
+    return wake_word.WakeWordDetector(model="hey_jarvis", threshold=0.5), stub
+
+
+def test_wake_word_detector_below_threshold_returns_none(monkeypatch):
+    """Score < threshold -> feed() returns None, no fire."""
+    import numpy as np
+
+    detector, _stub = _wake_with_stub(monkeypatch, scores={"hey_jarvis": 0.2})
+    chunk = np.zeros(1280, dtype=np.float32)
+    assert detector.feed(chunk) is None
+
+
+def test_wake_word_detector_fires_at_threshold(monkeypatch):
+    """Score >= threshold past first frame -> feed() returns the score."""
+    import numpy as np
+
+    detector, _stub = _wake_with_stub(monkeypatch, scores={"hey_jarvis": 0.9})
+    chunk = np.zeros(1280, dtype=np.float32)
+    score = detector.feed(chunk)
+    assert score == 0.9
+
+
+def test_wake_word_detector_cooldown_suppresses_rapid_retriggers(monkeypatch):
+    """Two hot frames inside cooldown -> only the first fires."""
+    import numpy as np
+
+    detector, _stub = _wake_with_stub(monkeypatch, scores={"hey_jarvis": 0.9})
+    # Wake_word default cooldown is 2000ms. Feed two back-to-back chunks.
+    chunk = np.zeros(1280, dtype=np.float32)
+    first = detector.feed(chunk)
+    second = detector.feed(chunk)
+    assert first == 0.9
+    assert second is None
+
+
+def test_wake_word_detector_does_not_fire_on_noise_below_threshold(monkeypatch):
+    """Repeated noise frames below threshold never fire."""
+    import numpy as np
+
+    detector, _stub = _wake_with_stub(monkeypatch, scores={"hey_jarvis": 0.4})
+    rng = np.random.default_rng(42)
+    for _ in range(10):
+        # Random low-amplitude noise. Score is hardcoded by the stub
+        # regardless, but we confirm there's no accidental fire from
+        # any path-quirk.
+        chunk = rng.standard_normal(1280).astype(np.float32) * 0.01
+        assert detector.feed(chunk) is None
+
+
+def test_wake_word_config_round_trip():
+    """[wake_word] block in sabrina.toml round-trips through pydantic."""
+    from sabrina.config import load_settings
+
+    s = load_settings(reload=True)
+    assert s.wake_word.enabled is False
+    assert s.wake_word.model == "hey_jarvis"
+    assert 0.0 <= s.wake_word.threshold <= 1.0
+    assert s.wake_word.cooldown_ms > 0
+
+
+# --- step 3 (overnight): supervisor + autostart ---
+
+
+def _supervisor_cfg(**overrides):
+    """Build a SupervisorConfig with sensible test defaults overridden."""
+    from sabrina.config import SupervisorConfig
+
+    base = dict(
+        mode="task_scheduler",
+        task_name="SabrinaTest",
+        restart_max=3,
+        restart_window_s=60,
+        nssm_binary="",
+    )
+    base.update(overrides)
+    return SupervisorConfig(**base)
+
+
+def test_supervisor_exits_on_clean_child_exit():
+    """rc 0 from the child -> supervisor returns 0 immediately, no restart."""
+    from sabrina.supervisor import run_supervised
+
+    spawn_calls = []
+
+    def stub_spawn(_argv):
+        spawn_calls.append(1)
+        return 0
+
+    rc = run_supervised(
+        ["python", "stub"], _supervisor_cfg(), spawner=stub_spawn, sleeper=lambda _s: None
+    )
+    assert rc == 0
+    assert len(spawn_calls) == 1
+
+
+def test_supervisor_restarts_within_budget_then_gives_up():
+    """Crashes inside window count toward `restart_max`; over -> rc 2."""
+    from sabrina.supervisor import run_supervised
+
+    sleeps: list[float] = []
+    spawn_calls: list[int] = []
+
+    def stub_spawn(_argv):
+        spawn_calls.append(1)
+        return 1  # crash
+
+    rc = run_supervised(
+        ["python", "stub"],
+        _supervisor_cfg(restart_max=2),
+        spawner=stub_spawn,
+        sleeper=lambda s: sleeps.append(s),
+    )
+    assert rc == 2
+    # restart_max=2 means: first crash counts (1 entry, not exceeded),
+    # second crash counts (2 entries, not exceeded > max=2 is False),
+    # third crash (3 entries) -> exceeded -> bail. So 3 spawns.
+    assert len(spawn_calls) == 3
+    # Backoff doubles per consecutive crash, capped at 60.
+    assert sleeps[0] == 2.0
+    assert sleeps[1] == 4.0
+
+
+def test_supervisor_user_interrupt_returns_immediately():
+    """Exit codes that mean Ctrl+C must not respawn."""
+    from sabrina.supervisor import run_supervised
+
+    def stub_spawn(_argv):
+        return 130  # POSIX SIGINT exit code
+
+    rc = run_supervised(
+        ["python", "stub"], _supervisor_cfg(), spawner=stub_spawn, sleeper=lambda _s: None
+    )
+    assert rc == 130
+
+
+def test_supervisor_backoff_caps_at_60_seconds():
+    """Consecutive backoff grows but never exceeds the documented 60 s cap."""
+    from sabrina.supervisor import run_supervised
+
+    sleeps: list[float] = []
+
+    def stub_spawn(_argv):
+        return 1
+
+    run_supervised(
+        ["python", "stub"],
+        _supervisor_cfg(restart_max=12),
+        spawner=stub_spawn,
+        sleeper=lambda s: sleeps.append(s),
+    )
+    assert max(sleeps) <= 60.0
+
+
+def test_task_scheduler_xml_renders_with_paths_and_user():
+    """XML contains the python exe, project root, and user verbatim."""
+    from sabrina.supervisor import render_task_scheduler_xml
+
+    xml = render_task_scheduler_xml(
+        python_executable=r"C:\Python312\python.exe",
+        project_root=r"C:\projects\sabrina-2",
+        user_id="DESKTOP-ABC\\eric",
+    )
+    assert "<LogonTrigger>" in xml
+    assert "<Command>C:\Python312\python.exe</Command>" in xml
+    assert "<Arguments>-m sabrina run</Arguments>" in xml
+    assert "<WorkingDirectory>C:\projects\sabrina-2</WorkingDirectory>" in xml
+    assert "DESKTOP-ABC\\eric" in xml
+
+
+def test_task_scheduler_xml_writes_with_utf16_le_bom(tmp_path):
+    """schtasks /xml requires UTF-16 LE with a BOM. We assert both bytes."""
+    from sabrina.supervisor import render_task_scheduler_xml, write_task_scheduler_xml
+
+    xml = render_task_scheduler_xml(
+        python_executable="x",
+        project_root="y",
+        user_id="z",
+    )
+    out = tmp_path / "task.xml"
+    write_task_scheduler_xml(out, xml)
+    raw = out.read_bytes()
+    # BOM is 0xFF 0xFE for little-endian UTF-16.
+    assert raw[:2] == b"\xff\xfe"
+    # Body must round-trip through utf-16-le decoding.
+    decoded = raw[2:].decode("utf-16-le")
+    assert decoded == xml
+
+
+def test_task_scheduler_install_invokes_schtasks(tmp_path):
+    """Install path shells out to schtasks /create /tn ... /xml ... /f."""
+    from sabrina.supervisor import install_task_scheduler_task
+
+    captured: list[list[str]] = []
+
+    def fake_run(cmd):
+        captured.append(cmd)
+        return 0
+
+    rc = install_task_scheduler_task(
+        task_name="SabrinaTest",
+        xml_path=tmp_path / "task.xml",
+        runner=fake_run,
+    )
+    assert rc == 0
+    assert captured == [
+        ["schtasks", "/create", "/tn", "SabrinaTest", "/xml",
+         str(tmp_path / "task.xml"), "/f"],
+    ]
+
+
+def test_nssm_install_command_sequence_shape():
+    """Install sequence for service mode: install + 5 set + restart-default."""
+    from sabrina.supervisor import build_nssm_install_commands
+
+    cmds = build_nssm_install_commands(
+        task_name="SabrinaTest",
+        python_executable="C:/Python312/python.exe",
+        project_root="C:/sabrina",
+        nssm_binary="C:/tools/nssm.exe",
+        log_path="C:/sabrina/logs/service.log",
+    )
+    assert len(cmds) == 6
+    assert cmds[0][:3] == ["C:/tools/nssm.exe", "install", "SabrinaTest"]
+    # The post-install configures all live in `nssm set`.
+    for c in cmds[1:]:
+        assert c[:3] == ["C:/tools/nssm.exe", "set", "SabrinaTest"]
+    # AppExit Default Restart pair tells nssm to restart on crash too.
+    assert ["AppExit", "Default", "Restart"] == cmds[-1][3:]
+
+
+def test_supervisor_config_round_trip():
+    """[supervisor] block round-trips through pydantic."""
+    from sabrina.config import load_settings
+
+    s = load_settings(reload=True)
+    assert s.supervisor.mode in ("task_scheduler", "service")
+    assert s.supervisor.task_name == "SabrinaAI"
+    assert s.supervisor.restart_max >= 1
+    assert s.supervisor.restart_window_s >= 1
+
+
+# --- step 4 (overnight): semantic-memory GUI + compaction ---
+
+
+def test_memory_store_migrates_to_v1_idempotently(tmp_path):
+    """First open adds kind+summarized_at; second open is a no-op."""
+    import sqlite3
+
+    from sabrina.memory.store import MemoryStore
+
+    db = tmp_path / "memory.db"
+    store = MemoryStore(db_path=db)
+    cols = {row[1] for row in store._conn.execute("PRAGMA table_info(messages)")}
+    assert "kind" in cols
+    assert "summarized_at" in cols
+    v = store._conn.execute("PRAGMA user_version").fetchone()[0]
+    assert v == 1
+    store.close()
+    # Re-open should not error.
+    store2 = MemoryStore(db_path=db)
+    v2 = store2._conn.execute("PRAGMA user_version").fetchone()[0]
+    assert v2 == 1
+    store2.close()
+
+
+def test_memory_store_load_summaries_returns_only_summary_rows(tmp_path):
+    from sabrina.memory.store import MemoryStore
+
+    store = MemoryStore(db_path=tmp_path / "memory.db")
+    store.append("s1", "user", "what time is it?")
+    store.append("s1", "assistant", "around 9 am")
+    sid = store.append_summary("s1", "User asked about the time.")
+    summaries = store.load_summaries()
+    assert len(summaries) == 1
+    assert summaries[0].id == sid
+    assert summaries[0].content == "User asked about the time."
+    # load_recent must NOT return the summary.
+    recent = store.load_recent(limit=10)
+    roles = [m.role for m in recent]
+    assert "user" in roles
+    assert all(m.id != sid for m in recent)
+    store.close()
+
+
+def test_memory_store_count_uncompacted_drops_after_mark(tmp_path):
+    from sabrina.memory.store import MemoryStore
+
+    store = MemoryStore(db_path=tmp_path / "memory.db")
+    ids = [store.append("s1", "user", f"turn {i}") for i in range(5)]
+    assert store.count_uncompacted() == 5
+    store.mark_summarized(ids[:3])
+    assert store.count_uncompacted() == 2
+    store.close()
+
+
+def test_memory_store_total_turn_chars_excludes_marked(tmp_path):
+    from sabrina.memory.store import MemoryStore
+
+    store = MemoryStore(db_path=tmp_path / "memory.db")
+    ids = []
+    for body in ["aaaa", "bbbbbb", "cccccccc"]:
+        ids.append(store.append("s1", "user", body))
+    assert store.total_turn_chars() == 4 + 6 + 8
+    store.mark_summarized(ids[:1])  # the 4-char one
+    assert store.total_turn_chars() == 6 + 8
+    # only_uncompacted=False counts all turn rows.
+    assert store.total_turn_chars(only_uncompacted=False) == 4 + 6 + 8
+    store.close()
+
+
+def test_compaction_should_compact_below_threshold_returns_false(tmp_path):
+    from sabrina.config import CompactionConfig
+    from sabrina.memory.compaction import should_compact
+    from sabrina.memory.store import MemoryStore
+
+    store = MemoryStore(db_path=tmp_path / "memory.db")
+    store.append("s1", "user", "x" * 100)
+    cfg = CompactionConfig(mode="auto", threshold_tokens=10_000, batch_size=200, chars_per_token=4.0)
+    assert should_compact(store, cfg) is False
+    store.close()
+
+
+def test_compaction_should_compact_above_threshold_returns_true(tmp_path):
+    from sabrina.config import CompactionConfig
+    from sabrina.memory.compaction import should_compact
+    from sabrina.memory.store import MemoryStore
+
+    store = MemoryStore(db_path=tmp_path / "memory.db")
+    # 40,000 chars / 4 chars-per-token = 10,000 tokens.
+    store.append("s1", "user", "x" * 40_000)
+    cfg = CompactionConfig(
+        mode="auto", threshold_tokens=5_000, batch_size=200, chars_per_token=4.0
+    )
+    assert should_compact(store, cfg) is True
+    store.close()
+
+
+def test_compaction_manual_mode_never_auto_triggers(tmp_path):
+    from sabrina.config import CompactionConfig
+    from sabrina.memory.compaction import should_compact
+    from sabrina.memory.store import MemoryStore
+
+    store = MemoryStore(db_path=tmp_path / "memory.db")
+    store.append("s1", "user", "x" * 1_000_000)  # huge corpus
+    cfg = CompactionConfig(
+        mode="manual", threshold_tokens=10, batch_size=200, chars_per_token=4.0
+    )
+    # Even with overflowing content, manual mode never auto-triggers.
+    assert should_compact(store, cfg) is False
+    store.close()
+
+
+async def test_compaction_compacts_marks_originals_and_writes_summary(tmp_path):
+    from sabrina.config import CompactionConfig
+    from sabrina.memory.compaction import compact, make_callable_summarizer
+    from sabrina.memory.store import MemoryStore
+
+    store = MemoryStore(db_path=tmp_path / "memory.db")
+    for i in range(20):
+        store.append("s1", "user" if i % 2 == 0 else "assistant", f"turn {i}")
+
+    captured_transcripts: list[str] = []
+
+    async def fake_summarize(transcript: str) -> str:
+        captured_transcripts.append(transcript)
+        return "User and assistant exchanged 20 turns about test data."
+
+    summarizer = make_callable_summarizer(fake_summarize)
+    cfg = CompactionConfig(
+        mode="auto", threshold_tokens=10, batch_size=20, chars_per_token=4.0
+    )
+    result = await compact(store, summarizer, cfg, force=True)
+
+    assert result.summaries_written == 1
+    assert result.turns_compacted == 20
+    assert len(captured_transcripts) == 1
+    # Summary row written; turns marked.
+    summaries = store.load_summaries()
+    assert len(summaries) == 1
+    assert "exchanged 20 turns" in summaries[0].content
+    assert store.count_uncompacted() == 0
+    store.close()
+
+
+async def test_compaction_skips_when_below_threshold_and_not_forced(tmp_path):
+    from sabrina.config import CompactionConfig
+    from sabrina.memory.compaction import compact, make_callable_summarizer
+    from sabrina.memory.store import MemoryStore
+
+    store = MemoryStore(db_path=tmp_path / "memory.db")
+    store.append("s1", "user", "small")
+
+    summarize_called = []
+
+    async def fake_summarize(_t):
+        summarize_called.append(1)
+        return "should not be called"
+
+    cfg = CompactionConfig(
+        mode="auto", threshold_tokens=10_000, batch_size=200, chars_per_token=4.0
+    )
+    result = await compact(
+        store, make_callable_summarizer(fake_summarize), cfg
+    )
+    assert result.skipped_reason == "below_threshold"
+    assert summarize_called == []
+    store.close()
+
+
+# --- Phase 2 deferred items: regression guards ---
+
+
+def test_voice_loop_summary_block_helper_returns_none_for_no_summaries(tmp_path):
+    """`_summary_block(memory)` -> None when there are no summary rows."""
+    from sabrina.memory.store import MemoryStore
+    from sabrina.voice_loop import _summary_block
+
+    with MemoryStore(tmp_path / "mem.db") as m:
+        assert _summary_block(m) is None
+
+
+def test_voice_loop_summary_block_renders_header_and_rows(tmp_path):
+    """`_summary_block(memory)` -> 'Long-term memory ...' + one line per summary."""
+    from sabrina.memory.store import MemoryStore, new_session_id
+    from sabrina.voice_loop import _summary_block
+
+    with MemoryStore(tmp_path / "mem.db") as m:
+        sid = new_session_id()
+        m.append_summary(sid, "user is named eric, prefers terse replies")
+        m.append_summary(sid, "user is rebuilding sabrina; second-gen project")
+        block = _summary_block(m)
+    assert block is not None
+    assert block.startswith("Long-term memory")
+    assert "user is named eric" in block
+    assert "second-gen project" in block
+
+
+def test_voice_loop_imports_wake_word_classes():
+    """voice_loop should import WakeWordDetector + WakeWordMonitor for idle wiring."""
+    from pathlib import Path
+
+    src = (Path(__file__).parent.parent / "src/sabrina/voice_loop.py").read_text()
+    assert "WakeWordDetector" in src
+    assert "WakeWordMonitor" in src
+
+
+def test_cli_memory_compact_command_registered():
+    """`sabrina memory-compact` should be a registered Typer command."""
+    from sabrina.cli import app
+
+    names = {cmd.name for cmd in app.registered_commands}
+    assert "memory-compact" in names
+
+
+def test_cli_download_models_command_registered():
+    """`sabrina download-models` should be a registered Typer command."""
+    from sabrina.cli import app
+
+    names = {cmd.name for cmd in app.registered_commands}
+    assert "download-models" in names
+
+
+def test_gui_settings_window_has_mainloop_method():
+    """Regression for Phase 0 finding: SettingsWindow.mainloop dropped."""
+    from sabrina.gui.settings import SettingsWindow
+
+    assert hasattr(SettingsWindow, "mainloop")
+    assert callable(SettingsWindow.mainloop)
+
+
+def test_gui_collect_filters_underscore_keys_and_translates_preset():
+    """GUI _collect: underscore-prefixed control vars don't leak; _piper_preset
+    translates to tts.piper.voice_model."""
+    from sabrina.gui.settings import SettingsWindow
+
+    class _FakeVar:
+        def __init__(self, v):
+            self._v = v
+
+        def get(self):
+            return self._v
+
+    win = SettingsWindow.__new__(SettingsWindow)
+    win._vars = {
+        "memory.enabled": _FakeVar(True),
+        "_piper_preset": _FakeVar("amy-medium"),
+    }
+    out = SettingsWindow._collect(win)
+    assert "_piper_preset" not in out
+    assert out.get("tts.piper.voice_model") == "voices/en_US-amy-medium.onnx"
+    assert out["memory.enabled"] is True

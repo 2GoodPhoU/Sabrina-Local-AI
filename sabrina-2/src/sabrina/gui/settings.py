@@ -19,6 +19,7 @@ Design choices:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 # customtkinter is imported lazily inside open_settings() so that
@@ -191,6 +192,95 @@ class SettingsWindow:
         self._vars["memory.load_recent"] = self._spinbox(
             parent, "Messages to reload at start", m.load_recent, (0, 500)
         )
+        # --- Semantic retrieval sub-frame ---
+        self._section_label(parent, "Semantic retrieval")
+        s = m.semantic
+        self._vars["memory.semantic.enabled"] = self._switch(
+            parent, "Enabled", s.enabled
+        )
+        self._vars["memory.semantic.top_k"] = self._spinbox(
+            parent, "Top K", s.top_k, (1, 25)
+        )
+        self._vars["memory.semantic.max_distance"] = self._entry(
+            parent, "Max distance (0..1)", f"{s.max_distance:.2f}"
+        )
+        self._vars["memory.semantic.min_age_turns"] = self._spinbox(
+            parent, "Min age turns", s.min_age_turns, (0, 1000)
+        )
+        # --- Compaction sub-frame ---
+        self._section_label(parent, "Compaction")
+        c = m.compaction
+        self._vars["memory.compaction.mode"] = self._optionmenu(
+            parent, "Auto-compaction", c.mode, ["auto", "manual"]
+        )
+        self._vars["memory.compaction.threshold_tokens"] = self._spinbox(
+            parent, "Threshold tokens", c.threshold_tokens, (1000, 1_000_000)
+        )
+        self._vars["memory.compaction.batch_size"] = self._spinbox(
+            parent, "Turns per pass", c.batch_size, (10, 5_000)
+        )
+        # Stats + manual-compact button. Both subprocess-shell-out so the
+        # voice loop / GUI never block on the brain. Wired to no-op
+        # placeholders here; the runner is added when the
+        # `sabrina memory-compact` CLI verb lands.
+        self._memory_stats_label = self.ctk.CTkLabel(
+            parent,
+            text="(stats refresh on tab switch)",
+            text_color=("gray40", "gray70"),
+            anchor="w",
+        )
+        self._memory_stats_label.pack(fill="x", padx=8, pady=(4, 0))
+        action_bar = self.ctk.CTkFrame(parent, fg_color="transparent")
+        action_bar.pack(fill="x", padx=8, pady=4)
+        self.ctk.CTkButton(
+            action_bar, text="Compact now", width=120,
+            command=lambda: self._shell_out_async(
+                ["sabrina", "memory-compact", "--force"], label="Compacting"
+            ),
+        ).pack(side="left", padx=(0, 6))
+        self.ctk.CTkButton(
+            action_bar, text="Reindex", width=120,
+            command=lambda: self._shell_out_async(
+                ["sabrina", "memory-reindex"], label="Reindexing"
+            ),
+        ).pack(side="left")
+
+    def _set_status(self, text: str) -> None:
+        """Update the footer status label. Used by sub-frame buttons."""
+        if hasattr(self, "_status") and self._status is not None:
+            self._status.configure(text=text)
+
+    def _shell_out_async(self, argv: list, *, label: str) -> None:
+        """Fire a CLI subprocess in the background; surface result in the status label.
+
+        Runs the command in a daemon thread so the GUI stays responsive.
+        The status label updates pre-flight ("Compacting...") and
+        post-flight ("Done."/"Failed"). We don't pipe stdout/stderr into
+        the GUI; users follow up with the CLI for full output.
+        """
+        import subprocess
+        import threading
+
+        self._set_status(f"{label}... (running `{' '.join(argv)}`)")
+
+        def _run() -> None:
+            try:
+                rc = subprocess.call(argv)
+            except Exception as exc:  # noqa: BLE001
+                msg = f"{label} failed: {exc}"
+            else:
+                msg = (
+                    f"{label} done."
+                    if rc == 0
+                    else f"{label} exited rc={rc}; check `{' '.join(argv)}` in a terminal."
+                )
+            # Tk vars/labels must be touched from the main thread.
+            try:
+                self.root.after(0, lambda: self._set_status(msg))
+            except Exception:  # noqa: BLE001 - window may be closing
+                pass
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def _build_footer(self) -> None:
         bar = self.ctk.CTkFrame(self.root, fg_color="transparent")
@@ -314,83 +404,125 @@ class SettingsWindow:
 
     # --- save ---
 
-    def _collect_updates(self) -> dict[str, Any]:
-        # Read each var, coerce to the right type, then nest it into a dict
-        # matching the TOML layout.
+    def _collect(self) -> dict[str, Any]:
+        """Pull every var into a flat {dotted-key: value} dict, coerced.
+
+        Skips control vars whose key starts with underscore (e.g.
+        `_piper_preset`); those are translated to their real TOML keys
+        below before save. Without this filter, `_piper_preset` would
+        end up as a top-level TOML key on save.
+        """
         flat: dict[str, Any] = {}
         for key, var in self._vars.items():
             if key.startswith("_"):
-                continue  # intermediate control vars (e.g. _piper_preset)
-            raw = var.get()
+                continue  # control var; handled below
+            try:
+                raw = var.get()
+            except Exception:  # noqa: BLE001 - tk var may not be alive
+                continue
             flat[key] = _coerce(key, raw)
 
-        # Translate piper preset -> voice_model path.
-        preset_key = self._vars["_piper_preset"].get()
-        if preset_key in PRESETS:
-            flat["tts.piper.voice_model"] = f"voices/{PRESETS[preset_key].id}.onnx"
-
-        return _nest(flat)
+        # Voice preset dropdown -> tts.piper.voice_model path.
+        # Pull from PRESETS so adding a voice in voices.py automatically
+        # surfaces here without editing GUI code (no drift).
+        preset_var = self._vars.get("_piper_preset")
+        if preset_var is not None:
+            try:
+                preset_key = preset_var.get()
+            except Exception:  # noqa: BLE001
+                preset_key = ""
+            if preset_key in PRESETS:
+                flat["tts.piper.voice_model"] = (
+                    f"voices/{PRESETS[preset_key].id}.onnx"
+                )
+        return flat
 
     def _on_save(self) -> None:
+        """Render collected vars to a nested dict + write via settings_io."""
+        flat = self._collect()
+        nested = _nest(flat)
         try:
-            updates = self._collect_updates()
-            save_with_updates(updates)
-        except Exception as exc:  # noqa: BLE001 - surface any failure to user
-            self._status.configure(
-                text=f"Save failed: {exc}", text_color=("red", "red")
-            )
-            return
-        self._status.configure(
-            text="Saved. Restart any running sabrina command to pick up changes.",
-            text_color=("#22a95a", "#3ddb83"),
-        )
+            save_with_updates(nested)
+            self._set_status("Saved.")
+        except Exception as exc:  # noqa: BLE001
+            self._set_status(f"Save failed: {exc}")
 
     def mainloop(self) -> None:
+        """Run the GUI event loop. Blocks until the window is closed.
+
+        Thin wrapper so callers (open_settings) can call .mainloop()
+        on the SettingsWindow rather than reaching into .root, and so
+        a future test can substitute a no-op.
+        """
         self.root.mainloop()
 
 
-# --- helpers ---
-
-
 def _preset_key_from_model_path(path: str) -> str:
-    """Given 'voices/en_US-amy-medium.onnx', return 'amy-medium' if known."""
-    stem = path.rsplit("/", 1)[-1].removesuffix(".onnx")
+    """Map a `voices/<voice>.onnx` path to a dropdown preset key.
+
+    Drives off `PRESETS` from `sabrina.speaker.voices` so a new voice
+    landing in voices.py shows up in the GUI without a parallel update
+    here. Falls back to the first preset key when the path doesn't
+    match any known preset (so the dropdown always has a legal value).
+    """
+    name = Path(path).stem
     for key, preset in PRESETS.items():
-        if preset.id == stem:
+        if preset.id == name:
             return key
-    # Fallback: the first preset, so the dropdown always has a legal value.
-    return next(iter(PRESETS))
-
-
-_BOOL_KEYS = {"memory.enabled"}
-_INT_KEYS = {
-    "brain.claude.max_tokens",
-    "tts.piper.speaker_id",
-    "tts.sapi.rate",
-    "asr.faster_whisper.beam_size",
-    "vision.monitor",
-    "vision.max_edge_px",
-    "memory.load_recent",
-}
-_FLOAT_KEYS = {"tts.piper.length_scale"}
+    return next(iter(PRESETS), "")
 
 
 def _coerce(key: str, value: Any) -> Any:
-    if key in _BOOL_KEYS:
-        return bool(value)
-    if key in _INT_KEYS:
-        return int(float(value))  # StringVar might deliver "12" or "12.0"
-    if key in _FLOAT_KEYS:
-        return float(value)
-    return str(value)
+    """Coerce a TK-var raw value to the right Python type per dotted key.
+
+    Booleans pass through. Ints/floats are inferred from key names; the
+    full set of typed fields is small enough to enumerate.
+    """
+    if isinstance(value, bool):
+        return value
+    int_keys = {
+        "memory.load_recent",
+        "memory.semantic.top_k",
+        "memory.semantic.min_age_turns",
+        "memory.compaction.threshold_tokens",
+        "memory.compaction.batch_size",
+        "tts.piper.speaker_id",
+        "tts.sapi.rate",
+        "asr.faster_whisper.beam_size",
+        "vision.monitor",
+        "vision.max_edge_px",
+    }
+    float_keys = {
+        "tts.piper.length_scale",
+        "memory.semantic.max_distance",
+        "barge_in.threshold",
+        "wake_word.threshold",
+        "memory.compaction.chars_per_token",
+    }
+    s = str(value).strip()
+    if key in int_keys:
+        try:
+            return int(s)
+        except ValueError:
+            return 0
+    if key in float_keys:
+        try:
+            return float(s)
+        except ValueError:
+            return 0.0
+    return s
 
 
 def _nest(flat: dict[str, Any]) -> dict[str, Any]:
-    """{'a.b.c': 1} -> {'a': {'b': {'c': 1}}}."""
+    """Convert {"a.b.c": v} -> {"a": {"b": {"c": v}}}.
+
+    Used so the GUI's flat var map can be handed to settings_io which
+    expects nested dicts mirroring the TOML structure.
+    """
     out: dict[str, Any] = {}
-    for dotted, value in flat.items():
+    for key, value in flat.items():
+        parts = key.split(".")
         cur = out
-        parts = dotted.split(".")
         for p in parts[:-1]:
             cur = cur.setdefault(p, {})
         cur[parts[-1]] = value
