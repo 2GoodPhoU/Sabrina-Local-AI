@@ -1,108 +1,98 @@
 # When you return — Sabrina rebuild quickstart
 
-**Date:** 2026-04-25
+**Date:** 2026-04-25 (refreshed end-of-day after pass 2)
 **Purpose:** single entry-point for starting a new chat session. Read this
 first. Then act.
 
+> **Open [`rebuild/ACTION_ITEMS.md`](ACTION_ITEMS.md) right after this doc** —
+> it's the consolidated punch list for everything in the working tree
+> (Tracks A + B + tonight's pass 2). One file, one source of truth.
+
 ## State of play
 
-Decisions 007, 008, and 009 are committed on this branch:
+Decisions 007, 008, 009, and the 009a thin-spots bundle are committed.
+Barge-in is `enabled = true` in `sabrina.toml`.
 
 - **007 (semantic memory)** — Windows-validated 2026-04-24, first-audio
   1.62 s warm.
 - **008 (foundational refactor bundle)** — `[schema].version` hook +
-  redacting structlog processor + rotating file sink. Tests green
-  (52 passed); committed.
+  redacting structlog processor + rotating file sink. Tests green.
 - **009 (barge-in)** — Silero VAD + `CancelToken` threading through
   `Brain.chat` and `Speaker.speak`, wired into the voice loop's
   speaking state with `pending_barge_audio` to hand the captured audio
-  back to the next turn. Committed at `f22cd73`.
-- **009a (barge-in thin-spot patches)** — four of the five thin spots
-  from decision 009 closed in-tree per `rebuild/drafts/009a-thin-spots-plan.md`:
-  graceful-degrade on Silero load (`_make_barge_in_vad` helper, logs
-  `vad.unavailable`), trim-to-VAD-start in `AudioMonitor.stop()` with a
-  150 ms pre-fire margin, per-frame `vad.prob` DEBUG log, and Piper
-  cancel poll tightened 30 ms → 10 ms. 59 tests green (was 57).
-  Footnoted on decision 009; no new decision doc. **Not yet committed**
-  — Eric runs `pre-commit install` + `git commit` on his Windows box.
+  back to the next turn. **Validated 2026-04-25** on the
+  i7-13700K/4080: 264 ms cut latency, threshold 0.5 holds against
+  keyboard/mouse noise, no first-audio regression.
+- **009a (barge-in thin-spots)** — graceful-degrade on Silero load
+  failure, trim-to-VAD-start in `AudioMonitor.stop()`, per-frame
+  `vad.prob` DEBUG log, Piper cancel poll tightened to 10 ms.
+  Footnoted on decision 009; 59 tests green pre-overnight.
 
-**009 + 009a validated 2026-04-25** on the i7-13700K/4080 box: 264 ms
-cut latency on the "stop nevermind" interrupt, threshold 0.5 holds
-against keyboard/mouse noise, no first-audio regression (1.839 s vs.
-~1.85 s baseline). `[barge_in].enabled = true` is now committed in
-`sabrina.toml`.
+## Working tree — uncommitted (Track B + pass 2)
 
-**Next up: pick the next component** (see "First-time-you-sit-down
-sequence" Step 4 below — infra-first vs. character-first menu). Eric's
-call. Both paths are draft-complete.
+Track B ran four steps sequentially while Eric slept (2026-04-25).
+Pass 2 (later same day) added the ONNX embedder swap, voice-loop
+wake-word + summary-injection wiring, brain-backed `memory-compact`
+CLI verb, GUI shell-out buttons, GUI Phase-0 fixes, and an
+MCP-compatibility audit. Everything is in the working tree,
+**uncommitted** — see `ACTION_ITEMS.md` for the per-unit table (B0-B4
++ C0-C8) and suggested commit slicing.
+
+| Step | What landed | Files |
+|---|---|---|
+| 0 | Cleanup: deduped 008 decision file + refreshed this doc | `rebuild/decisions/008-foundational-refactor-shipped.md` (now a redirect stub — `git rm` it), `rebuild/when-you-return.md` |
+| 1 | Logging-vocabulary completion: canonical `component.action[.detail]`, `turn_id` contextvar correlation, pre-declared event names in plan | `sabrina-2/src/sabrina/listener/faster_whisper.py`, `sabrina-2/src/sabrina/listener/record.py`, `sabrina-2/src/sabrina/voice_loop.py`, `sabrina-2/tests/test_smoke.py` |
+| 2 | Wake-word scaffolding (openWakeWord placeholder model `hey_jarvis`) reusing `AudioMonitor` primitive | `sabrina-2/src/sabrina/listener/wake_word.py` (new), `sabrina-2/sabrina.toml`, `sabrina-2/src/sabrina/config.py`, `sabrina-2/pyproject.toml`, `sabrina-2/tests/test_smoke.py` |
+| 3 | Supervisor + autostart: Task Scheduler XML generator + nssm service path + crash-budget restart loop | `sabrina-2/src/sabrina/supervisor.py` (new), `sabrina-2/src/sabrina/cli.py`, `sabrina-2/sabrina.toml`, `sabrina-2/src/sabrina/config.py`, `sabrina-2/tests/test_smoke.py` |
+| 4 | 007b: semantic-memory GUI panel + token-based auto-compaction with summary-skip flag | `sabrina-2/src/sabrina/memory/store.py`, `sabrina-2/src/sabrina/memory/compaction.py` (new), `sabrina-2/src/sabrina/gui/settings.py`, `sabrina-2/sabrina.toml`, `sabrina-2/src/sabrina/config.py`, `sabrina-2/tests/test_smoke.py` |
+
+Full per-unit detail + Eric's morning todo list (in suggested order):
+[`rebuild/ACTION_ITEMS.md`](ACTION_ITEMS.md). The earlier
+`ACTION_ITEMS_code.md` and `ACTION_ITEMS_personality.md` files are
+now redirect stubs — `git rm` both during cleanup.
 
 ## First-time-you-sit-down sequence
 
-**Step 1 — Smoke 009 + 009a in-repo.** From `sabrina-2/`:
+**Step 1 — Sanity-check the overnight diffs.** From `Sabrina-Local-AI/`:
 
 ```powershell
-uv sync                        # picks up silero-vad>=5.1
-uv run pytest -q               # expect 59 passed, 0 skipped (57 pre-009a)
+git status
+git diff --stat
 ```
 
-If pytest passes, the code is sound. If anything fails, skip to the
-"If 009 smoke fails" table at the bottom.
+Expect a substantial working-tree delta across `sabrina-2/` plus
+`rebuild/decisions/008-foundational-refactor-shipped.md` (the dedup
+stub) and the new `rebuild/ACTION_ITEMS_code.md`. The duplicate decision
+file should also be `git rm`-ed during your first commit.
 
-**Step 2 — Commit the 009a bundle.** Changes are already in the
-working tree (see `git status`):
-
-- `sabrina-2/src/sabrina/listener/vad.py` — `_PRE_FIRE_MARGIN_MS`
-  constant, `SileroVAD.speech_window_samples` property, `vad.prob`
-  DEBUG log, `AudioMonitor._fire_at_samples` + trimmed `stop()`.
-- `sabrina-2/src/sabrina/voice_loop.py` — new `_make_barge_in_vad`
-  module-level helper (graceful-degrade); inline wiring simplified to
-  a one-liner.
-- `sabrina-2/src/sabrina/speaker/piper.py` — poll `sleep(0.03)` →
-  `sleep(0.01)`.
-- `sabrina-2/tests/test_smoke.py` — `test_make_barge_in_vad_degrades_on_load_failure`
-  + `test_audio_monitor_trims_capture_to_speech_onset`. 57 → 59.
-- `rebuild/decisions/009-barge-in-shipped.md` — 009a footnote at the
-  top of "Thin spots."
-- `rebuild/when-you-return.md` — this file; state-of-play refreshed
-  and the thin-spots section pruned.
-
-Before committing, run from Eric's Windows box (pre-commit install was
-deferred for this session — still need to `--no-verify`):
+**Step 2 — Run tests per step.** From `sabrina-2/`:
 
 ```powershell
-cd sabrina-2
-uv add --dev pre-commit
-uv run pre-commit install   # unblocks normal `git commit` going forward
-uv run pytest -q            # must report 59 passed
-cd ..
-git add sabrina-2/src/sabrina/listener/vad.py `
-        sabrina-2/src/sabrina/voice_loop.py `
-        sabrina-2/src/sabrina/speaker/piper.py `
-        sabrina-2/tests/test_smoke.py `
-        rebuild/decisions/009-barge-in-shipped.md `
-        rebuild/when-you-return.md `
-        rebuild/drafts/009a-thin-spots-plan.md
-git commit -m "fix: barge-in thin-spots (graceful degrade, VAD log, trim, poll tighten) - 009a footnote"
+uv sync                # picks up openwakeword>=0.6
+uv run pytest -q
 ```
 
-(If `pre-commit install` is still deferred, swap the `git commit` for
-`git commit --no-verify`.)
+Expected: 59 → ~70 tests passing. Per-step failure modes are catalogued
+in `ACTION_ITEMS_code.md`.
 
-**Step 3 — (done; no action needed.)** Decision 009 + 009a were
-validated on Windows 2026-04-25; ROADMAP carries the stamp. Re-run
-`rebuild/validate-barge-in.md` only if barge-in regresses or new
-hardware enters the picture.
+**Step 3 — Commit per step.** Each step is a self-contained
+commit-equivalent unit. Recommended order:
 
-**Step 4 — Pick next component.** Menu from decision 009's tail:
+1. Step 0 cleanup commit — dedup file + this doc.
+2. Step 1 logging-vocabulary commit.
+3. Step 2 wake-word commit.
+4. Step 3 supervisor commit.
+5. Step 4 memory-GUI + auto-compaction commit.
 
-- **Infra-first path:** wake-word → supervisor+autostart. Wake-word
-  reuses the `AudioMonitor` primitive shipped this session; supervisor
-  is OS-level, no audio.
-- **Character-first path:** personality → onboarding. Lock voice before
-  the avatar arc. Personality plan's "inferred vs. stated" section
-  needs Eric input before any code lands.
+**Step 4 — Validate per component.** Each step's `validate-*.md` doc
+is the gating procedure for stamping its decision doc:
 
-Don't prescribe. Ask Eric which path; both are ready.
+- Step 2: `rebuild/validate-wake-word.md` (see `wake-word-plan.md`).
+- Step 3: `rebuild/validate-supervisor-autostart.md`.
+- Step 4: `rebuild/validate-memory-gui.md` (see
+  `semantic-memory-gui-plan.md`).
+
+Step 1 has no validate doc — it's a refactor; the test suite gates it.
 
 ## Decisions awaiting glance-and-approve
 
@@ -119,52 +109,37 @@ Recommendation blocks attached; Eric just needs to eyeball:
 ## Personality plan — calibration callout
 
 `rebuild/drafts/personality-plan.md` has a "Where these signals came
-from — explicit vs. assumed" section. The voice was **inferred** from
-anti-sprawl premise and decision-doc tone rather than stated by Eric.
-Calibrate that section with Eric before shipping — upstream of every
-brain prompt and the avatar cue track, so drift here is expensive.
-
-## If 009 smoke fails
-
-| Symptom | Likely cause | What to check |
-|---|---|---|
-| `ImportError: silero_vad` during pytest collection | `uv sync` skipped the dep | `uv pip list \| findstr silero` |
-| `test_cancel_token_*` fails | Protocol addition regressed | Diff `brain/protocol.py` against decision 009 doc |
-| `test_vad_state_machine_ignores_below_min_speech_ms` fails | Speech-samples reset logic broken in `SileroVAD.feed` | Re-read `listener/vad.py:80-100` |
-| Voice loop crashes on start with barge-in off | Import-time side effect in `listener/vad.py` | Lazy-load `silero_vad` inside `_ensure_loaded` only |
-| `uv run pytest` uses wrong venv | Windows console-script stub baked in old path | `Remove-Item .venv -Recurse -Force; uv sync` |
+from — explicit vs. assumed" section. Track A may have rewritten parts
+of this overnight; check `rebuild/ACTION_ITEMS_personality.md` first.
+Voice was **inferred** rather than stated — calibrate before shipping.
 
 ## Sandbox-mount sanity check (do this BEFORE any code edits)
 
-The Edit tool was observed silently failing to propagate file writes
-on 2026-04-24 (memory: `feedback_edit_tool_propagation.md`). Before
-trusting any in-session edits, from `Sabrina-Local-AI/`:
+Edit and Write tools have been observed silently truncating large
+files on this mount (memory: `feedback_write_tool_also_truncates.md`).
+Before trusting any in-session edits, from `Sabrina-Local-AI/`:
 
 ```powershell
-git status   # expect: clean working tree, ?? rebuild/drafts/009a-thin-spots-plan.md
-```
-
-Then pick one tracked file and compare its line count to git:
-
-```powershell
+git status
 git show HEAD:rebuild/when-you-return.md | wc -l   # compare to actual file
 ```
 
-If they match, the mount is healthy. If not, see
-`memory/sabrina_repo_location_corruption.md` for the
-`Move-Item`-out-of-`Documents\` remediation. **Use the `Write` tool,
-not `Edit`, until you've confirmed the mount is healthy this session.**
+If they match, the mount is healthy. **Use bash + python3 heredocs for
+any non-trivial edit (>1 KB) instead of Edit/Write.**
 
 ## Where everything lives
 
 ```
 rebuild/
 ├── ROADMAP.md                              # roadmap + progress-at-a-glance
-├── decisions/001–009-*.md                  # shipped decisions
+├── ACTION_ITEMS.md                         # consolidated punch list (Tracks A+B + pass 2)
+├── decisions/001-009-*.md                  # shipped decisions
 ├── validate-*.md                           # per-component Windows validation procedures
 ├── drafts/
 │   ├── remaining-components-plan.md        # master planning index
-│   ├── 009a-thin-spots-plan.md             # CURRENT: signed-off, ready to implement
 │   ├── *-plan.md                           # per-component plans
 │   └── avatar-animation-graph.svg
-sabri
+sabrina-2/                                  # the code
+└── src/sabrina/                            # brain/, listener/, speaker/, memory/,
+                                            # vision/, gui/, voice_loop.py, supervisor.py
+```

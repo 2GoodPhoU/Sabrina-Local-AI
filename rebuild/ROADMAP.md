@@ -6,6 +6,8 @@
 **Ambition:** Personal daily-driver. Windows. Local-first, Claude as the brain.
 **Strategy:** Build and prove each component in isolation before integrating. Every component gets a working implementation, a benchmarked alternative set, and a "garbage-removal" pass on the old code.
 
+> **Heads-up (2026-04-25 night):** pass 2 work is uncommitted in the working tree — wake-word voice-loop wiring, ONNX embedder swap, `memory-compact` CLI, GUI shell-outs, MCP audit. See `rebuild/ACTION_ITEMS.md`.
+
 > **Status:** MVP is alive. Voice loop with PTT + Claude/Ollama + sentence-streaming Piper TTS + SQLite memory (semantic retrieval) + vision attach + settings GUI + barge-in (validated 2026-04-25; on by default in sabrina.toml). ~4,200 lines, 59 tests. See [`decisions/009-barge-in-shipped.md`](decisions/009-barge-in-shipped.md) for the latest (Silero VAD + CancelToken through Brain/Speaker); [`decisions/008-foundational-refactor-bundle.md`](decisions/008-foundational-refactor-bundle.md) for the prior refactor (schema versioning + log redaction + rotating file sink). Decision 007 validated on Windows (i7-13700K/4080, Python 3.12) 2026-04-24: sqlite-vec loaded, first-audio 1.62s warm. Decision 009 validated on Windows (i7-13700K/4080, Python 3.12) 2026-04-25: VAD loaded (OnnxWrapper), 264 ms cut latency observed, no noise false-positives at threshold=0.5, first-audio regression ~0 ms (1.839 s vs. 1.85 s baseline). 009a thin-spot bundle landed pre-validation.
 
 ---
