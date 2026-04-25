@@ -31,15 +31,19 @@ class PiperNotInstalled(RuntimeError):
 
 
 async def _poll_and_stop(token: CancelToken, speaker: "PiperSpeaker") -> None:
-    """Poll a CancelToken every ~30ms; call speaker.stop() when it fires.
+    """Poll a CancelToken every ~10ms; call speaker.stop() when it fires.
 
     Lives at module scope (vs. inline in speak()) so it's unit-testable.
     Shared by both Piper and SAPI; the 8-line duplication is smaller than
     introducing a new shared module purely for this helper.
+
+    Poll interval: 10 ms. Tightened from the previous 30 ms as part of
+    the 009a thin-spot bundle — cuts worst-case cancel detection latency
+    to ~20 ms (poll + subprocess kill) on barge-in cancellations.
     """
     try:
         while not token.cancelled:
-            await asyncio.sleep(0.03)
+            await asyncio.sleep(0.01)
         await speaker.stop()
     except asyncio.CancelledError:
         # Expected teardown path when speak() finishes normally.

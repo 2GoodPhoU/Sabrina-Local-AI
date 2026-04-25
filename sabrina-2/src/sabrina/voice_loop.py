@@ -91,6 +91,31 @@ def _split_off_sentence(buf: str) -> tuple[str | None, str]:
     return (None, buf)
 
 
+def _make_barge_in_vad(settings: Settings | None) -> SileroVAD | None:
+    """Construct and eagerly warm up a Silero VAD for barge-in, or None.
+
+    Returns None when barge-in is disabled OR the silero-vad package
+    can't be loaded (broken install, missing wheel, etc). The voice loop
+    then runs without barge-in rather than crashing on first speaking
+    phase. Mirrors memory/store.py:_try_enable_vec graceful-degrade.
+
+    Lives at module scope so `test_smoke.py` can exercise the degrade
+    path without spinning up the full voice loop.
+    """
+    if settings is None or not settings.barge_in.enabled:
+        return None
+    candidate = SileroVAD(
+        threshold=settings.barge_in.threshold,
+        min_speech_ms=settings.barge_in.min_speech_ms,
+    )
+    try:
+        candidate._ensure_loaded()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("vad.unavailable", error=str(exc))
+        return None
+    return candidate
+
+
 async def run_voice_loop(
     brain: Brain,
     listener: Listener,
@@ -152,15 +177,7 @@ async def run_voice_loop(
     # If the user starts talking mid-reply, the CancelToken trips, the brain
     # stream exits early, the speaker is stopped, and (if continue_on_interrupt)
     # the captured audio becomes the next user turn without a PTT press.
-    barge_enabled = (
-        settings is not None and settings.barge_in.enabled
-    )
-    vad: SileroVAD | None = None
-    if barge_enabled:
-        vad = SileroVAD(
-            threshold=settings.barge_in.threshold,
-            min_speech_ms=settings.barge_in.min_speech_ms,
-        )
+    vad: SileroVAD | None = _make_barge_in_vad(settings)
 
     ptt = PushToTalk(hotkey, input_device=input_device)
     ptt.start()

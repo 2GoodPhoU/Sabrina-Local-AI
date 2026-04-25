@@ -112,6 +112,16 @@ but the UX payoff is obvious.
 
 ## Thin spots
 
+**Post-ship bundle 009a (2026-04-24).** Four of the five thin spots
+below were closed in a ride-along fix pass: graceful-degrade on Silero
+load failure (voice loop now logs `vad.unavailable` and runs without
+barge-in), trim-to-VAD-start in `AudioMonitor.stop()` with a 150 ms
+pre-fire margin, per-frame `vad.prob` DEBUG log, and Piper cancel-poll
+tightened from 30 ms to 10 ms. Pre-commit hook install (#5) is an
+Eric-runs-locally step. See commit with message prefix
+`fix: barge-in thin-spots`. Two new unit tests: `test_make_barge_in_vad_degrades_on_load_failure`
+and `test_audio_monitor_trims_capture_to_speech_onset` (57 → 59).
+
 ### Implementation
 
 - **No log-and-degrade if silero-vad won't import at runtime.** Today

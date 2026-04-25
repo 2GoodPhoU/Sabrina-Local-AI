@@ -6,46 +6,81 @@ first. Then act.
 
 ## State of play
 
-Decisions 007 and 008 are validated and committed on this branch:
+Decisions 007, 008, and 009 are committed on this branch:
 
 - **007 (semantic memory)** — Windows-validated 2026-04-24, first-audio
   1.62 s warm.
 - **008 (foundational refactor bundle)** — `[schema].version` hook +
   redacting structlog processor + rotating file sink. Tests green
   (52 passed); committed.
+- **009 (barge-in)** — Silero VAD + `CancelToken` threading through
+  `Brain.chat` and `Speaker.speak`, wired into the voice loop's
+  speaking state with `pending_barge_audio` to hand the captured audio
+  back to the next turn. Committed at `f22cd73`.
+- **009a (barge-in thin-spot patches)** — four of the five thin spots
+  from decision 009 closed in-tree per `rebuild/drafts/009a-thin-spots-plan.md`:
+  graceful-degrade on Silero load (`_make_barge_in_vad` helper, logs
+  `vad.unavailable`), trim-to-VAD-start in `AudioMonitor.stop()` with a
+  150 ms pre-fire margin, per-frame `vad.prob` DEBUG log, and Piper
+  cancel poll tightened 30 ms → 10 ms. 59 tests green (was 57).
+  Footnoted on decision 009; no new decision doc. **Not yet committed**
+  — Eric runs `pre-commit install` + `git commit` on his Windows box.
 
-**Decision 009 (barge-in)** is the current tip. Silero VAD + a
-`CancelToken` threading through `Brain.chat` and `Speaker.speak`,
-wired into the voice loop's speaking state with `pending_barge_audio`
-to hand the captured audio back to the next turn. Five new unit tests
-(57 total; suite green in ~3 s). **Not yet end-to-end validated on
-real hardware** — `[barge_in].enabled` ships as `false` until the
-`rebuild/validate-barge-in.md` procedure passes.
+**Next up: validation.** Decision 009 (now including the 009a patches)
+is not yet end-to-end validated on real hardware; `[barge_in].enabled`
+ships as `false` until `rebuild/validate-barge-in.md` passes.
 
 ## First-time-you-sit-down sequence
 
-**Step 1 — Smoke 009 in-repo.** From `sabrina-2/`:
+**Step 1 — Smoke 009 + 009a in-repo.** From `sabrina-2/`:
 
 ```powershell
 uv sync                        # picks up silero-vad>=5.1
-uv run pytest -q               # expect 57 passed, 0 skipped
+uv run pytest -q               # expect 59 passed, 0 skipped (57 pre-009a)
 ```
 
 If pytest passes, the code is sound. If anything fails, skip to the
 "If 009 smoke fails" table at the bottom.
 
-**Step 2 — Commit 009.** Bundle the barge-in files + the doc updates:
+**Step 2 — Commit the 009a bundle.** Changes are already in the
+working tree (see `git status`):
+
+- `sabrina-2/src/sabrina/listener/vad.py` — `_PRE_FIRE_MARGIN_MS`
+  constant, `SileroVAD.speech_window_samples` property, `vad.prob`
+  DEBUG log, `AudioMonitor._fire_at_samples` + trimmed `stop()`.
+- `sabrina-2/src/sabrina/voice_loop.py` — new `_make_barge_in_vad`
+  module-level helper (graceful-degrade); inline wiring simplified to
+  a one-liner.
+- `sabrina-2/src/sabrina/speaker/piper.py` — poll `sleep(0.03)` →
+  `sleep(0.01)`.
+- `sabrina-2/tests/test_smoke.py` — `test_make_barge_in_vad_degrades_on_load_failure`
+  + `test_audio_monitor_trims_capture_to_speech_onset`. 57 → 59.
+- `rebuild/decisions/009-barge-in-shipped.md` — 009a footnote at the
+  top of "Thin spots."
+- `rebuild/when-you-return.md` — this file; state-of-play refreshed
+  and the thin-spots section pruned.
+
+Before committing, run from Eric's Windows box (pre-commit install was
+deferred for this session — still need to `--no-verify`):
 
 ```powershell
-git add src/sabrina/brain/protocol.py src/sabrina/brain/claude.py src/sabrina/brain/ollama.py `
-        src/sabrina/speaker/protocol.py src/sabrina/speaker/piper.py src/sabrina/speaker/sapi.py `
-        src/sabrina/listener/vad.py src/sabrina/listener/__init__.py `
-        src/sabrina/voice_loop.py src/sabrina/events.py src/sabrina/config.py `
-        sabrina.toml pyproject.toml uv.lock tests/test_smoke.py `
-        ..\rebuild\decisions\009-barge-in-shipped.md ..\rebuild\ROADMAP.md ..\rebuild\when-you-return.md
-git status   # verify — nothing else unexpected
-git commit --no-verify -m "feat: barge-in (Silero VAD + CancelToken through Brain/Speaker) — decision 009"
+cd sabrina-2
+uv add --dev pre-commit
+uv run pre-commit install   # unblocks normal `git commit` going forward
+uv run pytest -q            # must report 59 passed
+cd ..
+git add sabrina-2/src/sabrina/listener/vad.py `
+        sabrina-2/src/sabrina/voice_loop.py `
+        sabrina-2/src/sabrina/speaker/piper.py `
+        sabrina-2/tests/test_smoke.py `
+        rebuild/decisions/009-barge-in-shipped.md `
+        rebuild/when-you-return.md `
+        rebuild/drafts/009a-thin-spots-plan.md
+git commit -m "fix: barge-in thin-spots (graceful degrade, VAD log, trim, poll tighten) - 009a footnote"
 ```
+
+(If `pre-commit install` is still deferred, swap the `git commit` for
+`git commit --no-verify`.)
 
 **Step 3 — Validate 009 on real hardware.** Run
 `rebuild/validate-barge-in.md` top-to-bottom. Nine steps, each with a
@@ -89,26 +124,6 @@ anti-sprawl premise and decision-doc tone rather than stated by Eric.
 Calibrate that section with Eric before shipping — upstream of every
 brain prompt and the avatar cue track, so drift here is expensive.
 
-## Thin spots from decision 009 worth tracking
-
-- **No log-and-degrade for silero-vad import.** A broken install crashes
-  the voice loop on first speaking phase. Mirror semantic memory's
-  `_try_enable_vec` graceful-degrade pattern.
-- **`AudioMonitor` captures TTS bleed before user speech.** On
-  `continue_on_interrupt`, whatever audio was buffered (potentially
-  including Sabrina's own voice) gets re-transcribed. Whisper usually
-  handles it, but on a speakerphone setup it's garbage. Trim-to-VAD-start
-  or document "headset required" based on what validation shows.
-- **No per-frame VAD probability logging.** Tuning `threshold` during
-  step 7 of the validation is blind without a DEBUG path that logs
-  `vad.prob`. Trivial addition.
-- **Speaker cancellation granularity is per-sentence.** If Piper is mid-
-  synth on a long sentence, the cancel has to wait for synth to finish
-  before stop() can interrupt playback. ~1 s worst case.
-- `pre-commit` hook not installed in venv (still bypassed with
-  `--no-verify`). Cheap fix: `uv add --dev pre-commit && uv run
-  pre-commit install`.
-
 ## If 009 smoke fails
 
 | Symptom | Likely cause | What to check |
@@ -119,6 +134,27 @@ brain prompt and the avatar cue track, so drift here is expensive.
 | Voice loop crashes on start with barge-in off | Import-time side effect in `listener/vad.py` | Lazy-load `silero_vad` inside `_ensure_loaded` only |
 | `uv run pytest` uses wrong venv | Windows console-script stub baked in old path | `Remove-Item .venv -Recurse -Force; uv sync` |
 
+## Sandbox-mount sanity check (do this BEFORE any code edits)
+
+The Edit tool was observed silently failing to propagate file writes
+on 2026-04-24 (memory: `feedback_edit_tool_propagation.md`). Before
+trusting any in-session edits, from `Sabrina-Local-AI/`:
+
+```powershell
+git status   # expect: clean working tree, ?? rebuild/drafts/009a-thin-spots-plan.md
+```
+
+Then pick one tracked file and compare its line count to git:
+
+```powershell
+git show HEAD:rebuild/when-you-return.md | wc -l   # compare to actual file
+```
+
+If they match, the mount is healthy. If not, see
+`memory/sabrina_repo_location_corruption.md` for the
+`Move-Item`-out-of-`Documents\` remediation. **Use the `Write` tool,
+not `Edit`, until you've confirmed the mount is healthy this session.**
+
 ## Where everything lives
 
 ```
@@ -128,41 +164,7 @@ rebuild/
 ├── validate-*.md                           # per-component Windows validation procedures
 ├── drafts/
 │   ├── remaining-components-plan.md        # master planning index
+│   ├── 009a-thin-spots-plan.md             # CURRENT: signed-off, ready to implement
 │   ├── *-plan.md                           # per-component plans
 │   └── avatar-animation-graph.svg
-sabrina-2/
-├── README.md                               # current-state README (read this before diving)
-├── src/sabrina/                            # the code
-└── tests/test_smoke.py                     # all 57 tests
-CLAUDE.md                                   # Claude-agent bootstrap (repo root)
-```
-
-## If you're a new Claude assistant reading this
-
-1. Read `CLAUDE.md` at the repo root first — it has the short-form
-   bootstrap, working-style cues, and pointers to everything else.
-2. Read the memory index (`MEMORY.md`) and the files it links.
-3. Read `sabrina-2/README.md` for the current-state component snapshot.
-4. Read `rebuild/drafts/remaining-components-plan.md` for the master
-   planning index.
-5. Don't ask Eric to re-explain context that's in memory, `CLAUDE.md`,
-   or the master index.
-
-## Working-style reminders
-
-- **Decision doc per shipped component.** Match the voice of 002–009:
-  terse prose, bullets sparingly, "thin spots" section at end,
-  alternatives-to-research list.
-- **Anti-sprawl.** No new abstraction until the second caller exists.
-  No module past 300 lines without justification in the header.
-- **Ship-one-validate-next.** No component starts until the previous
-  one is in main with a smoke test.
-- **Validation procedure** (`validate-*.md`) ships with each component
-  before Eric calls it done on Windows.
-- **Recommendations-attached pattern** for drafts with open questions
-  — rationale + override path makes review cheap.
-- **Additive protocol extensions** over new protocols — `Message.images`,
-  `system_suffix`, and now `cancel_token` are the patterns.
-- **Memory guardrails.** Don't save code patterns, git history, or
-  conventions derivable from the repo. Do save surprises, corrections,
-  and validated non-obvious calls.
+sabri

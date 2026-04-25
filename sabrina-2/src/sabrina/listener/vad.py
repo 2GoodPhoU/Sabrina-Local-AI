@@ -36,6 +36,14 @@ log = get_logger(__name__)
 _FRAME_SAMPLES = 512
 _SAMPLE_RATE = 16000
 
+# Extra pre-fire audio (on top of the VAD speech window) kept by
+# AudioMonitor.stop() so Whisper has onset context to transcribe the
+# interruption. 150 ms is a compromise between 'give Whisper the
+# first phoneme' and 'drop TTS-bleed captured before the user
+# started talking.' Bump if validation step 6 shows onset clipping;
+# drop to 0 if we want strict speech-only capture.
+_PRE_FIRE_MARGIN_MS = 150
+
 
 class SileroVAD:
     """ONNX-backed Silero VAD. Stateful across calls to `feed()`.
@@ -66,6 +74,15 @@ class SileroVAD:
         log.info("vad.loading", backend="silero-vad")
         self._model = load_silero_vad(onnx=True)
         log.info("vad.ready", threshold=self._threshold)
+
+    @property
+    def speech_window_samples(self) -> int:
+        """How many samples of continuous speech trip `feed()`.
+
+        Exposed so AudioMonitor can compute its trim-to-VAD-start offset
+        without reaching into a private attribute.
+        """
+        return self._min_speech_samples
 
     def reset(self) -> None:
         """Clear VAD state. Call between speaking phases so dead-zone
@@ -98,6 +115,9 @@ class SileroVAD:
             buffer = buffer[_FRAME_SAMPLES:]
             frame_t = torch.from_numpy(frame)
             prob = float(self._model(frame_t, _SAMPLE_RATE).item())
+            # DEBUG-only so INFO-level runs pay nothing; flip
+            # SABRINA_LOGGING__LEVEL=DEBUG to tune [barge_in].threshold.
+            log.debug("vad.prob", prob=prob)
             if prob >= self._threshold:
                 self._speech_samples += _FRAME_SAMPLES
                 if self._speech_samples >= self._min_speech_samples:
@@ -125,7 +145,8 @@ class AudioMonitor:
     - keeps capturing audio so the voice loop can re-transcribe the user's
       barge-in utterance without asking them to press PTT.
 
-    `stop()` returns the accumulated audio, or `None` if VAD never fired.
+    `stop()` returns the accumulated audio (trimmed to roughly the speech
+    onset minus a small margin), or `None` if VAD never fired.
     """
 
     def __init__(
@@ -144,6 +165,9 @@ class AudioMonitor:
         self._start_t: float = 0.0
         self._captured: list[np.ndarray] = []
         self._detected: bool = False
+        # Sample index into the concatenated capture at the moment VAD
+        # fired. Used by stop() to drop pre-fire TTS-bleed and silence.
+        self._fire_at_samples: int | None = None
 
     def start(self) -> None:
         """Open the input stream. Idempotent — calling twice is a no-op
@@ -153,6 +177,7 @@ class AudioMonitor:
         self._start_t = time.monotonic()
         self._captured = []
         self._detected = False
+        self._fire_at_samples = None
         self._vad.reset()
 
         def _callback(indata, _frames, _time_info, status) -> None:  # noqa: ANN001
@@ -171,6 +196,10 @@ class AudioMonitor:
                 log.warning("vad.feed_failed", err=str(exc))
                 return
             if fired:
+                # Record position so stop() can trim pre-fire
+                # silence/TTS-bleed while still handing Whisper enough
+                # onset to transcribe the interruption.
+                self._fire_at_samples = sum(c.size for c in self._captured)
                 self._detected = True
                 self._cancel.cancel()
                 log.info("bargein.detected")
@@ -189,7 +218,13 @@ class AudioMonitor:
         self._stream.start()
 
     def stop(self) -> np.ndarray | None:
-        """Close the stream. Returns captured audio iff VAD fired, else None."""
+        """Close the stream. Returns captured audio iff VAD fired, else None.
+
+        Trims the returned buffer to `speech_window + _PRE_FIRE_MARGIN_MS`
+        of pre-fire audio plus everything captured after the fire. Drops
+        the bulk of the dead-zone-to-speech silence (and any TTS bleed on
+        speakerphone setups) while preserving enough onset for Whisper.
+        """
         if self._stream is not None:
             try:
                 self._stream.stop()
@@ -199,7 +234,14 @@ class AudioMonitor:
             self._stream = None
         if not self._detected or not self._captured:
             return None
-        return np.concatenate(self._captured)
+        full = np.concatenate(self._captured)
+        if self._fire_at_samples is None:
+            return full
+        margin = int(_PRE_FIRE_MARGIN_MS * _SAMPLE_RATE / 1000)
+        keep_from = max(
+            0, self._fire_at_samples - self._vad.speech_window_samples - margin
+        )
+        return full[keep_from:]
 
     @property
     def detected(self) -> bool:

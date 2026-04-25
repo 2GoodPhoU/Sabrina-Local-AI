@@ -1080,3 +1080,74 @@ def test_vad_fires_on_sustained_speech(monkeypatch):
     # 15 frames of constant speech — well past the 10-frame / 300 ms gate.
     samples = np.ones(_FRAME_SAMPLES * 15, dtype=np.float32)
     assert vad.feed(samples) is True
+
+
+def test_make_barge_in_vad_degrades_on_load_failure(monkeypatch):
+    """A broken silero-vad install must not crash voice loop startup.
+
+    We swap SileroVAD._ensure_loaded for one that raises, force barge-in
+    on in the config, and assert _make_barge_in_vad returns None — the
+    voice loop then runs happily without barge-in.
+    """
+    from sabrina.config import load_settings
+    from sabrina.listener.vad import SileroVAD
+    from sabrina.voice_loop import _make_barge_in_vad
+
+    def _raise(self):
+        raise ImportError("silero-vad stub failure")
+
+    monkeypatch.setattr(SileroVAD, "_ensure_loaded", _raise)
+    settings = load_settings(reload=True)
+    # Barge-in ships disabled by default; force it on for this test.
+    settings.barge_in.enabled = True
+
+    assert _make_barge_in_vad(settings) is None
+
+
+def test_audio_monitor_trims_capture_to_speech_onset():
+    """stop() drops pre-fire silence, keeps speech window + margin + post-fire.
+
+    Populates AudioMonitor's state directly (bypassing sounddevice) to
+    exercise just the stop()-side trim math: _fire_at_samples is set at
+    the end of the speech window, and stop() should walk back by
+    speech_window_samples + _PRE_FIRE_MARGIN_MS and keep everything
+    from there forward.
+    """
+    import numpy as np
+
+    from sabrina.brain.protocol import CancelToken
+    from sabrina.listener.vad import (
+        _PRE_FIRE_MARGIN_MS,
+        _SAMPLE_RATE,
+        AudioMonitor,
+        SileroVAD,
+    )
+
+    vad = SileroVAD(threshold=0.5, min_speech_ms=300)  # 4800-sample window
+    token = CancelToken()
+    mon = AudioMonitor(vad, token)
+
+    # 1.0 s of pre-fire capture (silence / TTS bleed) + the 300 ms speech
+    # window (fires at its end) + 0.5 s of post-fire capture (the user
+    # still talking after the cancel).
+    pre = np.zeros(_SAMPLE_RATE, dtype=np.float32)            # 16000
+    speech = np.ones(4800, dtype=np.float32)                  # 4800
+    post = np.ones(_SAMPLE_RATE // 2, dtype=np.float32)       # 8000
+
+    mon._captured = [pre, speech, post]
+    mon._detected = True
+    mon._fire_at_samples = pre.size + speech.size             # 20800
+
+    out = mon.stop()
+
+    assert out is not None
+    margin_samples = int(_PRE_FIRE_MARGIN_MS * _SAMPLE_RATE / 1000)  # 2400
+    # keep_from = 20800 - 4800 - 2400 = 13600
+    # full size = 28800 ; expected out = 28800 - 13600 = 15200
+    full = pre.size + speech.size + post.size
+    expected = full - (mon._fire_at_samples - 4800 - margin_samples)
+    assert out.size == expected
+    # Sanity: output starts in the pre-fire silence region and extends
+    # through the post-fire chunk (which is 1.0 in this setup).
+    assert out[0] == 0.0
+    assert out[-1] == 1.0
