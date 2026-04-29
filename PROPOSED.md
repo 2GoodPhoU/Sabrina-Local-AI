@@ -39,8 +39,8 @@
   - Suggested priority: P2
 
 - [ ] [proposed-by: pre-automation-prep / 2026-04-28] Split the queued ClaudeBrain wire-up into two Worker-sized items
-  - Why: the current QUEUE P1 item ("Wire ClaudeBrain.chat to pass tools= and handle ToolUseBlock events ~150 LOC") is realistically 2-3 hours including tests and Windows e2e validation. Per planner.md, queue items should fit in one Worker run (~1 hour). Today's first Worker is likely to bail with `[in-progress]` on this one.
+  - Why: the current QUEUE P1 (verbatim: "Wire ClaudeBrain.chat to pass tools= and handle ToolUseBlock events (~150 LOC), enabling write_clipboard ToolSpec end-to-end. Definition of done: write_clipboard fires from a real voice turn; tests pass; ToolSpec.to_anthropic_dict round-trips. Notes: ToolSpec MCP migration already shipped uncommitted; brain side is the missing wire-up.") is realistically 2-3 hours including tests and Windows e2e validation. Per planner.md, queue items should fit in one Worker run (~1 hour). Today's first Worker is likely to bail with `[in-progress]` on this one.
   - What it would do: replace the single P1 with two: (a) "ClaudeBrain.chat accepts `tools=` kwarg and emits ToolUseBlock-shaped events" + unit tests; (b) "wire `write_clipboard` handler end-to-end + Windows voice-loop validation per validate-automation.md."
-  - Risk / blast radius: zero — this is a queue restructure, not a code change. Improves Worker throughput on day one.
+  - Risk / blast radius: zero — this is a queue restructure, not a code change. Improves Worker throughput on day one. If QUEUE has shifted by the time the human approves this, treat the verbatim quote above as the canonical version of the item being split.
   - Suggested priority: P1 (both halves)
 
