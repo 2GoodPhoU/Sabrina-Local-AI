@@ -42,25 +42,27 @@ from sabrina.listener.vad import AudioMonitor, SileroVAD
 from sabrina.listener.wake_word import WakeWordDetector, WakeWordMonitor
 from sabrina.logging import get_logger
 from sabrina.memory.embed import Embedder, build_embedder
-from sabrina.memory.store import MemoryStore, SearchHit, new_session_id
+from sabrina.memory.store import MemoryStore, ScoredHit, SearchHit, new_session_id
 from sabrina.speaker.protocol import Speaker
 from sabrina.state import StateMachine
 
 log = get_logger(__name__)
 
-_SYSTEM = (
-    "You are Sabrina, a helpful, concise personal assistant speaking to the user "
-    "through a voice interface. Reply in 1-3 short sentences. Don't use markdown, "
-    "bullet lists, or code blocks -- your reply will be spoken aloud. If the user "
-    "asks for something you can't do yet (e.g. control apps), say so briefly."
-)
+# Personality system prompt — decision 010, see brain/claude.py for the
+# block constants and `build_system_prompt(register=...)` to override.
+# Cacheable head only; the dynamic retrieval suffix is appended per-turn
+# below (and stays out of the cache key when caching wires up).
+from sabrina.brain.claude import SABRINA_SYSTEM_PROMPT as _SYSTEM
 
 
-def _format_retrieved(hits: list[SearchHit], max_chars_per_hit: int = 180) -> str:
+def _format_retrieved(
+    hits: "list[SearchHit] | list[ScoredHit]", max_chars_per_hit: int = 180
+) -> str:
     """Turn search hits into a compact block the brain sees as system context.
 
-    One line per hit, "[date role] snippet". Distance is hidden from the brain
-    (not useful) but logged for tuning.
+    Accepts either bare ``SearchHit`` (legacy) or Park-scored ``ScoredHit``
+    (current). Distance / score are hidden from the brain (not useful as
+    text input) but logged elsewhere for tuning.
     """
     lines = ["Earlier in our conversations you might find relevant:"]
     for h in hits:
@@ -434,12 +436,18 @@ async def run_voice_loop(
                         if user_msg_id is not None:
                             exclude.add(user_msg_id)
 
-                        def _do_search(vec: list[float]) -> list[SearchHit]:
-                            return memory.search(
+                        ret_cfg = sem_cfg.retrieval
+
+                        def _do_search(vec: list[float]) -> list[ScoredHit]:
+                            return memory.search_scored(
                                 vec,
                                 k=sem_cfg.top_k,
                                 max_distance=sem_cfg.max_distance,
                                 exclude_ids=exclude,
+                                alpha=ret_cfg.alpha,
+                                beta=ret_cfg.beta,
+                                gamma=ret_cfg.gamma,
+                                recency_half_life_days=ret_cfg.recency_half_life_days,
                             )
 
                         hits = await asyncio.to_thread(_do_search, user_embedding)
@@ -448,6 +456,7 @@ async def run_voice_loop(
                             log.info(
                                 "semantic.hits",
                                 count=len(hits),
+                                top_score=round(hits[0].score, 3),
                                 top_distance=round(hits[0].distance, 3),
                             )
                     except Exception as exc:  # noqa: BLE001 - never fail the turn

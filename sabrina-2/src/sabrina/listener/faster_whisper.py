@@ -12,13 +12,10 @@ from __future__ import annotations
 import asyncio
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from sabrina.listener.protocol import Segment, Transcript
 from sabrina.logging import get_logger
 
-if TYPE_CHECKING:
-    import numpy as np
 
 log = get_logger(__name__)
 

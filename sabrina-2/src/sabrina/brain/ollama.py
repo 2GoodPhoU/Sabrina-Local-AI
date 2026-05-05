@@ -7,11 +7,15 @@ official Python client. Streaming; returns TextDelta events followed by Done.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 from ollama import AsyncClient
 
 from sabrina.brain.protocol import CancelToken, Done, Message, StreamEvent, TextDelta
 from sabrina.logging import get_logger
+
+if TYPE_CHECKING:
+    from sabrina.tools import ToolSpec
 
 log = get_logger(__name__)
 
@@ -33,7 +37,18 @@ class OllamaBrain:
         system: str | None = None,
         max_tokens: int | None = None,
         cancel_token: CancelToken | None = None,
+        tools: list[ToolSpec] | None = None,
     ) -> AsyncIterator[StreamEvent]:
+        if tools:
+            # Ollama tool-use parity is planned (see CLAUDE.md "personality-
+            # projection layer planned for parity"); until then, fail loudly
+            # so a misconfigured `[tools] enabled = true` with the Ollama
+            # backend is obvious instead of silently dropping tool support.
+            raise NotImplementedError(
+                f"Backend {self.name!r} does not support tool use; "
+                "pick Claude or set [tools] enabled = false."
+            )
+
         api_messages: list[dict[str, str]] = []
         if system:
             api_messages.append({"role": "system", "content": system})

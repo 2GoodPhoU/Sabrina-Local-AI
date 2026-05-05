@@ -8,7 +8,7 @@ decision 007b validated.
 **Prerequisite:** PowerShell open in `Sabrina-Local-AI\sabrina-2`.
 007b implementation has landed per
 `rebuild/drafts/semantic-memory-gui-plan.md` (schema migration to add
-`kind` + `summarized_at`, `memory/compact.py`, `sabrina memory-compact`
+`kind` + `summarized_at`, `memory/compaction.py`, `sabrina memory-compact`
 CLI verb, GUI three-sub-frame Memory tab, `[memory.compaction]` block,
 voice-loop summary injection). Decision 007 must already be validated
 (this builds on its migrations and tests).

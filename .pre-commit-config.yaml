@@ -16,3 +16,17 @@ repos:
     hooks:
     -   id: flake8
         args: ['--max-line-length=160', '--ignore=E203,W503,F811,E722,F401']  # Each argument needs to be a separate string
+
+# Local hook: byte-compile every module under sabrina-2/src to catch
+# SyntaxErrors before they reach a commit. Added 2026-04-26 after a
+# cleanup audit flagged that a SyntaxError in config.py nearly shipped.
+# `python -m compileall -q` is silent on success, prints + exits non-zero
+# on failure. No third-party dependency, no extra repo to clone.
+-   repo: local
+    hooks:
+    -   id: compileall-sabrina2
+        name: compileall sabrina-2/src (catches SyntaxError)
+        entry: python -m compileall -q sabrina-2/src
+        language: system
+        pass_filenames: false
+        types_or: [python]

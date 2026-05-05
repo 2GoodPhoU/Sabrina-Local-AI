@@ -1,17 +1,24 @@
 # When you return — Sabrina rebuild quickstart
 
-**Date:** 2026-04-25 (refreshed end-of-day after pass 2)
+**Date:** 2026-04-26 (overnight cleanup + 010 promotion)
 **Purpose:** single entry-point for starting a new chat session. Read this
 first. Then act.
 
 > **Open [`rebuild/ACTION_ITEMS.md`](ACTION_ITEMS.md) right after this doc** —
 > it's the consolidated punch list for everything in the working tree
-> (Tracks A + B + tonight's pass 2). One file, one source of truth.
+> (Tracks A + B + pass 2 + 2026-04-26 night cleanup). One file, one
+> source of truth. Also see
+> [`rebuild/CLEANUP_FINDINGS_2026-04-26-night.md`](CLEANUP_FINDINGS_2026-04-26-night.md)
+> and [`rebuild/LEGACY_REPLACEMENT_GATE.md`](LEGACY_REPLACEMENT_GATE.md)
+> for the legacy-archive criteria.
 
 ## State of play
 
-Decisions 007, 008, 009, and the 009a thin-spots bundle are committed.
-Barge-in is `enabled = true` in `sabrina.toml`.
+Decisions 007, 008, 009, the 009a thin-spots bundle, and pass 2
+(wake-word scaffold + supervisor + memory compaction + ONNX embedder)
+are committed. Decision 010 (personality spec) is being promoted from
+draft to shipped in a parallel session (2026-04-26). Barge-in is
+`enabled = true` in `sabrina.toml`.
 
 - **007 (semantic memory)** — Windows-validated 2026-04-24, first-audio
   1.62 s warm.
@@ -38,61 +45,50 @@ MCP-compatibility audit. Everything is in the working tree,
 **uncommitted** — see `ACTION_ITEMS.md` for the per-unit table (B0-B4
 + C0-C8) and suggested commit slicing.
 
+Pass 2 has now landed (see `CLEANUP_FINDINGS_2026-04-26.md`). Recap of
+what shipped in that pass — kept for context, no longer "uncommitted":
+
 | Step | What landed | Files |
 |---|---|---|
-| 0 | Cleanup: deduped 008 decision file + refreshed this doc | `rebuild/decisions/008-foundational-refactor-shipped.md` (now a redirect stub — `git rm` it), `rebuild/when-you-return.md` |
 | 1 | Logging-vocabulary completion: canonical `component.action[.detail]`, `turn_id` contextvar correlation, pre-declared event names in plan | `sabrina-2/src/sabrina/listener/faster_whisper.py`, `sabrina-2/src/sabrina/listener/record.py`, `sabrina-2/src/sabrina/voice_loop.py`, `sabrina-2/tests/test_smoke.py` |
 | 2 | Wake-word scaffolding (openWakeWord placeholder model `hey_jarvis`) reusing `AudioMonitor` primitive | `sabrina-2/src/sabrina/listener/wake_word.py` (new), `sabrina-2/sabrina.toml`, `sabrina-2/src/sabrina/config.py`, `sabrina-2/pyproject.toml`, `sabrina-2/tests/test_smoke.py` |
 | 3 | Supervisor + autostart: Task Scheduler XML generator + nssm service path + crash-budget restart loop | `sabrina-2/src/sabrina/supervisor.py` (new), `sabrina-2/src/sabrina/cli.py`, `sabrina-2/sabrina.toml`, `sabrina-2/src/sabrina/config.py`, `sabrina-2/tests/test_smoke.py` |
 | 4 | 007b: semantic-memory GUI panel + token-based auto-compaction with summary-skip flag | `sabrina-2/src/sabrina/memory/store.py`, `sabrina-2/src/sabrina/memory/compaction.py` (new), `sabrina-2/src/sabrina/gui/settings.py`, `sabrina-2/sabrina.toml`, `sabrina-2/src/sabrina/config.py`, `sabrina-2/tests/test_smoke.py` |
 
-Full per-unit detail + Eric's morning todo list (in suggested order):
-[`rebuild/ACTION_ITEMS.md`](ACTION_ITEMS.md). The earlier
-`ACTION_ITEMS_code.md` and `ACTION_ITEMS_personality.md` files are
-now redirect stubs — `git rm` both during cleanup.
+The previously-mentioned `ACTION_ITEMS_code.md`,
+`ACTION_ITEMS_personality.md`, and the
+`008-foundational-refactor-shipped.md` redirect stub are gone (never
+committed; verified 2026-04-26). The single source of truth for
+follow-ups is `ACTION_ITEMS.md`.
 
 ## First-time-you-sit-down sequence
 
-**Step 1 — Sanity-check the overnight diffs.** From `Sabrina-Local-AI/`:
+**Step 1 — Sanity-check tree.** From `Sabrina-Local-AI/`:
 
 ```powershell
 git status
-git diff --stat
+git log --oneline -10
 ```
 
-Expect a substantial working-tree delta across `sabrina-2/` plus
-`rebuild/decisions/008-foundational-refactor-shipped.md` (the dedup
-stub) and the new `rebuild/ACTION_ITEMS_code.md`. The duplicate decision
-file should also be `git rm`-ed during your first commit.
+Expect pass 2 commits already merged plus uncommitted overnight cleanup
+(this doc, README test count, validate-*.md filename refs,
+LEGACY_REPLACEMENT_GATE.md, pre-commit `compileall` hook).
 
-**Step 2 — Run tests per step.** From `sabrina-2/`:
+**Step 2 — Run tests.** From `sabrina-2/`:
 
 ```powershell
-uv sync                # picks up openwakeword>=0.6
+uv sync
 uv run pytest -q
 ```
 
-Expected: 59 → ~70 tests passing. Per-step failure modes are catalogued
-in `ACTION_ITEMS_code.md`.
+Expected: 96 tests passing in ~3 s.
 
-**Step 3 — Commit per step.** Each step is a self-contained
-commit-equivalent unit. Recommended order:
-
-1. Step 0 cleanup commit — dedup file + this doc.
-2. Step 1 logging-vocabulary commit.
-3. Step 2 wake-word commit.
-4. Step 3 supervisor commit.
-5. Step 4 memory-GUI + auto-compaction commit.
-
-**Step 4 — Validate per component.** Each step's `validate-*.md` doc
+**Step 3 — Validate per component.** Each component's `validate-*.md`
 is the gating procedure for stamping its decision doc:
 
-- Step 2: `rebuild/validate-wake-word.md` (see `wake-word-plan.md`).
-- Step 3: `rebuild/validate-supervisor-autostart.md`.
-- Step 4: `rebuild/validate-memory-gui.md` (see
-  `semantic-memory-gui-plan.md`).
-
-Step 1 has no validate doc — it's a refactor; the test suite gates it.
+- `rebuild/validate-wake-word.md` — wake-word (`hey_jarvis` placeholder).
+- `rebuild/validate-supervisor-autostart.md` — supervisor + autostart.
+- `rebuild/validate-007b-semantic-memory-gui.md` — memory GUI + compaction.
 
 ## Decisions awaiting glance-and-approve
 
@@ -108,10 +104,11 @@ Recommendation blocks attached; Eric just needs to eyeball:
 
 ## Personality plan — calibration callout
 
-`rebuild/drafts/personality-plan.md` has a "Where these signals came
-from — explicit vs. assumed" section. Track A may have rewritten parts
-of this overnight; check `rebuild/ACTION_ITEMS_personality.md` first.
-Voice was **inferred** rather than stated — calibrate before shipping.
+Decision 010 (personality spec) is being promoted from
+`rebuild/decisions/drafts/010-personality-spec.md` → shipped in a
+parallel session 2026-04-26. The "Where these signals came from —
+explicit vs. assumed" section flags voice as **inferred** rather than
+stated — calibrate before locking. See decision 010 once it lands.
 
 ## Sandbox-mount sanity check (do this BEFORE any code edits)
 

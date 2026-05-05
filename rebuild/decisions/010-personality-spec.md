@@ -1,6 +1,6 @@
 # Decision 010: Personality spec — who Sabrina is
 
-**Date:** 2026-04-25
+**Date:** 2026-04-25 (spec) · **Shipped:** 2026-04-26 (overnight implementation)
 
 ## Summary
 
@@ -146,11 +146,21 @@ rather than papered over.
 
 ## Next
 
-When Eric signs off:
-
-1. In a separate session, lift the skeleton blocks into
-   `voice_loop._SYSTEM` and `chat._SYSTEM`, and add the
-   `system_suffix=` plumbing if `budget-and-caching-plan.md`
-   hasn't shipped yet.
-2. Smoke test + first dogfood; surface any drift back into the
-   plan, not the prompt.
+1. ~~Lift the skeleton blocks into `voice_loop._SYSTEM` and
+   `chat._SYSTEM`.~~ **Shipped 2026-04-26.** Blocks live in
+   `brain/claude.py` as module constants; `build_system_prompt(
+   register=..., tool_use_block=...)` assembles the cacheable head;
+   `SABRINA_SYSTEM_PROMPT` is the default-config convenience.
+   `voice_loop._SYSTEM` and `chat._SYSTEM` both re-export it. Block 4
+   (avatar cue vocabulary) and block 5 (tool-use rules) are reserved
+   placeholders; block 7 (retrieval suffix) is appended by the voice
+   loop, never part of the head.
+2. ~~Add the `system_suffix=` plumbing if `budget-and-caching-plan.md`
+   hasn't shipped yet.~~ Deferred — head is currently below the
+   1024-token cache floor (matches the plan's "accept it" call); when
+   tools/avatar push it over, wire `cache_control` then.
+3. Smoke test + first dogfood; surface any drift back into the plan,
+   not the prompt. Snapshot test
+   (`test_sabrina_system_prompt_snapshot_register_a`) and length-cap
+   test (`test_sabrina_system_prompt_under_token_budget`) live in
+   `tests/test_smoke.py` so commits to the blocks fail loud.

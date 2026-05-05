@@ -176,6 +176,25 @@ restart_window_s = 300
 # Path to nssm.exe (used only when mode = "service"). Empty = PATH lookup.
 nssm_binary = ""
 
+[tools]
+# Tool-use surface. The brain can call into a registry of pure-function
+# tools (`write_clipboard`, future `get_time`, `read_clipboard`, ...).
+# Per-tool toggles live in their own subtables; this block is the
+# master switch and the enabled-list. See
+# `rebuild/drafts/tool-use-plan.md` and
+# `rebuild/drafts/research/2026-04-26-toolspec-first-three.md`.
+enabled = false  # Off until the brain wire-up lands; registry still works for tests.
+# Allow-list of tool names (matches `ToolSpec.name`). Empty = all
+# registered tools enabled when `enabled = true`. Listing names here
+# narrows the surface without removing handlers from the registry.
+allowed = ["write_clipboard"]
+
+[tools.write_clipboard]
+enabled = true
+# Hard cap on bytes accepted per call. The handler also clamps internally
+# so a misconfig here can't open a hole; keep the two values in sync.
+max_bytes = 100000
+
 [memory.compaction]
 # Auto-compact old turns into summary entries when memory exceeds
 # `threshold_tokens`. mode="manual" disables auto-compaction; the

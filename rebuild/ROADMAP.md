@@ -2,13 +2,19 @@
 
 **Author:** Eric
 **Started:** April 2026
-**Last updated:** April 25, 2026
+**Last updated:** April 26, 2026
 **Ambition:** Personal daily-driver. Windows. Local-first, Claude as the brain.
 **Strategy:** Build and prove each component in isolation before integrating. Every component gets a working implementation, a benchmarked alternative set, and a "garbage-removal" pass on the old code.
 
-> **Heads-up (2026-04-25 night):** pass 2 work is uncommitted in the working tree — wake-word voice-loop wiring, ONNX embedder swap, `memory-compact` CLI, GUI shell-outs, MCP audit. See `rebuild/ACTION_ITEMS.md`.
+> **Heads-up (2026-04-26):** pass 2 (wake-word voice-loop wiring, ONNX
+> embedder swap, `memory-compact` CLI, GUI shell-outs, MCP audit) **landed
+> 2026-04-25**. Personality spec (decision 010) is being promoted from
+> draft to shipped in a parallel session — the cross-cutting cleanup
+> (this doc, README test count, validate-*.md filename refs) is the
+> overnight work. See `rebuild/ACTION_ITEMS.md` and
+> `rebuild/CLEANUP_FINDINGS_2026-04-26-night.md`.
 
-> **Status:** MVP is alive. Voice loop with PTT + Claude/Ollama + sentence-streaming Piper TTS + SQLite memory (semantic retrieval) + vision attach + settings GUI + barge-in (validated 2026-04-25; on by default in sabrina.toml). ~4,200 lines, 59 tests. See [`decisions/009-barge-in-shipped.md`](decisions/009-barge-in-shipped.md) for the latest (Silero VAD + CancelToken through Brain/Speaker); [`decisions/008-foundational-refactor-bundle.md`](decisions/008-foundational-refactor-bundle.md) for the prior refactor (schema versioning + log redaction + rotating file sink). Decision 007 validated on Windows (i7-13700K/4080, Python 3.12) 2026-04-24: sqlite-vec loaded, first-audio 1.62s warm. Decision 009 validated on Windows (i7-13700K/4080, Python 3.12) 2026-04-25: VAD loaded (OnnxWrapper), 264 ms cut latency observed, no noise false-positives at threshold=0.5, first-audio regression ~0 ms (1.839 s vs. 1.85 s baseline). 009a thin-spot bundle landed pre-validation.
+> **Status:** MVP is alive. Voice loop with PTT + Claude/Ollama + sentence-streaming Piper TTS + SQLite memory (semantic retrieval, token-budget compaction) + vision attach + settings GUI + barge-in (validated 2026-04-25; on by default in sabrina.toml) + wake-word scaffold (openWakeWord `hey_jarvis` placeholder, off by default, awaiting Windows validation). ~4,200 lines, **96 tests** running in ~3 s. See [`decisions/009-barge-in-shipped.md`](decisions/009-barge-in-shipped.md) for the latest barge-in write-up (Silero VAD + CancelToken through Brain/Speaker); [`decisions/008-foundational-refactor-bundle.md`](decisions/008-foundational-refactor-bundle.md) for the prior refactor (schema versioning + log redaction + rotating file sink); [`decisions/010-personality-spec.md`](decisions/010-personality-spec.md) for the personality voice spec (inferred-vs-stated calibration). Decision 007 validated on Windows (i7-13700K/4080, Python 3.12) 2026-04-24: sqlite-vec loaded, first-audio 1.62s warm. Decision 009 validated on Windows (i7-13700K/4080, Python 3.12) 2026-04-25: VAD loaded (OnnxWrapper), 264 ms cut latency observed, no noise false-positives at threshold=0.5, first-audio regression ~0 ms (1.839 s vs. 1.85 s baseline). 009a thin-spot bundle landed pre-validation.
 
 ---
 
@@ -19,7 +25,7 @@
 | 0 | Foundation | planned | ✅ shipped | uv, pydantic-settings, structlog, typer. [decision 001] |
 | 1 | TTS | planned | ✅ shipped | Piper (libritts_r-medium spk 0) + SAPI fallback. [decision 002] |
 | 2 | ASR | planned | ✅ shipped | faster-whisper base.en. [decision 003] |
-| 3 | Wake word | planned | ⏭ **replaced by PTT** | openWakeWord still a candidate; PTT is primary. |
+| 3 | Wake word | planned | 🟡 **scaffolded (2026-04-25)** | openWakeWord wired; bundled `hey_jarvis` placeholder; off by default; PTT remains primary until validation. |
 | 4 | Brain | planned (with router) | ✅ **shipped, no router yet** | Claude + Ollama via `Brain` protocol. Router deferred. [decision 003] |
 | 5 | Event bus + state machine | planned | ✅ shipped | ~100-line bus, ~80-line SM. [decision 003] |
 | — | **MVP checkpoint** | planned | ✅ **hit** | Voice loop end-to-end, ~1.85s first-audio latency. |
@@ -82,10 +88,12 @@ streaming synth. Alternatives to revisit: Kokoro, XTTS v2, StyleTTS 2.
 hit; no VAD or streaming partials. Alternatives to revisit: Parakeet,
 WhisperX, Distil-Whisper.
 
-### 3. ~~Wake word~~ → PTT — ⏭
-PTT works. Wake word is deferred. If Eric wants true hands-free,
-**openWakeWord** is the top candidate (Apache license, ~30MB ONNX,
-active maintenance). Porcupine has better accuracy but nasty licensing.
+### 3. Wake word — 🟡 scaffolded (2026-04-25)
+PTT remains primary. openWakeWord scaffold landed in pass 2 — `listener/
+wake_word.py`, `[wake_word]` block in `sabrina.toml`, `enabled = false`
+by default, bundled `hey_jarvis` placeholder model (custom "Hey Sabrina"
+training is a follow-up). Awaiting `validate-wake-word.md` on Windows
+before the decision doc gets stamped.
 
 ### 4. Brain — ✅ (no router) [decision 003]
 **Shipped:** `Brain` protocol (50 lines), Claude backend, Ollama
@@ -278,3 +286,4 @@ shipped plus the foundational refactor and barge-in bonuses.
 - [007 — Semantic memory shipped](decisions/007-semantic-memory-shipped.md)
 - [008 — Foundational refactor bundle shipped](decisions/008-foundational-refactor-bundle.md)
 - [009 — Barge-in shipped](decisions/009-barge-in-shipped.md)
+- [010 — Personality spec](decisions/010-personality-spec.md) *(promoting from draft → shipped in parallel session 2026-04-26)*

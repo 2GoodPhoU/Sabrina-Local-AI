@@ -70,6 +70,17 @@ ALTER TABLE messages ADD COLUMN summarized_at TEXT NULL;
 CREATE INDEX IF NOT EXISTS idx_messages_kind ON messages(kind);
 """
 
+# Migration to schema v2: add `importance REAL DEFAULT 0.5` column for
+# Park-style retrieval scoring (`α·recency + β·importance + γ·relevance`).
+# 0.5 is the neutral midpoint — until LLM-rating lands, every existing
+# row scores neutrally and the formula reduces to recency + relevance,
+# which is still a strict win over cosine-only.
+# See `rebuild/drafts/research/2026-04-26-memory-architecture-evolution.md`
+# Tier 1.
+_MIGRATION_V2 = """
+ALTER TABLE messages ADD COLUMN importance REAL NOT NULL DEFAULT 0.5;
+"""
+
 
 def _vec_schema(dim: int) -> str:
     """vec0 virtual table DDL. Dim is fixed at creation."""
@@ -83,6 +94,33 @@ def _vec_schema(dim: int) -> str:
 
 def _pack_vec(vec: list[float] | tuple[float, ...]) -> bytes:
     return struct.pack(f"{len(vec)}f", *vec)
+
+
+def _recency_score(message_ts: datetime, *, now: datetime, half_life_days: float) -> float:
+    """Exponential-decay recency term for Park-style retrieval.
+
+    Returns 1.0 for a message dated `now`, 0.5 after `half_life_days`,
+    0.25 after 2x, etc. Older-than-now timestamps (which can happen with
+    clock skew or a restored DB) clamp to 1.0; future timestamps clamp
+    to 1.0 too. Half-life <= 0 disables decay (always 1.0).
+    """
+    if half_life_days <= 0:
+        return 1.0
+    # Both timestamps are tz-aware (we always write isoformat with
+    # `datetime.now(timezone.utc)`). If a caller passes a naive `now`
+    # we coerce to UTC to keep the math sane.
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    if message_ts.tzinfo is None:
+        message_ts = message_ts.replace(tzinfo=timezone.utc)
+    age_seconds = (now - message_ts).total_seconds()
+    if age_seconds <= 0:
+        return 1.0
+    age_days = age_seconds / 86400.0
+    # 0.5 ** (age / half_life). Use math.pow for clarity over **.
+    import math
+
+    return math.pow(0.5, age_days / half_life_days)
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +141,28 @@ class SearchHit:
 
     message: StoredMessage
     distance: float  # cosine distance, 0 = identical, 2 = opposite
+
+
+@dataclass(frozen=True, slots=True)
+class ScoredHit:
+    """A search hit annotated with the Park-style component scores.
+
+    Score = ``alpha*recency + beta*importance + gamma*relevance``. Every
+    sub-score is reported so the brain (or a tuner) can see why a hit
+    ranked where it did — recency decay vs. importance vs. raw cosine.
+
+    `relevance = 1 - cosine_distance` (clamped to [0, 1]).
+    `recency` is the exponential decay term from `_recency_score`.
+    `importance` is the per-message column value (0..1).
+    `score` is the linear combination using the supplied weights.
+    """
+
+    message: StoredMessage
+    distance: float
+    importance: float
+    recency: float
+    relevance: float
+    score: float
 
 
 def new_session_id() -> str:
@@ -139,6 +199,8 @@ class MemoryStore:
         """Run pending schema migrations idempotently via PRAGMA user_version.
 
         v0 -> v1: add kind + summarized_at columns. See `_MIGRATION_V1`.
+        v1 -> v2: add importance column for Park-style scoring. See
+                  `_MIGRATION_V2`.
         """
         row = self._conn.execute("PRAGMA user_version").fetchone()
         v = int(row[0]) if row else 0
@@ -155,6 +217,16 @@ class MemoryStore:
                 log.debug("memory.migrate.duplicate_column_ok", err=str(exc))
             self._conn.execute("PRAGMA user_version = 1")
             log.info("memory.migrated", to_version=1)
+            v = 1
+        if v < 2:
+            try:
+                self._conn.executescript(_MIGRATION_V2)
+            except sqlite3.OperationalError as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
+                log.debug("memory.migrate.duplicate_column_ok", err=str(exc))
+            self._conn.execute("PRAGMA user_version = 2")
+            log.info("memory.migrated", to_version=2)
 
     def _try_enable_vec(self, dim: int) -> None:
         """Attempt to load sqlite-vec and create the vec table. Swallow failures."""
@@ -340,6 +412,19 @@ class MemoryStore:
         ).fetchall()
         return [_row_to_stored(row) for row in rows]
 
+    def set_importance(self, message_id: int, importance: float) -> None:
+        """Override the per-message importance score.
+
+        Importance is in [0, 1]. The schema stores any REAL value; the
+        clamp here is the contract. The brain (or a future LLM-rating
+        background job) is the canonical writer.
+        """
+        importance = max(0.0, min(1.0, float(importance)))
+        self._conn.execute(
+            "UPDATE messages SET importance = ? WHERE id = ?",
+            (importance, message_id),
+        )
+
     def search(
         self,
         query_vec: list[float],
@@ -397,6 +482,96 @@ class MemoryStore:
             if len(hits) >= k:
                 break
         return hits
+
+    def search_scored(
+        self,
+        query_vec: list[float],
+        *,
+        k: int = 5,
+        max_distance: float | None = None,
+        exclude_ids: Iterable[int] = (),
+        alpha: float = 1.0,
+        beta: float = 1.0,
+        gamma: float = 1.0,
+        recency_half_life_days: float = 30.0,
+        now: datetime | None = None,
+        candidate_multiplier: int = 4,
+    ) -> list[ScoredHit]:
+        """Top-k results ranked by ``alpha*recency + beta*importance + gamma*relevance``.
+
+        Distance still drives the candidate pool (sqlite-vec is k-NN
+        only); we over-fetch by `candidate_multiplier` so the rerank
+        has room to reorder. This is the Park et al. canonical
+        retrieval formulation; see
+        ``rebuild/drafts/research/2026-04-26-memory-architecture-evolution.md``.
+
+        - `relevance = max(0, 1 - distance)` (cosine distance is in
+          [0, 2]; we clamp the negative half so an "anti-relevant" term
+          can't drag the score negative).
+        - `importance` reads from the per-message column (default 0.5).
+        - `recency` uses `_recency_score(...)` (exponential decay).
+        - Sort: score desc; ties broken by lower distance (more
+          relevant) then higher id (newer).
+        """
+        if not self._vec_enabled:
+            raise RuntimeError(
+                "sqlite-vec is not enabled; search_scored requires it."
+            )
+        if self._embedding_dim is not None and len(query_vec) != self._embedding_dim:
+            raise ValueError(
+                f"Query dim {len(query_vec)} != index dim {self._embedding_dim}."
+            )
+
+        exclude_set = set(exclude_ids)
+        # Over-fetch so the rerank can promote older-but-important hits
+        # over newer-but-irrelevant ones. 4x is generous without being
+        # expensive at single-user scale.
+        fetch_k = max(k * candidate_multiplier, k) + len(exclude_set)
+        rows = self._conn.execute(
+            """
+            SELECT m.id, m.session_id, m.ts, m.role, m.content,
+                   v.distance, m.importance
+            FROM (
+                SELECT message_id, distance
+                FROM vec_messages
+                WHERE embedding MATCH ? AND k = ?
+            ) AS v
+            JOIN messages m ON m.id = v.message_id
+            WHERE m.kind = 'turn'
+            ORDER BY v.distance
+            """,
+            (_pack_vec(query_vec), fetch_k),
+        ).fetchall()
+
+        now = now or datetime.now(timezone.utc)
+        scored: list[ScoredHit] = []
+        for row in rows:
+            msg_id = int(row[0])
+            if msg_id in exclude_set:
+                continue
+            distance = float(row[5])
+            if max_distance is not None and distance > max_distance:
+                continue
+            stored = _row_to_stored(row[:5])
+            importance_raw = row[6] if row[6] is not None else 0.5
+            importance = max(0.0, min(1.0, float(importance_raw)))
+            relevance = max(0.0, min(1.0, 1.0 - distance))
+            recency = _recency_score(
+                stored.ts, now=now, half_life_days=recency_half_life_days
+            )
+            score = alpha * recency + beta * importance + gamma * relevance
+            scored.append(
+                ScoredHit(
+                    message=stored,
+                    distance=distance,
+                    importance=importance,
+                    recency=recency,
+                    relevance=relevance,
+                    score=score,
+                )
+            )
+        scored.sort(key=lambda h: (-h.score, h.distance, -h.message.id))
+        return scored[:k]
 
     # -- stats / admin -------------------------------------------------------
 

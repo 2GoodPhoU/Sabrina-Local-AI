@@ -969,6 +969,165 @@ def memory_compact(
 
 
 # ---------------------------------------------------------------------------
+# personality eval (decision 010 follow-up; tier 2 plumbing only). The
+# actual judge call is left as a TODO so Eric runs it with his API key
+# rather than this verb spending tokens automatically. See
+# `rebuild/drafts/research/2026-04-26-personality-eval-framework.md` and
+# `tests/personality/`.
+# ---------------------------------------------------------------------------
+
+
+@app.command("personality-eval")
+def personality_eval(
+    system_prompt: Path = typer.Option(
+        None,
+        "--system-prompt",
+        help=(
+            "Path to a system-prompt file. Default: introspect "
+            "voice_loop._SYSTEM (which is brain.claude.SABRINA_SYSTEM_PROMPT)."
+        ),
+    ),
+    backend: str = typer.Option(
+        "claude",
+        "--backend",
+        help="Brain to GENERATE replies with: 'claude' or 'ollama'.",
+    ),
+    judge_model: str = typer.Option(
+        "claude-sonnet-4-6",
+        "--judge-model",
+        help="Model used as the LLM judge. sonnet-4-6 is the cost/quality sweet spot.",
+    ),
+    consensus: bool = typer.Option(
+        False,
+        "--consensus",
+        help="Tier 3: run multiple judges and median their scores. Currently unwired.",
+    ),
+    prompts: Path = typer.Option(
+        None,
+        "--prompts",
+        help="Alternative golden-set YAML. Default: tests/personality/golden_set.yaml.",
+    ),
+    cost_cap: float = typer.Option(
+        0.50,
+        "--cost-cap",
+        help="Hard cap on total API spend for this run, in USD. Aborts before exceed.",
+    ),
+    dry_run: bool = typer.Option(
+        True,
+        "--dry-run/--live",
+        help=(
+            "Default --dry-run prints the planned calls + budget without spending "
+            "any tokens. Pass --live to actually invoke the judge (NOT YET WIRED)."
+        ),
+    ),
+) -> None:
+    """Tier-2 personality eval (LLM-as-judge over golden set).
+
+    This verb wires up the plumbing: loads the golden set, locates the
+    target system prompt, formats the judge prompt, and reports the
+    planned cost. The actual judge invocation is intentionally left
+    unwired — see the docstring in `tests/personality/__init__.py`.
+    """
+    import json
+    from pathlib import Path as _Path
+
+    settings = load_settings()
+    setup_logging(settings.logging.level)
+
+    # Resolve the system prompt source.
+    if system_prompt is not None:
+        if not system_prompt.is_file():
+            typer.secho(f"system-prompt file not found: {system_prompt}", fg=typer.colors.RED)
+            raise typer.Exit(code=2)
+        target_prompt = system_prompt.read_text(encoding="utf-8")
+        target_prompt_source = str(system_prompt)
+    else:
+        from sabrina.brain.claude import SABRINA_SYSTEM_PROMPT
+
+        target_prompt = SABRINA_SYSTEM_PROMPT
+        target_prompt_source = "brain.claude.SABRINA_SYSTEM_PROMPT"
+
+    # Resolve the golden set.
+    if prompts is None:
+        # Default path: tests/personality/golden_set.yaml under project root.
+        prompts = project_root() / "sabrina-2" / "tests" / "personality" / "golden_set.yaml"
+        if not prompts.is_file():
+            prompts = project_root() / "tests" / "personality" / "golden_set.yaml"
+    if not prompts.is_file():
+        typer.secho(f"golden set not found: {prompts}", fg=typer.colors.RED)
+        raise typer.Exit(code=2)
+
+    try:
+        import yaml as _yaml  # type: ignore[import-not-found]
+    except ImportError:
+        typer.secho(
+            "PyYAML required for personality-eval. `uv add pyyaml` first.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=2)
+
+    golden = _yaml.safe_load(prompts.read_text(encoding="utf-8"))
+    if not isinstance(golden, list):
+        typer.secho(f"unexpected golden-set shape in {prompts}", fg=typer.colors.RED)
+        raise typer.Exit(code=2)
+
+    # Resolve the judge prompt template.
+    judge_prompt_path = prompts.parent / "judge_prompt.md"
+    judge_prompt_text = (
+        judge_prompt_path.read_text(encoding="utf-8")
+        if judge_prompt_path.is_file()
+        else "<missing judge_prompt.md>"
+    )
+
+    # Cost estimate. Sonnet 4.6 ~ $3/M input + $15/M output as of
+    # 2026-04-26. Each scored reply: ~3500 input + ~600 output (judge
+    # prompt + persona + reply + structured-output JSON).
+    per_call_usd = (3500 / 1_000_000) * 3.0 + (600 / 1_000_000) * 15.0
+    n = len(golden)
+    estimated_total = per_call_usd * n * (3 if consensus else 1)
+
+    typer.echo(f"personality-eval (dry_run={dry_run})")
+    typer.echo(f"  system prompt source: {target_prompt_source}")
+    typer.echo(f"  system prompt length: {len(target_prompt)} chars")
+    typer.echo(f"  golden set:           {prompts}  ({n} prompts)")
+    typer.echo(f"  judge prompt:         {judge_prompt_path} ({len(judge_prompt_text)} chars)")
+    typer.echo(f"  generation backend:   {backend}")
+    typer.echo(f"  judge model:          {judge_model}  (consensus={consensus})")
+    typer.echo(f"  estimated cost:       ${estimated_total:.3f}  (cap ${cost_cap:.2f})")
+
+    if estimated_total > cost_cap:
+        typer.secho(
+            f"estimated cost ${estimated_total:.3f} exceeds cap ${cost_cap:.2f}; aborting.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=3)
+
+    if dry_run:
+        typer.echo("\n--- DRY RUN — no API calls made ---")
+        sample = golden[0]
+        typer.echo(
+            f"sample prompt id={sample.get('id')} register={sample.get('register')}"
+        )
+        typer.echo(f"  axes:   {sample.get('axes')}")
+        typer.echo(f"  prompt: {sample.get('prompt')!r}")
+        typer.echo(
+            "\n(Wire the actual judge call in a follow-up; this verb proves "
+            "loading + cost-cap arithmetic + judge-prompt assembly only.)"
+        )
+        raise typer.Exit(code=0)
+
+    # --- LIVE PATH (NOT YET WIRED) ---
+    typer.secho(
+        "live mode is not yet wired. Per the overnight prompt scope, the CLI "
+        "plumbing + judge prompt + structured-output schema land here; the "
+        "actual API invocation is a follow-up so Eric runs it manually with "
+        "his API key.",
+        fg=typer.colors.YELLOW,
+    )
+    raise typer.Exit(code=4)
+
+
+# ---------------------------------------------------------------------------
 # supervisor + autostart -- decision pending; see
 # `rebuild/drafts/supervisor-autostart-plan.md`. Off by default; activated
 # by `sabrina autostart enable`.
@@ -1008,7 +1167,8 @@ def autostart(
     if cfg.mode == "task_scheduler":
         if action == "enable":
             xml_path = root / "logs" / f"{cfg.task_name}.task.xml"
-            import os, sys
+            import os
+            import sys
 
             user_id = os.environ.get(
                 "USERDOMAIN_ROAMINGPROFILE",

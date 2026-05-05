@@ -1864,3 +1864,977 @@ def test_gui_collect_filters_underscore_keys_and_translates_preset():
     assert "_piper_preset" not in out
     assert out.get("tts.piper.voice_model") == "voices/en_US-amy-medium.onnx"
     assert out["memory.enabled"] is True
+
+
+# --- step 1 (overnight 2026-04-26): ToolSpec MCP shape ---
+
+
+def test_toolspec_to_anthropic_dict_uses_input_schema_key():
+    """`to_anthropic_dict()` returns the snake_case `input_schema` key the
+    Anthropic SDK expects."""
+    from sabrina.tools import ToolSpec
+
+    async def _h(**_kw):
+        return {"ok": True}
+
+    spec = ToolSpec(
+        name="dummy",
+        description="A dummy tool used in tests.",
+        input_schema={
+            "type": "object",
+            "properties": {"q": {"type": "string"}},
+            "required": ["q"],
+        },
+        handler=_h,
+    )
+    out = spec.to_anthropic_dict()
+    assert out == {
+        "name": "dummy",
+        "description": "A dummy tool used in tests.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"q": {"type": "string"}},
+            "required": ["q"],
+        },
+    }
+    # Handler is intentionally NOT in the wire payload.
+    assert "handler" not in out
+
+
+def test_toolspec_to_mcp_dict_uses_camelcase_input_schema_key():
+    """`to_mcp_dict()` returns `inputSchema` (camelCase) per the MCP
+    `tools/list` spec — same content, different field name."""
+    from sabrina.tools import ToolSpec
+
+    async def _h(**_kw):
+        return {"ok": True}
+
+    spec = ToolSpec(
+        name="dummy",
+        description="A dummy tool used in tests.",
+        input_schema={"type": "object", "properties": {}, "required": []},
+        handler=_h,
+    )
+    out = spec.to_mcp_dict()
+    assert "inputSchema" in out
+    assert "input_schema" not in out
+    # Top-level field set matches the published MCP tool schema.
+    assert set(out.keys()) == {"name", "description", "inputSchema"}
+    assert out["inputSchema"] == {"type": "object", "properties": {}, "required": []}
+
+
+def test_toolspec_round_trip_both_serializations_share_payload():
+    """Both serializations must carry the same name/description/schema —
+    only the schema key name differs."""
+    from sabrina.tools import ToolSpec
+
+    async def _h(**_kw):
+        return {}
+
+    schema = {
+        "type": "object",
+        "properties": {"x": {"type": "integer", "minimum": 0}},
+        "required": ["x"],
+    }
+    spec = ToolSpec(
+        name="dummy",
+        description="Round-trip fixture.",
+        input_schema=schema,
+        handler=_h,
+    )
+    a = spec.to_anthropic_dict()
+    m = spec.to_mcp_dict()
+    assert a["name"] == m["name"] == "dummy"
+    assert a["description"] == m["description"] == "Round-trip fixture."
+    assert a["input_schema"] == m["inputSchema"] == schema
+
+
+def test_toolspec_mcp_shape_has_required_fields_per_spec():
+    """The MCP tool schema requires `name`, `description`, `inputSchema`
+    at minimum. Guard against drift."""
+    from sabrina.tools import BUILTIN_TOOLS
+
+    assert BUILTIN_TOOLS, "BUILTIN_TOOLS must ship at least one tool"
+    for spec in BUILTIN_TOOLS:
+        d = spec.to_mcp_dict()
+        for key in ("name", "description", "inputSchema"):
+            assert key in d, f"missing {key!r} in {spec.name}"
+        # inputSchema must itself be a JSON-Schema-shaped object.
+        assert d["inputSchema"]["type"] == "object"
+        assert "properties" in d["inputSchema"]
+
+
+# --- step 2 (overnight 2026-04-26): write_clipboard tool ---
+
+
+def test_write_clipboard_registered_in_builtin_tools():
+    from sabrina.tools import BUILTIN_TOOLS, find
+
+    spec = find("write_clipboard")
+    assert spec is not None, "write_clipboard must be in BUILTIN_TOOLS"
+    assert spec in BUILTIN_TOOLS
+    # Schema accepts a `content` string and requires it.
+    assert spec.input_schema["required"] == ["content"]
+    assert spec.input_schema["properties"]["content"]["type"] == "string"
+
+
+async def test_write_clipboard_writes_via_pyperclip(monkeypatch):
+    """Happy-path: the handler routes to the pyperclip backend and
+    returns success + byte length."""
+    from sabrina.tools import clipboard as clip_mod
+
+    captured: list[str] = []
+
+    def fake_pp(text: str) -> None:
+        captured.append(text)
+
+    monkeypatch.setattr(clip_mod, "_set_clipboard_pyperclip", fake_pp)
+    # Make sure the native fallback can never be reached (would shell
+    # out for real on this test box).
+    def _fail(_t):
+        raise AssertionError("native fallback should not be invoked")
+    monkeypatch.setattr(clip_mod, "_set_clipboard_native", _fail)
+
+    result = await clip_mod.write_clipboard(content="hello from sabrina")
+    assert result == {"success": True, "length": len("hello from sabrina")}
+    assert captured == ["hello from sabrina"]
+
+
+async def test_write_clipboard_falls_back_to_native_when_pyperclip_raises(monkeypatch):
+    """If the pyperclip backend errors (broken install, no display),
+    the handler must fall through to the native subprocess path."""
+    from sabrina.tools import clipboard as clip_mod
+
+    def fake_pp(_text: str) -> None:
+        raise RuntimeError("pyperclip not available")
+
+    native_calls: list[str] = []
+
+    def fake_native(text: str) -> None:
+        native_calls.append(text)
+
+    monkeypatch.setattr(clip_mod, "_set_clipboard_pyperclip", fake_pp)
+    monkeypatch.setattr(clip_mod, "_set_clipboard_native", fake_native)
+
+    result = await clip_mod.write_clipboard(content="abc")
+    assert result == {"success": True, "length": 3}
+    assert native_calls == ["abc"]
+
+
+async def test_write_clipboard_truncates_input_above_max_bytes(monkeypatch):
+    """Long inputs are clamped at the byte cap. Reported length reflects
+    the truncated payload."""
+    from sabrina.tools import clipboard as clip_mod
+
+    captured: list[str] = []
+
+    def fake_pp(text: str) -> None:
+        captured.append(text)
+
+    monkeypatch.setattr(clip_mod, "_set_clipboard_pyperclip", fake_pp)
+
+    # 200 KB of ASCII; cap is 100 KB. Truncation policy: take MAX_BYTES//4
+    # characters (which is ~25 KB ASCII bytes — well under the cap).
+    long_text = "x" * 200_000
+    result = await clip_mod.write_clipboard(content=long_text)
+    assert result["success"] is True
+    assert result["length"] <= clip_mod._MAX_BYTES
+    # Backend got the truncated string, not the original.
+    assert captured and len(captured[0]) < len(long_text)
+
+
+async def test_write_clipboard_returns_failure_on_backend_error(monkeypatch):
+    """If both backends raise, the handler returns success=False rather
+    than propagating — the brain shouldn't crash on a clipboard hiccup."""
+    from sabrina.tools import clipboard as clip_mod
+
+    def boom(_t):
+        raise RuntimeError("clipboard contended")
+
+    monkeypatch.setattr(clip_mod, "_set_clipboard_pyperclip", boom)
+    monkeypatch.setattr(clip_mod, "_set_clipboard_native", boom)
+
+    result = await clip_mod.write_clipboard(content="x")
+    assert result["success"] is False
+    assert result["length"] == 0
+    assert "error" in result
+
+
+async def test_write_clipboard_rejects_non_string_content():
+    """Handler is defensive against bad model output (None, dict, ...)."""
+    from sabrina.tools.clipboard import write_clipboard
+
+    result = await write_clipboard(content=None)  # type: ignore[arg-type]
+    assert result["success"] is False
+    assert "error" in result
+
+
+def test_tools_config_block_loads_with_defaults():
+    from sabrina.config import load_settings
+
+    s = load_settings(reload=True)
+    # Master switch defaults off; per-tool defaults on.
+    assert s.tools.enabled is False
+    assert "write_clipboard" in s.tools.allowed
+    assert s.tools.write_clipboard.enabled is True
+    assert s.tools.write_clipboard.max_bytes == 100_000
+
+
+# --- step 3 (overnight 2026-04-26): Park-style retrieval scoring ---
+
+
+def test_memory_store_migrates_to_v2_adds_importance_column(tmp_path):
+    """Schema v1 -> v2 adds importance REAL DEFAULT 0.5; idempotent."""
+    from sabrina.memory.store import MemoryStore
+
+    db = tmp_path / "memory.db"
+    with MemoryStore(db_path=db) as store:
+        cols = {row[1] for row in store._conn.execute("PRAGMA table_info(messages)")}
+        assert "importance" in cols
+        v = store._conn.execute("PRAGMA user_version").fetchone()[0]
+        assert v == 2
+    # Re-open: must not double-migrate.
+    with MemoryStore(db_path=db) as store2:
+        v2 = store2._conn.execute("PRAGMA user_version").fetchone()[0]
+        assert v2 == 2
+
+
+def test_memory_store_default_importance_is_half(tmp_path):
+    """Newly-inserted rows default to importance=0.5 (neutral midpoint)."""
+    from sabrina.memory.store import MemoryStore
+
+    with MemoryStore(tmp_path / "mem.db") as store:
+        msg_id = store.append("s1", "user", "hello")
+        row = store._conn.execute(
+            "SELECT importance FROM messages WHERE id = ?", (msg_id,)
+        ).fetchone()
+        assert abs(float(row[0]) - 0.5) < 1e-9
+
+
+def test_memory_store_set_importance_clamps_and_persists(tmp_path):
+    from sabrina.memory.store import MemoryStore
+
+    with MemoryStore(tmp_path / "mem.db") as store:
+        a = store.append("s1", "user", "very important")
+        b = store.append("s1", "user", "trivial")
+        store.set_importance(a, 0.95)
+        store.set_importance(b, -0.4)  # clamped to 0
+        row_a = store._conn.execute(
+            "SELECT importance FROM messages WHERE id = ?", (a,)
+        ).fetchone()
+        row_b = store._conn.execute(
+            "SELECT importance FROM messages WHERE id = ?", (b,)
+        ).fetchone()
+        assert abs(float(row_a[0]) - 0.95) < 1e-9
+        assert float(row_b[0]) == 0.0
+
+
+def test_recency_score_decays_with_half_life():
+    """`_recency_score` is 1.0 at now, ~0.5 at one half-life, ~0.25 at two."""
+    from datetime import datetime, timedelta, timezone
+
+    from sabrina.memory.store import _recency_score
+
+    now = datetime(2026, 4, 26, tzinfo=timezone.utc)
+    half_life = 30.0  # days
+
+    # Today: ~1.0
+    assert abs(_recency_score(now, now=now, half_life_days=half_life) - 1.0) < 1e-6
+    # 30 days ago: ~0.5
+    s_30 = _recency_score(now - timedelta(days=30), now=now, half_life_days=half_life)
+    assert abs(s_30 - 0.5) < 1e-3
+    # 60 days ago: ~0.25
+    s_60 = _recency_score(now - timedelta(days=60), now=now, half_life_days=half_life)
+    assert abs(s_60 - 0.25) < 1e-3
+    # 90 days ago: ~0.125
+    s_90 = _recency_score(now - timedelta(days=90), now=now, half_life_days=half_life)
+    assert abs(s_90 - 0.125) < 1e-3
+
+
+def test_recency_score_half_life_zero_disables_decay():
+    from datetime import datetime, timedelta, timezone
+
+    from sabrina.memory.store import _recency_score
+
+    now = datetime(2026, 4, 26, tzinfo=timezone.utc)
+    # half_life=0 -> always 1.0 regardless of age
+    s = _recency_score(now - timedelta(days=365), now=now, half_life_days=0.0)
+    assert s == 1.0
+
+
+def test_search_scored_basic_orders_by_combined_score(tmp_path):
+    """When importance is uniform, search_scored matches search ordering
+    on the `relevance` term alone (recency cancels out for same-time rows)."""
+    _require_sqlite_vec()
+    from sabrina.memory.store import MemoryStore, new_session_id
+
+    e1 = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    e2 = [0.99, 0.141, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    e3 = [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+    with MemoryStore(tmp_path / "mem.db", embedding_dim=8) as m:
+        sid = new_session_id()
+        m.append(sid, "user", "anchor", embedding=e1)
+        m.append(sid, "user", "close", embedding=e2)
+        m.append(sid, "user", "ortho", embedding=e3)
+
+        scored = m.search_scored(e1, k=3, alpha=1.0, beta=1.0, gamma=1.0)
+        assert len(scored) == 3
+        # anchor first (relevance=1.0), then close, then ortho.
+        assert scored[0].message.content == "anchor"
+        assert scored[1].message.content == "close"
+        # Score is non-increasing.
+        assert scored[0].score >= scored[1].score >= scored[2].score
+        # All sub-scores populated.
+        for h in scored:
+            assert 0.0 <= h.recency <= 1.0
+            assert 0.0 <= h.importance <= 1.0
+            assert 0.0 <= h.relevance <= 1.0
+
+
+def test_search_scored_promotes_high_importance_over_close_distance(tmp_path):
+    """An older / less-relevant turn with importance=1.0 can outrank a
+    fresh / highly-relevant turn with importance=0.0 when beta is large."""
+    _require_sqlite_vec()
+    from sabrina.memory.store import MemoryStore, new_session_id
+
+    e1 = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]   # close to query
+    e2 = [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]   # orthogonal
+    query = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+    with MemoryStore(tmp_path / "mem.db", embedding_dim=8) as m:
+        sid = new_session_id()
+        rid_close = m.append(sid, "user", "close low importance", embedding=e1)
+        rid_far = m.append(sid, "user", "far high importance", embedding=e2)
+        m.set_importance(rid_close, 0.0)
+        m.set_importance(rid_far, 1.0)
+
+        # Heavily weight importance; near-zero on relevance and recency.
+        scored = m.search_scored(
+            query, k=2, alpha=0.01, beta=10.0, gamma=0.01,
+            recency_half_life_days=30.0,
+        )
+        assert len(scored) == 2
+        # The "far" but high-importance row should rank first.
+        assert scored[0].message.id == rid_far
+        assert scored[1].message.id == rid_close
+
+
+def test_search_scored_recency_breaks_tie_when_importance_equal(tmp_path):
+    """With equal importance + same query distance, the more-recent turn
+    scores higher because its recency term is higher."""
+    _require_sqlite_vec()
+    import time
+
+    from sabrina.memory.store import MemoryStore, new_session_id
+
+    e = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+    with MemoryStore(tmp_path / "mem.db", embedding_dim=8) as m:
+        sid = new_session_id()
+        old_id = m.append(sid, "user", "old", embedding=e)
+        # Backdate the old row so the recency term diverges noticeably.
+        m._conn.execute(
+            "UPDATE messages SET ts = ? WHERE id = ?",
+            ("2026-01-01T00:00:00+00:00", old_id),
+        )
+        time.sleep(0.01)
+        new_id = m.append(sid, "user", "new", embedding=e)
+
+        scored = m.search_scored(
+            e, k=2, alpha=10.0, beta=0.01, gamma=0.01,
+            recency_half_life_days=30.0,
+        )
+        assert scored[0].message.id == new_id
+        assert scored[1].message.id == old_id
+        assert scored[0].recency > scored[1].recency
+
+
+def test_search_scored_respects_max_distance_cutoff(tmp_path):
+    _require_sqlite_vec()
+    from sabrina.memory.store import MemoryStore, new_session_id
+
+    e_close = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    e_far = [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+    with MemoryStore(tmp_path / "mem.db", embedding_dim=8) as m:
+        sid = new_session_id()
+        m.append(sid, "user", "close", embedding=e_close)
+        m.append(sid, "user", "far", embedding=e_far)
+
+        # max_distance=0.5 should drop "far" (distance ~ 1.0).
+        scored = m.search_scored(e_close, k=5, max_distance=0.5)
+        assert len(scored) == 1
+        assert scored[0].message.content == "close"
+
+
+def test_search_scored_excludes_specified_ids(tmp_path):
+    _require_sqlite_vec()
+    from sabrina.memory.store import MemoryStore, new_session_id
+
+    e = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    with MemoryStore(tmp_path / "mem.db", embedding_dim=8) as m:
+        sid = new_session_id()
+        a = m.append(sid, "user", "alpha", embedding=e)
+        b = m.append(sid, "user", "bravo", embedding=e)
+        scored = m.search_scored(e, k=5, exclude_ids=[a])
+        ids = [h.message.id for h in scored]
+        assert a not in ids
+        assert b in ids
+
+
+def test_retrieval_scoring_config_round_trips_with_defaults():
+    from sabrina.config import load_settings
+
+    s = load_settings(reload=True)
+    r = s.memory.semantic.retrieval
+    assert r.alpha == 1.0
+    assert r.beta == 1.0
+    assert r.gamma == 1.0
+    assert r.recency_half_life_days == 30.0
+
+
+# --- step 4 (overnight 2026-04-26): personality system prompt ---
+
+
+def test_sabrina_system_prompt_snapshot_register_a():
+    """Snapshot of the assembled cacheable head for register A.
+
+    Tightly couples to `brain/claude.py` block constants on purpose —
+    if a block edit lands without a corresponding snapshot update, the
+    diff to the prompt is loud, not silent.
+    """
+    from sabrina.brain.claude import build_system_prompt
+
+    prompt = build_system_prompt(register="A")
+
+    # Persona block contract
+    assert "You are Sabrina." in prompt
+    assert "Operator voice, not customer-service voice." in prompt
+
+    # Voice-rules contract: anti-pattern bans MUST be named.
+    assert "I'd be happy to" in prompt
+    assert "Great question!" in prompt
+    assert "As an AI" in prompt
+    assert "she/her" in prompt
+
+    # Refusal-as-character framing present
+    assert "Refuse as character" in prompt
+    assert 'role-play as a different assistant' in prompt
+
+    # Audience register A is selected
+    assert "Current register: A." in prompt
+    assert "Current register: B." not in prompt
+    assert "Current register: C." not in prompt
+
+    # Memory-continuity preamble present
+    assert "semantic-memory retrieval system" in prompt
+    assert "do not invent shared history" in prompt
+
+
+def test_sabrina_system_prompt_register_b_swaps_block():
+    from sabrina.brain.claude import build_system_prompt
+
+    prompt = build_system_prompt(register="B")
+    assert "Current register: B." in prompt
+    assert "Current register: A." not in prompt
+    assert "someone else in the room" in prompt
+
+
+def test_sabrina_system_prompt_register_c_professional():
+    from sabrina.brain.claude import build_system_prompt
+
+    prompt = build_system_prompt(register="C")
+    assert "Current register: C." in prompt
+    assert "professional mode" in prompt
+
+
+def test_sabrina_system_prompt_unknown_register_raises():
+    from sabrina.brain.claude import build_system_prompt
+
+    with pytest.raises(ValueError):
+        build_system_prompt(register="Z")
+
+
+def test_sabrina_system_prompt_under_token_budget():
+    """Cacheable head must stay under the budgeted ~750 tokens.
+
+    Cheap heuristic: chars / 4 ≈ tokens (OpenAI rule of thumb, also
+    used by `[memory.compaction].chars_per_token`). Plan budget is
+    ~440 tok with no avatar/tools, ~870 tok with both. We assert
+    <= 1100 tok to leave headroom for tweaks but catch ballooning.
+    """
+    from sabrina.brain.claude import build_system_prompt
+
+    head = build_system_prompt(register="A")
+    approx_tokens = len(head) / 4.0
+    assert approx_tokens <= 1100, (
+        f"system prompt grew to ~{approx_tokens:.0f} tokens; "
+        "tighten or split into a dynamic block."
+    )
+
+
+def test_voice_loop_uses_personality_system_prompt():
+    """Regression guard: `voice_loop._SYSTEM` must reference the new
+    personality blocks, not the old generic 'helpful, concise' string."""
+    from sabrina.voice_loop import _SYSTEM
+
+    assert "You are Sabrina." in _SYSTEM
+    assert "Operator voice" in _SYSTEM
+    # The legacy stub must be gone.
+    assert "helpful, concise personal assistant" not in _SYSTEM
+
+
+def test_chat_repl_uses_personality_system_prompt():
+    """Same guard for the REPL entry point."""
+    from sabrina.chat import _SYSTEM
+
+    assert "You are Sabrina." in _SYSTEM
+    assert "Operator voice" in _SYSTEM
+
+
+def test_tool_use_block_inserted_when_provided():
+    from sabrina.brain.claude import build_system_prompt
+
+    tool_block = "Tool-use rules:\n- Confirm before destructive actions."
+    prompt = build_system_prompt(register="A", tool_use_block=tool_block)
+    assert "Confirm before destructive actions." in prompt
+    # Default omits it cleanly.
+    plain = build_system_prompt(register="A")
+    assert "Confirm before destructive actions." not in plain
+
+
+def test_sabrina_system_prompt_constant_matches_register_a_default():
+    from sabrina.brain.claude import SABRINA_SYSTEM_PROMPT, build_system_prompt
+
+    assert SABRINA_SYSTEM_PROMPT == build_system_prompt(register="A")
+
+
+# --- step 5 (overnight 2026-04-26): personality eval substrate ---
+
+
+def test_personality_eval_command_registered():
+    """`sabrina personality-eval` should be a registered Typer command."""
+    from sabrina.cli import app
+
+    names = {cmd.name for cmd in app.registered_commands}
+    assert "personality-eval" in names
+
+
+def test_personality_golden_set_present_at_canonical_path():
+    """The golden set must live at the path the CLI verb defaults to."""
+    from pathlib import Path
+
+    p = (
+        Path(__file__).parent / "personality" / "golden_set.yaml"
+    )
+    assert p.is_file(), f"missing golden set at {p}"
+
+
+def test_personality_judge_prompt_present():
+    """The judge prompt template must ship alongside the golden set."""
+    from pathlib import Path
+
+    p = Path(__file__).parent / "personality" / "judge_prompt.md"
+    assert p.is_file()
+    body = p.read_text(encoding="utf-8")
+    # Sanity guards: spec text must be present so the judge can't fall
+    # back to its own RLHF priors.
+    assert "Operator voice" in body
+    assert "Refuses as character" in body or "refuses **as character**" in body
+
+
+# --- step 4 (overnight 2026-05-04, worker-9am): tool-use wire-up ---
+#
+# These tests exercise ClaudeBrain.chat()'s tool-use path end-to-end against
+# a scripted Anthropic-SDK stub. They cover the six gates the (a)-half of the
+# QUEUE P1 owes per `research/2026-04-29-claudebrain-tool-wire-up-surface.md`
+# section 7. The stub mimics the bits of the real SDK we touch:
+# `messages.stream()` as an async context manager that exposes `.text_stream`
+# (async iterable) and `.get_final_message()` (coroutine returning a Message
+# with `.content`, `.stop_reason`, `.usage`).
+
+
+class _FakeBlock:
+    """Stand-in for an Anthropic ContentBlock (text or tool_use)."""
+
+    __slots__ = ("type", "text", "id", "name", "input")
+
+    def __init__(self, type_, *, text=None, id=None, name=None, input=None):
+        self.type = type_
+        self.text = text
+        self.id = id
+        self.name = name
+        self.input = input
+
+    def model_dump(self):
+        d = {"type": self.type}
+        if self.text is not None:
+            d["text"] = self.text
+        if self.id is not None:
+            d["id"] = self.id
+        if self.name is not None:
+            d["name"] = self.name
+        if self.input is not None:
+            d["input"] = self.input
+        return d
+
+
+class _FakeUsage:
+    def __init__(self, input_tokens=10, output_tokens=20):
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
+
+class _FakeFinalMessage:
+    def __init__(self, content, stop_reason, usage=None):
+        self.content = content
+        self.stop_reason = stop_reason
+        self.usage = usage or _FakeUsage()
+
+
+class _FakeStream:
+    """Async-context-manager + async-iterator-bearing fake of an SDK stream."""
+
+    def __init__(self, text_chunks, final):
+        self._text_chunks = text_chunks
+        self._final = final
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    @property
+    def text_stream(self):
+        async def _gen():
+            for t in self._text_chunks:
+                yield t
+        return _gen()
+
+    async def get_final_message(self):
+        return self._final
+
+
+class _FakeMessages:
+    def __init__(self, scripted):
+        self._scripted = list(scripted)
+        self.calls = []
+
+    def stream(self, **kwargs):
+        self.calls.append(kwargs)
+        if not self._scripted:
+            raise AssertionError(
+                "ClaudeBrain made more stream() calls than the test scripted."
+            )
+        return self._scripted.pop(0)
+
+
+class _FakeAnthropicClient:
+    def __init__(self, scripted):
+        self.messages = _FakeMessages(scripted)
+
+
+def _make_claude_with(scripted):
+    """Build a ClaudeBrain whose internal client is the scripted fake."""
+    from sabrina.brain.claude import ClaudeBrain
+
+    brain = ClaudeBrain(api_key="sk-ant-test-dummy", model="claude-test")
+    brain._client = _FakeAnthropicClient(scripted)
+    return brain
+
+
+def _toolspec_echo(name="echo", *, raises=None):
+    """Build a ToolSpec whose handler returns its input or raises if asked."""
+    from sabrina.tools import ToolSpec
+
+    async def handler(**kwargs):
+        if raises is not None:
+            raise raises
+        return {"echoed": kwargs}
+
+    return ToolSpec(
+        name=name,
+        description=f"Test tool {name}.",
+        input_schema={
+            "type": "object",
+            "properties": {"q": {"type": "string"}},
+        },
+        handler=handler,
+    )
+
+
+async def test_claude_executes_one_tool_and_continues():
+    """Happy path: model emits tool_use, we dispatch, recurse, model emits
+    final text + end_turn. Event sequence and tool_result follow-up shape
+    must match the spec from the research doc."""
+    from sabrina.brain.protocol import (
+        Done,
+        Message,
+        TextDelta,
+        ToolUseDone,
+        ToolUseStart,
+    )
+
+    spec = _toolspec_echo("echo")
+
+    round_1 = _FakeStream(
+        text_chunks=["thinking..."],
+        final=_FakeFinalMessage(
+            content=[
+                _FakeBlock("text", text="thinking..."),
+                _FakeBlock(
+                    "tool_use",
+                    id="toolu_01",
+                    name="echo",
+                    input={"q": "hello"},
+                ),
+            ],
+            stop_reason="tool_use",
+        ),
+    )
+    round_2 = _FakeStream(
+        text_chunks=["done."],
+        final=_FakeFinalMessage(
+            content=[_FakeBlock("text", text="done.")],
+            stop_reason="end_turn",
+            usage=_FakeUsage(input_tokens=42, output_tokens=7),
+        ),
+    )
+    brain = _make_claude_with([round_1, round_2])
+
+    events = []
+    async for ev in brain.chat(
+        [Message(role="user", content="say hi")],
+        tools=[spec],
+    ):
+        events.append(ev)
+
+    types = [type(ev).__name__ for ev in events]
+    assert "ToolUseStart" in types
+    assert "ToolUseDone" in types
+    start = next(ev for ev in events if isinstance(ev, ToolUseStart))
+    done_ev = next(ev for ev in events if isinstance(ev, ToolUseDone))
+    assert start.tool_id == done_ev.tool_id == "toolu_01"
+    assert start.name == "echo"
+    assert start.input == {"q": "hello"}
+    assert done_ev.error is None
+    assert done_ev.result == {"echoed": {"q": "hello"}}
+    final = events[-1]
+    assert isinstance(final, Done)
+    assert final.stop_reason == "end_turn"
+    assert final.input_tokens == 42
+    assert final.output_tokens == 7
+    text_after_tool = [
+        ev for ev in events
+        if isinstance(ev, TextDelta) and ev.text == "done."
+    ]
+    assert text_after_tool, "expected post-tool TextDelta from round 2"
+    calls = brain._client.messages.calls
+    assert len(calls) == 2
+    for call in calls:
+        assert "tools" in call
+        assert call["tools"][0]["name"] == "echo"
+    second_messages = calls[1]["messages"]
+    last_user = second_messages[-1]
+    assert last_user["role"] == "user"
+    assert isinstance(last_user["content"], list)
+    tr = last_user["content"][0]
+    assert tr["type"] == "tool_result"
+    assert tr["tool_use_id"] == "toolu_01"
+    assert tr["is_error"] is False
+    import json as _json
+    assert _json.loads(tr["content"]) == {"echoed": {"q": "hello"}}
+
+
+async def test_claude_recursion_cap_yields_done_with_cap_reason():
+    """If the model keeps invoking tools, the loop bails after
+    _MAX_TOOL_RECURSION dispatch rounds and reports `tool_recursion_cap`."""
+    from sabrina.brain.claude import _MAX_TOOL_RECURSION
+    from sabrina.brain.protocol import Done, Message
+
+    spec = _toolspec_echo("echo")
+
+    def _looping_round(i):
+        return _FakeStream(
+            text_chunks=[],
+            final=_FakeFinalMessage(
+                content=[
+                    _FakeBlock(
+                        "tool_use",
+                        id=f"toolu_{i:02d}",
+                        name="echo",
+                        input={"q": str(i)},
+                    ),
+                ],
+                stop_reason="tool_use",
+            ),
+        )
+
+    scripted = [_looping_round(i) for i in range(_MAX_TOOL_RECURSION + 2)]
+    brain = _make_claude_with(scripted)
+
+    events = []
+    async for ev in brain.chat(
+        [Message(role="user", content="loop")],
+        tools=[spec],
+    ):
+        events.append(ev)
+
+    final = events[-1]
+    assert isinstance(final, Done)
+    assert final.stop_reason == "tool_recursion_cap"
+    calls = brain._client.messages.calls
+    assert len(calls) == _MAX_TOOL_RECURSION
+
+
+async def test_claude_tool_handler_error_surfaces_in_tool_result():
+    """Handler raises -> ToolUseDone.error set, tool_result has is_error=True
+    so the model can see the failure and react instead of crashing the loop."""
+    from sabrina.brain.protocol import Done, Message, ToolUseDone
+
+    boom = _toolspec_echo("boom", raises=RuntimeError("clipboard contended"))
+
+    round_1 = _FakeStream(
+        text_chunks=[],
+        final=_FakeFinalMessage(
+            content=[
+                _FakeBlock(
+                    "tool_use",
+                    id="toolu_err",
+                    name="boom",
+                    input={"q": "x"},
+                ),
+            ],
+            stop_reason="tool_use",
+        ),
+    )
+    round_2 = _FakeStream(
+        text_chunks=["sorry."],
+        final=_FakeFinalMessage(
+            content=[_FakeBlock("text", text="sorry.")],
+            stop_reason="end_turn",
+        ),
+    )
+    brain = _make_claude_with([round_1, round_2])
+
+    events = []
+    async for ev in brain.chat(
+        [Message(role="user", content="break it")],
+        tools=[boom],
+    ):
+        events.append(ev)
+
+    done_ev = next(ev for ev in events if isinstance(ev, ToolUseDone))
+    assert done_ev.error == "clipboard contended"
+    assert done_ev.result is None
+
+    calls = brain._client.messages.calls
+    last_user = calls[1]["messages"][-1]
+    tr = last_user["content"][0]
+    assert tr["type"] == "tool_result"
+    assert tr["is_error"] is True
+    assert "clipboard contended" in tr["content"]
+
+    final = events[-1]
+    assert isinstance(final, Done)
+    assert final.stop_reason == "end_turn"
+
+
+async def test_claude_unknown_tool_name_returns_error_result():
+    """If the model invents a name we didn't advertise, the loop yields a
+    ToolUseDone(error=...) and recurses with an error tool_result rather
+    than crashing."""
+    from sabrina.brain.protocol import Done, Message, ToolUseDone
+
+    spec = _toolspec_echo("echo")
+
+    round_1 = _FakeStream(
+        text_chunks=[],
+        final=_FakeFinalMessage(
+            content=[
+                _FakeBlock(
+                    "tool_use",
+                    id="toolu_unknown",
+                    name="not_a_real_tool",
+                    input={},
+                ),
+            ],
+            stop_reason="tool_use",
+        ),
+    )
+    round_2 = _FakeStream(
+        text_chunks=[],
+        final=_FakeFinalMessage(
+            content=[_FakeBlock("text", text="oops")],
+            stop_reason="end_turn",
+        ),
+    )
+    brain = _make_claude_with([round_1, round_2])
+
+    events = []
+    async for ev in brain.chat(
+        [Message(role="user", content="trick it")],
+        tools=[spec],
+    ):
+        events.append(ev)
+
+    done_ev = next(ev for ev in events if isinstance(ev, ToolUseDone))
+    assert done_ev.error == "unknown tool: not_a_real_tool"
+    calls = brain._client.messages.calls
+    tr = calls[1]["messages"][-1]["content"][0]
+    assert tr["is_error"] is True
+    assert "unknown tool" in tr["content"]
+    assert isinstance(events[-1], Done)
+
+
+async def test_ollama_raises_cleanly_when_tools_provided():
+    """OllamaBrain.chat() must NotImplementedError on tools= until parity
+    lands. Message text is part of the contract — config error messages
+    point users at the right knob."""
+    from sabrina.brain.ollama import OllamaBrain
+    from sabrina.brain.protocol import Message
+
+    brain = OllamaBrain()
+    spec = _toolspec_echo("echo")
+
+    with pytest.raises(NotImplementedError) as exc_info:
+        async for _ev in brain.chat(
+            [Message(role="user", content="hi")],
+            tools=[spec],
+        ):
+            pass
+    msg = str(exc_info.value)
+    assert "does not support tool use" in msg
+    assert "set [tools] enabled = false" in msg
+
+
+async def test_brain_chat_tools_none_is_backward_compatible():
+    """Default-path regression: omitting tools= must keep the existing
+    text-only behavior. No tools= on the wire, classic event sequence."""
+    from sabrina.brain.protocol import Done, Message, TextDelta
+
+    only = _FakeStream(
+        text_chunks=["hi", " there"],
+        final=_FakeFinalMessage(
+            content=[_FakeBlock("text", text="hi there")],
+            stop_reason="end_turn",
+            usage=_FakeUsage(input_tokens=3, output_tokens=2),
+        ),
+    )
+    brain = _make_claude_with([only])
+
+    events = []
+    async for ev in brain.chat([Message(role="user", content="hi")]):
+        events.append(ev)
+
+    deltas = [ev for ev in events if isinstance(ev, TextDelta)]
+    assert [d.text for d in deltas] == ["hi", " there"]
+    final = events[-1]
+    assert isinstance(final, Done)
+    assert final.stop_reason == "end_turn"
+    assert final.input_tokens == 3
+    assert final.output_tokens == 2
+    call = brain._client.messages.calls[0]
+    assert "tools" not in call

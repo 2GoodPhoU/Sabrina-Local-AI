@@ -426,3 +426,181 @@ has its second caller and earns its keep.
   silent drops we missed (Phase-0 didn't find any in the three non-GUI
   files, but the search was function-level — tiny doc-string or
   one-line behaviour edits could still be missing).
+
+---
+
+## 2026-04-26 night cleanup — docs + hygiene
+
+Overnight session, doc-only scope. Code work is on a parallel session
+(promotion of decision 010 personality spec); that contribution will
+land below this section under its own header. Don't merge the two —
+keep them as separate commits per the slicing list at the bottom.
+
+| ID | What landed | Files | Done by |
+|---|---|---|---|
+| N1 | `compileall` pre-commit hook (catches SyntaxError-on-commit) | `.pre-commit-config.yaml` | docs session |
+| N2 | ROADMAP: pass-2 status from "uncommitted" → "landed 2026-04-25"; test count 59 → 96; wake-word row to "🟡 scaffolded"; wake-word body section rewritten; 010 added to decision log | `rebuild/ROADMAP.md` | docs session |
+| N3 | README: test count 57 → 96; layout `whisper.py` → `faster_whisper.py`; added `wake_word.py`, `compaction.py`, `supervisor.py` to layout tree; component table wake-word row to "🟡 scaffolded"; component table 010 personality row added | `sabrina-2/README.md` | docs session |
+| N4 | `validate-wake-word.md`: `listener/wake.py` → `listener/wake_word.py`; `hey_sabrina` (custom, untrained) → `hey_jarvis` (bundled placeholder); `voices/wake/hey_sabrina.onnx` path → bundled-id loading; `model_path` → `model` in toml example; dropped non-existent `auto_capture_s` | `rebuild/validate-wake-word.md` | docs session |
+| N5 | `validate-007b-semantic-memory-gui.md`: `memory/compact.py` → `memory/compaction.py` | `rebuild/validate-007b-semantic-memory-gui.md` | docs session |
+| N6 | `when-you-return.md`: refreshed for 2026-04-26; dropped references to removed `ACTION_ITEMS_code.md`, `ACTION_ITEMS_personality.md`, and `008-foundational-refactor-shipped.md` redirect stub; corrected `validate-memory-gui.md` → `validate-007b-semantic-memory-gui.md`; test count update; pass 2 marked landed | `rebuild/when-you-return.md` | docs session |
+| N7 | New: `LEGACY_REPLACEMENT_GATE.md` — gate doc with honest assessment, legacy uniques walk, 5-port checklist, 7-day bake-in window, mid- to late-May 2026 timeline, post-archive disposition options | `rebuild/LEGACY_REPLACEMENT_GATE.md` | docs session |
+| N8 | New: `CLEANUP_FINDINGS_2026-04-26-night.md` — full record of this session's deltas + open follow-ups | `rebuild/CLEANUP_FINDINGS_2026-04-26-night.md` | docs session |
+
+### Recommended commit slicing (Eric's morning)
+
+1. `chore: add compileall pre-commit hook` — `.pre-commit-config.yaml`.
+2. `docs: refresh ROADMAP + README for 2026-04-26 state` — N2 + N3.
+3. `docs: fix stale filename refs in validation procedures` — N4 + N5.
+4. `docs: prune removed-stub references from when-you-return` — N6.
+5. `docs: add legacy replacement gate + cleanup findings` — N7 + N8 +
+   this `ACTION_ITEMS.md` section.
+
+### Open follow-ups (none blocking)
+
+- `ROADMAP.md` "remove garbage scorecard" still in present tense; flip
+  to past tense in the same commit that moves legacy to `archive/`.
+- `CLAUDE.md` "Where the code and docs live" lists legacy folders by
+  name; same trigger.
+- When a real custom "Hey Sabrina" wake model is trained,
+  `validate-wake-word.md` gets one more sweep to swap `hey_jarvis`
+  references back. Today's doc matches today's scaffold.
+
+---
+
+# Action items — overnight 2026-04-26 (code track)
+
+**Owner:** code (this section). The cleanup/doc-drift task owns the
+doc deltas at `rebuild/` root. **State:** uncommitted in working
+tree; Eric reviews + commits in the morning.
+
+**Anti-truncation discipline held.** The Edit/Write tools truncated
+silently on `cli.py`, `config.py`, `voice_loop.py`, `chat.py`, and
+`store.py`. Each was caught by AST verification immediately after the
+edit and reconstructed via bash heredoc + `python3` splice. No file
+>1000 lines needed full reconstruction (cli.py at 1073→1246 lines was
+spliced near its tail). Final AST sweep across all 11 touched files
+clean.
+
+## Summary table
+
+| # | Work unit | Status | Files touched | Notes |
+|---|---|---|---|---|
+| D1 | Step 1 — ToolSpec MCP-shape migration | Tests gate | `sabrina-2/src/sabrina/tools/__init__.py` (new) | New module: 114 lines. `ToolSpec` dataclass exposes `to_anthropic_dict()` (snake_case `input_schema`) and `to_mcp_dict()` (camelCase `inputSchema`). Round-trip + shape-conformance tests in `test_smoke.py`. |
+| D2 | Step 2 — `write_clipboard` ToolSpec | Tests gate | `tools/clipboard.py` (new), `tools/__init__.py`, `pyproject.toml`, `sabrina.toml`, `config.py`, `test_smoke.py` | pyperclip primary backend with native `clip`/`pbcopy`/`xclip` fallback. Schema `{content: string}`, output `{success: bool, length: int}`. `BUILTIN_TOOLS` ships with the spec. New `[tools]` + `[tools.write_clipboard]` config block; master `enabled=false` (off until brain wires tool-call dispatch). |
+| D3 | Step 3 — Park-style retrieval scoring | Tests gate | `memory/store.py`, `config.py`, `voice_loop.py`, `test_smoke.py` | Schema v1→v2 migration adds `importance REAL DEFAULT 0.5`; `_recency_score()` does exponential decay (half-life 30d default); new `MemoryStore.search_scored()` returns `ScoredHit(score, recency, importance, relevance)`; `voice_loop` retrieval path now uses it. New `[memory.semantic.retrieval]` config: `alpha/beta/gamma=1.0`, `recency_half_life_days=30.0`. Existing `search()` unchanged for backward compat. |
+| D4 | Step 4 — Personality system-prompt commit | Tests gate | `brain/claude.py`, `voice_loop.py`, `chat.py`, `rebuild/decisions/010-personality-spec.md`, `test_smoke.py` | Persona / voice-rules / refusal / register-A/B/C / memory-continuity blocks land as module constants in `brain/claude.py`. `build_system_prompt(register, tool_use_block)` assembles the cacheable head; `SABRINA_SYSTEM_PROMPT = build_system_prompt(register="A")` is the default. `voice_loop._SYSTEM` and `chat._SYSTEM` both re-export it (legacy generic strings deleted). Snapshot test pins anti-pattern bans + register select; length-cap test bounds at ~1100 tok. Decision 010 marked Shipped 2026-04-26. |
+| D5 | Step 5 — Personality eval framework substrate | Tests gate (tier 1) + manual (tier 2) | `tests/personality/{__init__.py, golden_set.yaml, test_regex_smokes.py, judge_prompt.md}` (new), `cli.py`, `pyproject.toml`, `test_smoke.py` | 30-prompt golden set covering 12 documented failure-mode axes; register split 17 A / 7 B / 6 C (close to 60/25/15 plan target). Tier-1 regex smokes catch ~5 of 12 modes; `pytest -m personality_fast` selects them. Tier-2 plumbing in new `sabrina personality-eval` CLI verb: loads target prompt, golden set, judge prompt; estimates cost ($0.01/scored reply, ~$0.30 for the 30-prompt set); `--cost-cap` aborts on overspend; `--dry-run` is the default. **Live judge call intentionally NOT wired** — Eric runs that with his API key per the overnight prompt's scope. Tier 3 documented as TODO in `tests/personality/__init__.py`. |
+
+## Decisions made autonomously (the most important first)
+
+1. **Where ToolSpec lives.** New `sabrina/tools/__init__.py` rather
+   than `sabrina/brain/tools.py`. Rationale: handlers (`clipboard.py`,
+   future `time_tool.py`, `memory.py`) live next to the spec class, and
+   the toolspec research doc draws the directory boundary at the same
+   place. Anti-sprawl cost: one new package directory, justified by the
+   second caller (clipboard.py) shipping in the same step.
+2. **Schema-shape compatibility, not runtime.** `to_mcp_dict()` is
+   structural only — no MCP server, no stdio JSON-RPC. The handlers
+   slot into either transport when an MCP runtime lands; today's wins
+   are testability of the shape and zero churn when migration arrives.
+3. **`write_clipboard` falls back from pyperclip to native subprocess.**
+   The research doc proposed pyperclip-only. Real-world: pyperclip can
+   import-fail on Linux without a display and on locked-down Windows
+   installs. The `_set_clipboard_native` fallback is ~30 LOC and the
+   handler returns `success=False` if both backends fail (never
+   propagates), so the brain stays alive on a clipboard hiccup.
+4. **Park-style scoring lives next to existing `search`, not as a
+   replacement.** New method `search_scored()` returns `ScoredHit`
+   with all sub-scores broken out; the bare `search()` is untouched
+   so callers that just want cosine ordering (none today, but the
+   `memory-search` CLI verb is the obvious case) don't pay the rerank
+   cost. Voice loop migrated to `search_scored()` as the only caller.
+5. **Personality blocks live in `brain/claude.py`, not a sibling
+   `personality.py` module.** Anti-sprawl says no new module without
+   a second caller; voice_loop and chat both import via the existing
+   `brain.claude` namespace. If avatar cue track or REPL-mode register
+   land later and the constant pile grows past ~300 lines of blocks,
+   that's the trigger to split.
+6. **CLI verb `personality-eval` is dry-run by default.** Per the
+   overnight prompt: "Don't actually invoke the API in this step —
+   wire the CLI plumbing + judge-prompt template + structured output
+   parsing." `--dry-run` prints the planned cost + sample prompt; the
+   `--live` flag exits with code 4 and a message saying live mode is
+   a follow-up. Cost arithmetic, golden-set load, judge-prompt load
+   all exercised even on dry run, so the tests catch breakage before
+   Eric ever spends a token.
+7. **Decision 010 is Shipped, not moved.** The file was already at
+   `rebuild/decisions/010-personality-spec.md` (not `drafts/`) — the
+   prompt's "Move from drafts/" was a no-op. Updated the doc's date
+   line to `(spec) · Shipped: 2026-04-26 (overnight implementation)`
+   and rewrote "Next" to mark the implementation tasks done with
+   pointers to the new constants.
+
+## Coordination with cleanup track
+
+This section appended after the existing 2026-04-25 section; cleanup
+task owns documentation deltas at `rebuild/` root and may add its own
+2026-04-26 section. No conflict — distinct directories.
+
+## Test surface added
+
+- `test_toolspec_to_anthropic_dict_uses_input_schema_key`
+- `test_toolspec_to_mcp_dict_uses_camelcase_input_schema_key`
+- `test_toolspec_round_trip_both_serializations_share_payload`
+- `test_toolspec_mcp_shape_has_required_fields_per_spec`
+- `test_write_clipboard_registered_in_builtin_tools`
+- `test_write_clipboard_writes_via_pyperclip`
+- `test_write_clipboard_falls_back_to_native_when_pyperclip_raises`
+- `test_write_clipboard_truncates_input_above_max_bytes`
+- `test_write_clipboard_returns_failure_on_backend_error`
+- `test_write_clipboard_rejects_non_string_content`
+- `test_tools_config_block_loads_with_defaults`
+- `test_memory_store_migrates_to_v2_adds_importance_column`
+- `test_memory_store_default_importance_is_half`
+- `test_memory_store_set_importance_clamps_and_persists`
+- `test_recency_score_decays_with_half_life`
+- `test_recency_score_half_life_zero_disables_decay`
+- `test_search_scored_basic_orders_by_combined_score`
+- `test_search_scored_promotes_high_importance_over_close_distance`
+- `test_search_scored_recency_breaks_tie_when_importance_equal`
+- `test_search_scored_respects_max_distance_cutoff`
+- `test_search_scored_excludes_specified_ids`
+- `test_retrieval_scoring_config_round_trips_with_defaults`
+- `test_sabrina_system_prompt_snapshot_register_a`
+- `test_sabrina_system_prompt_register_b_swaps_block`
+- `test_sabrina_system_prompt_register_c_professional`
+- `test_sabrina_system_prompt_unknown_register_raises`
+- `test_sabrina_system_prompt_under_token_budget`
+- `test_voice_loop_uses_personality_system_prompt`
+- `test_chat_repl_uses_personality_system_prompt`
+- `test_tool_use_block_inserted_when_provided`
+- `test_sabrina_system_prompt_constant_matches_register_a_default`
+- `test_personality_eval_command_registered`
+- `test_personality_golden_set_present_at_canonical_path`
+- `test_personality_judge_prompt_present`
+- `tests/personality/test_regex_smokes.py` — 13 tests under
+  `pytest -m personality_fast`
+
+## Follow-ups Eric should think about
+
+- **Wire tool-call dispatch into `ClaudeBrain.chat`.** Step 1 + 2
+  ship the registry; the brain still ignores `tools=`. The
+  `tool-use-plan.md` audit baked in additive `Message` event types
+  (`ToolCall`, `ToolResult`); they're not in `brain/protocol.py` yet.
+  Probably one ~150-line change to `claude.py` + a streaming-event
+  union extension. Set the `[tools] enabled = true` after.
+- **LLM-rated importance.** Step 3 ships the column at default 0.5.
+  Heuristic-floor (cue tags, "remember…" phrases, behavior-driven
+  +1) is the next step per the memory architecture research doc; the
+  end-of-session batch-rate via Ollama is the step after that.
+- **Personality eval live mode.** `--live` exits cleanly with code 4
+  today. Wiring is one Anthropic call per scored reply with structured
+  output parsing — keep `--cost-cap` honest and surface per-axis
+  medians + delta vs. `last_run.json`.
+- **Cache-control wiring.** `build_system_prompt()` returns the
+  cacheable head as one string. When `[tools] enabled = true` (or
+  avatar cue vocabulary lands) push the head over Anthropic's
+  1024-token cache floor, add `cache_control={"type": "ephemeral"}`
+  on the system block, and verify with `last_run.json` deltas that the
+  cache-hit ratio actually rises.

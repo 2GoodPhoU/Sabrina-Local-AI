@@ -100,6 +100,30 @@ class EmbedderConfig(BaseModel):
     backend: Literal["onnx", "sentence-transformers"] = "onnx"
 
 
+class RetrievalScoringConfig(BaseModel):
+    """Park-style hybrid retrieval scoring weights.
+
+    Final score per hit: ``alpha*recency + beta*importance + gamma*relevance``,
+    each term in [0, 1]. Defaults are 1/1/1 — equal weight, easy mental
+    model. Increase `alpha` to bias toward fresher turns; lower `gamma`
+    to soften the cosine-only ranking.
+
+    See `rebuild/drafts/research/2026-04-26-memory-architecture-evolution.md`
+    for the rationale and the canonical Park et al. formulation.
+    """
+
+    # Recency weight (alpha). Exponential decay with `recency_half_life_days`.
+    alpha: float = 1.0
+    # Importance weight (beta). Multiplied with the per-message importance
+    # column (default 0.5; 0..1 once LLM-rating lands).
+    beta: float = 1.0
+    # Relevance weight (gamma). Multiplied with `1 - cosine_distance`.
+    gamma: float = 1.0
+    # Half-life for the recency decay, in days. After this many days a
+    # turn's recency contribution drops to 0.5; after 2x to 0.25; etc.
+    recency_half_life_days: float = 30.0
+
+
 class SemanticMemoryConfig(BaseModel):
     enabled: bool = False
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
@@ -107,6 +131,7 @@ class SemanticMemoryConfig(BaseModel):
     max_distance: float = 0.5
     min_age_turns: int = 20
     embedder: EmbedderConfig = EmbedderConfig()
+    retrieval: RetrievalScoringConfig = RetrievalScoringConfig()
 
 
 class CompactionConfig(BaseModel):
@@ -185,6 +210,25 @@ class SupervisorConfig(BaseModel):
     nssm_binary: str = ""
 
 
+class WriteClipboardToolConfig(BaseModel):
+    enabled: bool = True
+    # Hard cap; handler also clamps internally. Keep in sync with the
+    # ToolSpec input_schema's maxLength.
+    max_bytes: int = 100_000
+
+
+class ToolsConfig(BaseModel):
+    # Master switch for the tool-use surface. Off by default until the
+    # brain wires tool-call handling end-to-end (per
+    # `rebuild/drafts/tool-use-plan.md`). Even with `enabled=false`, the
+    # `BUILTIN_TOOLS` registry is importable so tests + `sabrina
+    # tool-test` (when shipped) still work.
+    enabled: bool = False
+    # Allow-list of tool names. Empty list = all registered tools allowed.
+    allowed: list[str] = Field(default_factory=lambda: ["write_clipboard"])
+    write_clipboard: WriteClipboardToolConfig = WriteClipboardToolConfig()
+
+
 class LoggingConfig(BaseModel):
     level: str = "INFO"
 
@@ -218,6 +262,7 @@ class Settings(BaseSettings):
     wake_word: WakeWordConfig = WakeWordConfig()
     barge_in: BargeInConfig = BargeInConfig()
     supervisor: SupervisorConfig = SupervisorConfig()
+    tools: ToolsConfig = ToolsConfig()
     logging: LoggingConfig = LoggingConfig()
     anthropic_api_key: SecretStr | None = Field(
         default=None,
@@ -281,21 +326,6 @@ def apply_migrations(toml_path: Path | None = None) -> int:
 
 def load_settings(reload: bool = False) -> Settings:
     """Load settings once (cached). Pass reload=True to force re-read."""
-    global _cached
-    if _cached is None or reload:
-        apply_migrations()
-        _cached = Settings()
-    return _cached
-
-
-def project_root() -> Path:
-    """Best-effort project root (where sabrina.toml lives)."""
-    cwd = Path.cwd()
-    for candidate in [cwd, *cwd.parents]:
-        if (candidate / "sabrina.toml").is_file():
-            return candidate
-    return cwd
-ings once (cached). Pass reload=True to force re-read."""
     global _cached
     if _cached is None or reload:
         apply_migrations()

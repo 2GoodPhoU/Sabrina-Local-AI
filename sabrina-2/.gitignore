@@ -29,7 +29,13 @@ build/
 Thumbs.db
 
 # Sabrina runtime
-/data/
+# `/data/` holds the local sqlite memory store (sabrina.db) at runtime,
+# but also tracked data assets (e.g. `shortcuts.yaml`). Match files inside
+# the directory (not the directory itself) so negation patterns can
+# re-include specific tracked assets.
+/data/*
+!/data/*.yaml
+!/data/*.yml
 /logs/
 *.db
 *.sqlite

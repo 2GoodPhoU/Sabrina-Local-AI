@@ -23,11 +23,11 @@ from sabrina.memory.store import MemoryStore, new_session_id
 from sabrina.state import StateMachine
 
 
-_SYSTEM = (
-    "You are Sabrina, a helpful, concise personal assistant running locally on the "
-    "user's Windows PC. Keep replies short and conversational unless the user asks "
-    "for detail."
-)
+# REPL system prompt — same persona as voice loop. Decision 010 +
+# brain/claude.py § "Personality system-prompt blocks". The REPL is a
+# `chat._SYSTEM` consumer (per personality-plan.md thin spot); a future
+# REPL-mode register that softens "no markdown" can override here.
+from sabrina.brain.claude import SABRINA_SYSTEM_PROMPT as _SYSTEM
 
 
 async def run_repl(

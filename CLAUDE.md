@@ -6,6 +6,8 @@
 
 Personality-forward local-first voice assistant for daily-driver use on Windows. Mic → STT → brain → TTS, with persistent semantic memory, barge-in, wake-word, and a Live2D avatar layer planned. Cortana-style "with you, not toward you" operator voice, defined canonically in `rebuild/decisions/010-personality-spec.md`.
 
+Master release-targeted plan to v1.0 (phase ladder + gates + current-state marker): `ROADMAP.md` at the project root.
+
 ## Stack & conventions
 
 Python 3.12, uv-managed. faster-whisper STT, Anthropic Claude + Ollama brain (with persona-projection layer planned for parity), Piper TTS, sqlite-vec semantic memory with ONNX MiniLM-L6 embedder, Silero VAD + barge-in (CancelToken plumbing through `Brain.chat` / `Speaker.speak`), openWakeWord scaffolded ('hey_jarvis' bundled placeholder, custom 'Hey Sabrina' model training pending). pytest, structlog with redacting + truncating processors, rotating `logs/sabrina.log` sink, schema-versioned config + memory migrations.
@@ -14,7 +16,7 @@ Python 3.12, uv-managed. faster-whisper STT, Anthropic Claude + Ollama brain (wi
 
 - Do not modify `rebuild/decisions/` files — the decision-doc voice is canon.
 - Do not modify the legacy root-level `core/`, `services/`, `utilities/`, `scripts/`, `models/` — these are pre-rebuild and slated for archive (see `rebuild/LEGACY_REPLACEMENT_GATE.md`).
-- Do not push to remote unless explicitly approved.
+- Local commits are sufficient for DoD at both Full and Partial tiers — Eric pushes manually each night. Workers MAY attempt to push to `automation/<role>-<YYYY-MM-DD>-<slot>` branches as an informational step (see `roles/worker.md` step 7), but push failure is NOT a DoD blocker and does not stop a queue item from moving to DONE. Never push to `main`/`master`. Never force-push. Never rewrite or delete remote history.
 - Do not log secrets — `redact_secrets` structlog processor is in place; any new logger call should respect it.
 - Do not modify or extend the pre-commit hook outside its existing scope.
 
@@ -26,6 +28,21 @@ Python 3.12, uv-managed. faster-whisper STT, Anthropic Claude + Ollama brain (wi
 - No new dependencies without justification recorded in ACTION_ITEMS or a decision doc.
 - Voice loop validated end-to-end (record sample → STT → brain → TTS) before claiming any voice-loop change ships.
 - Edit-tool truncation is a recurring hazard — verify file contents post-edit (AST-parse Python files; spot-check >300 lines for tail integrity).
+
+## Partial-DoD tiers
+
+DoD is tiered. A change satisfies one of the two tiers below; Full DoD is the long-term gate, Partial DoD lets Linux-runnable units ship without waiting on a Windows session.
+
+- **Full DoD** (the existing rule). Voice loop validated end-to-end on Windows + `pytest` passes on Windows + DECISIONS entry where required + the rest of the bullets above. Required for anything that touches voice-loop runtime, audio I/O, clipboard, mss/pynput/pyperclip paths, or pywin32-only modules. Required to claim a queue item is `[done]`.
+
+- **Partial DoD ("Linux-validated, Windows-pending")**. A Worker MAY ship at this tier when ALL of the following hold:
+  1. The diff does not modify voice-loop runtime, audio I/O, clipboard, mss/pynput/pyperclip paths, or pywin32-only modules.
+  2. `code-review` (per `roles/worker.md` step 6) approves the diff.
+  3. Unit tests for the diff pass under the Cowork Linux/Python 3.10 sandbox via `python -m compileall` + the test subset that the sandbox can run; no platform-specific code introduced.
+  4. The change is committed locally on an `automation/<role>-<YYYY-MM-DD>-<slot>` branch (per `roles/worker.md` step 7), with a `Windows-pending: e2e` marker in the commit message body and a Windows DoD checklist captured in JOURNAL.md so Eric can promote on his next Windows session. Push to remote and any draft-PR creation are informational/best-effort — Eric pushes manually nightly. If the Worker's push does succeed, it should also tag the PR title with `e2e: pending Windows runner`, but PR absence is not a partial-DoD failure.
+  Item moves to `[linux-shipped]` in QUEUE/DONE; promotion to `[done]` happens after the Windows checklist passes.
+
+The remote-push posture is unchanged: pushes are informational, not a DoD gate; only ever to `automation/<role>-<YYYY-MM-DD>-<slot>` branches; never `main`/`master`; never force-push; never rewrite or delete remote history.
 
 ## Project-specific notes
 

@@ -10,15 +10,15 @@ principles.
 
 Eight of nine planned components shipped plus bonuses — voice loop with
 PTT + streaming TTS + ASR + Claude/Ollama brains, vision, semantic memory,
-settings GUI, and barge-in. Nine decision docs filed. ~4,200 lines,
-57 tests running in ~3 s.
+settings GUI, barge-in, and a wake-word scaffold. Ten decision docs filed.
+~4,200 lines, 96 tests running in ~3 s.
 
 | # | Component | Status | Decision |
 |---|---|---|---|
 | 0 | Foundation (uv, pydantic-settings, structlog, typer) | ✅ | 001 |
 | 1 | TTS (Piper + SAPI fallback) | ✅ | 002 |
 | 2 | ASR (faster-whisper base.en) | ✅ | 003 |
-| 3 | Wake word | ⏭ replaced by PTT | — |
+| 3 | Wake word (openWakeWord, `hey_jarvis` placeholder) | 🟡 scaffolded, awaiting Windows validation | — |
 | 4 | Brain protocol (Claude + Ollama) | ✅ | 003 |
 | 5 | Event bus + state machine | ✅ | 003 |
 | 5.5 | Settings GUI (customtkinter) | ✅ | 004 |
@@ -28,6 +28,7 @@ settings GUI, and barge-in. Nine decision docs filed. ~4,200 lines,
 | 9 | Automation | ❌ deferred | — |
 | — | Foundational refactor (schema + log redaction + file sink) | ✅ | 008 |
 | — | Barge-in (Silero VAD + CancelToken) | ✅ | 009 |
+| — | Personality spec (inferred-vs-stated voice block, calibration) | 🟡 promoting | 010 |
 
 Roadmap, progress notes, and "what's next" live in
 [`../rebuild/ROADMAP.md`](../rebuild/ROADMAP.md). Decision log is in
@@ -106,9 +107,10 @@ sabrina-2/
     listener/
       protocol.py          # Listener + Transcript
       ptt.py               # push-to-talk via pynput + sounddevice
-      whisper.py           # faster-whisper backend
+      faster_whisper.py    # faster-whisper backend
       record.py            # one-shot capture for ASR smoke
       vad.py               # Silero VAD + AudioMonitor (barge-in)
+      wake_word.py         # openWakeWord (idle-state hands-free trigger, scaffolded)
     speaker/
       protocol.py          # Speaker + SpeakResult
       piper.py             # Piper binary via subprocess
@@ -117,6 +119,7 @@ sabrina-2/
     memory/
       store.py             # SQLite + sqlite-vec
       embed.py             # Embedder protocol + sentence-transformers impl
+      compaction.py        # token-budget summary compaction (007b)
     vision/
       capture.py           # mss → Pillow → PNG bytes
       see.py               # one-shot Claude vision query
@@ -124,8 +127,9 @@ sabrina-2/
       hotkey.py            # global-hotkey arm/consume
     gui/
       settings.py          # customtkinter settings window
+    supervisor.py          # Task Scheduler XML + nssm + crash-budget restart loop
   tests/
-    test_smoke.py          # ~57 tests, ~3 s wall
+    test_smoke.py          # 96 tests, ~3 s wall
   voices/                  # downloaded Piper voice models (gitignored)
   tools/piper/              # Piper binary + espeak-ng data (gitignored)
   data/                    # SQLite DB (gitignored)

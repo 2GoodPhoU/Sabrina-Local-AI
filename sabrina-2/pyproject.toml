@@ -45,6 +45,11 @@ dependencies = [
     # onnxruntime comes transitively (already in deps above).
     # See `rebuild/drafts/wake-word-plan.md`.
     "openwakeword>=0.6",
+    # Tools (write_clipboard et al). pyperclip is pure-Python, MIT,
+    # ~150 LOC wheel; if it ever fails to import we fall back to native
+    # `clip`/`pbcopy`/`xclip` subprocesses. See
+    # `rebuild/drafts/research/2026-04-26-toolspec-first-three.md`.
+    "pyperclip>=1.8",
 ]
 
 [project.optional-dependencies]
@@ -77,6 +82,12 @@ packages = ["src/sabrina"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    # Tier-1 personality eval (regex/string smokes). Runs in milliseconds;
+    # selectable for fast pre-commit gating: `pytest -m personality_fast`.
+    # See `rebuild/drafts/research/2026-04-26-personality-eval-framework.md`.
+    "personality_fast: tier-1 personality eval (no API call)",
+]
 
 [tool.ruff]
 line-length = 100

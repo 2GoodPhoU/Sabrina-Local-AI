@@ -1,5 +1,5 @@
 {
-  "_comment": "Static config of the 9 Sabrina-Local-AI scheduled tasks. Registered via Cowork's scheduled-tasks MCP on 2026-04-28 (the prior Eva-validation-week freeze was lifted at that time). Times are local to the machine running the scheduled tasks.",
+  "_comment": "Static config of the 11 Sabrina-Local-AI scheduled tasks. Original 9 registered via Cowork's scheduled-tasks MCP on 2026-04-28 (the prior Eva-validation-week freeze was lifted at that time). Spec Writer (06:50) + Graduation Sweeper (07:30) added on 2026-05-05 to bracket the Planner. Times are local to the machine running the scheduled tasks.",
   "project_name": "Sabrina-Local-AI",
   "project_path": "C:\\Users\\erics\\Documents\\GitHub\\Sabrina-Local-AI",
   "tasks": [
@@ -16,10 +16,22 @@
       "prompt": "You are the Researcher for the project at C:\\Users\\erics\\Documents\\GitHub\\Sabrina-Local-AI. Read CLAUDE.md, then STATE.md, NEEDS-INPUT.md, and QUEUE.md. Follow the instructions in roles/researcher.md exactly. Investigate ONE bounded question and write findings to research/."
     },
     {
+      "name": "Sabrina-Local-AI — Spec Writer",
+      "schedule": "daily at 06:50",
+      "role": "spec-writer",
+      "prompt": "You are the Spec Writer for the project at C:\\Users\\erics\\Documents\\GitHub\\Sabrina-Local-AI. Read CLAUDE.md in that folder, then STATE.md, ROADMAP.md, rebuild/ROADMAP.md, and QUEUE.md. Follow the instructions in roles/spec-writer.md exactly. Draft 1–2 design notes for XL/L/needs-spec or fuzzy-DoD queue items into rebuild/drafts/research/. You are READ-ONLY on existing code and existing specs — net additions only, no QUEUE moves, no DONE marks."
+    },
+    {
       "name": "Sabrina-Local-AI — Planner",
       "schedule": "daily at 07:00",
       "role": "planner",
       "prompt": "You are the Planner for the project at C:\\Users\\erics\\Documents\\GitHub\\Sabrina-Local-AI. Read CLAUDE.md, JOURNAL.md, NEEDS-INPUT.md, PROPOSED.md, QUEUE.md, DONE.md. Follow the instructions in roles/planner.md exactly. Update STATE.md and curate QUEUE.md. Do not modify code."
+    },
+    {
+      "name": "Sabrina-Local-AI — Graduation Sweeper",
+      "schedule": "daily at 07:30",
+      "role": "graduation-sweeper",
+      "prompt": "You are the Graduation Sweeper for the project at C:\\Users\\erics\\Documents\\GitHub\\Sabrina-Local-AI. Read CLAUDE.md in that folder, then PROPOSED.md and NEEDS-INPUT.md. Follow the instructions in roles/graduation-sweeper.md exactly. Apply the 5-condition rule and auto-graduate eligible Improvable items by checking [x] on them in PROPOSED.md. You are READ-ONLY outside PROPOSED.md and JOURNAL.md. Cap 5 graduations per slot."
     },
     {
       "name": "Sabrina-Local-AI — Worker (8am)",

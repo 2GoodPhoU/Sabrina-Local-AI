@@ -1,14 +1,15 @@
 # Wake word — Windows validation procedure
 
-**Purpose:** confirm the "Hey Sabrina" wake-word trigger works end-to-
+**Purpose:** confirm the bundled `hey_jarvis` wake-word trigger works end-to-
 end on Eric's Windows box before we call the wake-word decision
 validated.
 **Written:** 2026-04-23. One-shot procedure; run top-to-bottom from
 `sabrina-2/`.
 **Prerequisite:** PowerShell open in `Sabrina-Local-AI\sabrina-2`.
 Wake-word implementation has landed per `rebuild/drafts/wake-word-plan.md`
-(`listener/wake.py`, `voices/wake/hey_sabrina.onnx` committed,
-`sabrina wake-test` verb, `[wake_word]` block in `sabrina.toml`). **Barge-
+(`listener/wake_word.py` shipped; the openWakeWord-bundled `hey_jarvis`
+placeholder is loaded by name — no `.onnx` file lives in the repo;
+`sabrina wake-test` verb is wired; `[wake_word]` block lives in `sabrina.toml`). **Barge-
 in must have shipped first** — wake-word relies on `AudioMonitor` from
 the barge-in work.
 
@@ -21,16 +22,16 @@ causes.
 ## Step 0 — Sanity-check openwakeword + model file
 
 ```powershell
-uv run python -c "import openwakeword; from openwakeword import Model; m = Model(wakeword_models=['voices/wake/hey_sabrina.onnx'], inference_framework='onnx'); print('ok', list(m.models.keys()))"
+uv run python -c "import openwakeword; from openwakeword import Model; m = Model(wakeword_models=['hey_jarvis'], inference_framework='onnx'); print('ok', list(m.models.keys()))"
 ```
 
-**Success:** prints `ok ['hey_sabrina']` (or similar — the list should
-include the basename of the committed model file).
+**Success:** prints `ok ['hey_jarvis']` (or similar — the list should
+include the bundled model id).
 **Failure signal A:** `ImportError: openwakeword`. `uv sync` didn't
 install it; re-run step 1.
-**Failure signal B:** `FileNotFoundError: voices/wake/hey_sabrina.onnx`.
-The committed model never landed. Check `git log voices/wake/` —
-if blank, the model commit is missing.
+**Failure signal B:** `ValueError: model not found`. openWakeWord didn't
+bundle `hey_jarvis` in this version. Check `uv pip show openwakeword`
+and fall back to `alexa` / `hey_mycroft` / `hey_rhasspy` (also bundled).
 **Failure signal C:** `onnxruntime` DLL load error. Same VS C++
 redistributable problem as barge-in step 0.
 
@@ -73,14 +74,14 @@ traceback. If the openwakeword-gated tests skip, that means
 uv run sabrina wake-test --samples 10
 ```
 
-Read the prompt. It will ask you to say "hey sabrina" 10 times at
+Read the prompt. It will ask you to say "hey jarvis" 10 times at
 conversational volume from your usual desktop position (~1 m from the
 mic). Say it clearly, leave a short pause between utterances.
 
 **Success:** output looks like:
 
 ```
-Listening for 10 samples of "hey sabrina"...
+Listening for 10 samples of "hey jarvis"...
   [1/10] peak score = 0.83
   [2/10] peak score = 0.79
   [3/10] peak score = 0.88
@@ -105,7 +106,7 @@ isn't recognizing *your* voice well. Options:
 
 **Failure signal B:** peaks are fine but jittery (0.3, 0.9, 0.4, 0.7, ...).
 Suggests the VAD gate inside openwakeword is cutting off the word. Try
-saying "hey sabrina" with a slightly clearer pause after.
+saying "hey jarvis" with a slightly clearer pause after.
 
 Record the suggested threshold. You'll use it in step 4.
 
@@ -118,10 +119,9 @@ Edit `sabrina-2/sabrina.toml`:
 ```toml
 [wake_word]
 enabled = true
-model_path = "voices/wake/hey_sabrina.onnx"
+model = "hey_jarvis"
 threshold = 0.63              # <- paste step 3's suggested threshold
 cooldown_ms = 2000
-auto_capture_s = 5.0
 ```
 
 ---
@@ -139,7 +139,7 @@ uv run sabrina voice
 **Success:** launch completes in under ~2 s. Structlog shows:
 
 ```
-wake.model_loaded path=voices/wake/hey_sabrina.onnx
+wake.model_loaded model=hey_jarvis
 audio_monitor.started consumer=wake
 state.transition from=boot to=idle
 ```
@@ -161,7 +161,7 @@ uv pip show openwakeword
 ## Step 6 — Wake-from-idle smoke (5-for-5)
 
 With `sabrina voice` running and the window idle in another app, say
-*"Hey Sabrina, what time is it?"* — conversational volume, ~1 m from
+*"Hey Jarvis, what time is it?"* — conversational volume, ~1 m from
 the mic. Repeat 5 times, leaving ~10 s between attempts so the
 cooldown clears.
 
@@ -169,7 +169,7 @@ cooldown clears.
 Structlog between each:
 
 ```
-wake.detected word=hey_sabrina score=0.7x
+wake.detected word=hey_jarvis score=0.7x
 state.transition from=idle to=listening reason=wake_word
 listener.transcribe_start audio_src=audio_monitor.drain_recent seconds=5.0
 ```
@@ -178,7 +178,7 @@ The transcription should include the full "what time is it" because
 `AudioMonitor.drain_recent` captured the audio alongside detection.
 
 **Failure signal A:** wake detects but `drain_recent` returns silence,
-and the transcribed text is empty or just "hey sabrina" without the
+and the transcribed text is empty or just "hey jarvis" without the
 follow-on → AudioMonitor's ring buffer is too short (the user's full
 utterance doesn't fit in the cached window), or the drain happens
 before the user finishes speaking. Check the `audio_monitor.ring_buffer_size`
@@ -231,18 +231,18 @@ uv run sabrina voice
 1. Press PTT, ask *"give me a long three-paragraph reply about
    anything"*, release.
 2. As Sabrina starts speaking, let her finish one full sentence —
-   do not interrupt, do not say "hey sabrina" yet. Confirm VAD isn't
+   do not interrupt, do not say "hey jarvis" yet. Confirm VAD isn't
    firing on her own voice (if it is, that's a barge-in validation
    problem, not a wake problem).
 3. As soon as she stops speaking and state transitions back to idle,
-   say *"hey sabrina, stop"*. Expect wake to fire immediately.
+   say *"hey jarvis, stop"*. Expect wake to fire immediately.
 
 **Success:** structlog around the transition looks like:
 
 ```
 state.transition from=speaking to=idle reason=reply_complete
 audio_monitor.consumer_swap from=vad to=wake
-wake.detected word=hey_sabrina score=0.7x
+wake.detected word=hey_jarvis score=0.7x
 state.transition from=idle to=listening reason=wake_word
 ```
 
@@ -260,9 +260,9 @@ stay open. File a follow-up.
 
 | Step | Symptom | Likely cause | What to capture |
 |---|---|---|---|
-| 0 | `FileNotFoundError` on model | ONNX commit missing | `git log -- voices/wake/` |
+| 0 | `FileNotFoundError` on model | ONNX commit missing | `uv pip show openwakeword` |
 | 0 | `LoadLibrary` error | Missing VS C++ redist | Windows version + `uv run python -c "import onnxruntime; print(onnxruntime.get_available_providers())"` |
-| 3 | All peaks below 0.5 | Mic level too low, or voice/model mismatch | `sabrina test-audio` peak reading + a 5 s WAV of "hey sabrina" via `sabrina asr-record` |
+| 3 | All peaks below 0.5 | Mic level too low, or voice/model mismatch | `sabrina test-audio` peak reading + a 5 s WAV of "hey jarvis" via `sabrina asr-record` |
 | 3 | Jittery peaks | VAD-gate timing | Raw score-per-chunk log with DEBUG level |
 | 5 | Slow startup (> 5 s) | Model load on GPU → CUDA contention with Ollama | `ollama ps` + `nvidia-smi` during launch |
 | 6 | Wake fires but transcript empty | Ring buffer too short or drain timing | `audio_monitor.drain_recent` log line with returned sample count |
@@ -284,7 +284,7 @@ stay open. File a follow-up.
    `bargein.detected` and `wake.detected` in sequence during a single
    utterance, the state-machine's idle/speaking gate isn't working
    (only one should run per state).
-3. **`auto_capture_s=5.0` is generous.** Long enough for "Hey Sabrina,
+3. **`auto_capture_s=5.0` is generous.** Long enough for "Hey Jarvis,
    what's the weather in San Francisco today?" but may overrun a
    terse one-phrase command with 3+ seconds of trailing silence. The
    transcriber should trim trailing silence — if transcripts are
@@ -306,7 +306,7 @@ Edit `rebuild/ROADMAP.md`:
 2. Append one line at the end of the "Status:" paragraph:
 
 ```
-Wake-word "hey sabrina" validated on Windows (i7-13700K/4080, Python
+Wake-word "hey jarvis" validated on Windows (i7-13700K/4080, Python
 3.12) <YYYY-MM-DD>: threshold=<T>, 5/5 trigger rate, <F> false-
 positives in 5 min noise smoke, cold-start <C> s.
 ```

@@ -15,7 +15,10 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Literal, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from sabrina.tools import ToolSpec
 
 
 Role = Literal["system", "user", "assistant"]
@@ -88,8 +91,39 @@ class Done:
     stop_reason: str | None = None
 
 
-# Discriminated union of stream events. Add ToolCall, ToolResult, etc. later.
-StreamEvent = TextDelta | Done
+@dataclass(frozen=True, slots=True)
+class ToolUseStart:
+    """A tool dispatch is about to begin.
+
+    Emitted right before the brain invokes a tool handler. Lets the voice
+    loop print a dim status line ("(tool: write_clipboard ...)") and the
+    bus surface a `ToolUseStarted` event for observers (avatar, logs).
+    """
+
+    tool_id: str
+    name: str
+    input: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class ToolUseDone:
+    """A tool dispatch finished.
+
+    `result` is the handler's return dict on success; `error` is a
+    string description when the dispatch failed (handler raised, unknown
+    tool name, schema mismatch). Exactly one of the two is populated.
+    """
+
+    tool_id: str
+    name: str
+    result: dict[str, Any] | None = None
+    error: str | None = None
+
+
+# Discriminated union of stream events. Tool-use events extend it; existing
+# callers that switch on TextDelta / Done keep working (the new variants
+# arrive only when the caller passes ``tools=``).
+StreamEvent = TextDelta | Done | ToolUseStart | ToolUseDone
 
 
 @runtime_checkable
@@ -105,6 +139,7 @@ class Brain(Protocol):
         system: str | None = None,
         max_tokens: int | None = None,
         cancel_token: CancelToken | None = None,
+        tools: list[ToolSpec] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Stream a reply. Yields TextDelta events followed by a single Done.
 
@@ -112,5 +147,14 @@ class Brain(Protocol):
         ``True`` during the stream, implementations should stop emitting
         TextDeltas promptly and yield a final ``Done(stop_reason="cancelled")``.
         Default ``None`` keeps existing callers working.
+
+        If ``tools`` is provided and non-empty, the backend should advertise
+        them to the model and dispatch any ``tool_use`` blocks the model
+        emits, yielding ``ToolUseStart`` / ``ToolUseDone`` events around
+        each handler call and recursively feeding ``tool_result`` blocks
+        back to the model up to a backend-defined recursion cap. Backends
+        that do not support tool use (e.g. Ollama today) should raise
+        ``NotImplementedError`` when ``tools`` is non-empty. ``None`` or an
+        empty list keeps existing callers working unchanged.
         """
         ...

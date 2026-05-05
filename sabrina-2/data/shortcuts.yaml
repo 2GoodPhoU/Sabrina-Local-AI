@@ -1,0 +1,35 @@
+# Keyboard shortcut table for the Phase 4 automation surface.
+#
+# Ported verbatim from legacy `services/automation/automation.py`
+# (the `self.shortcuts` dict in `Automation.__init__`). The legacy file
+# is off-limits to modify per CLAUDE.md; this YAML is the canonical
+# rebuild copy. P4.B2 (`send_hotkey` ToolSpec) consumes this file.
+#
+# Each entry maps a human-readable name to an ordered list of key tokens.
+# The list reads modifiers-first, key-last:
+#   leading elements = modifier keys (ctrl, alt, shift, win)
+#   final element    = the action key
+# Most entries are 2-token (one modifier + one key); `screenshot` is the
+# only 3-token entry (win + shift + s). All tokens are strings exactly as
+# pyautogui / keyboard / pynput expect them.
+#
+# Source: `services/automation/automation.py:47-65` (legacy, off-limits).
+# Tests: `sabrina-2/tests/test_shortcuts_yaml.py`.
+
+copy: [ctrl, c]
+paste: [ctrl, v]
+cut: [ctrl, x]
+save: [ctrl, s]
+select_all: [ctrl, a]
+undo: [ctrl, z]
+redo: [ctrl, y]
+find: [ctrl, f]
+new_tab: [ctrl, t]
+close_tab: [ctrl, w]
+switch_tab: [ctrl, tab]
+screenshot: [win, shift, s]
+task_view: [win, tab]
+file_explorer: [win, e]
+system_settings: [win, i]
+lock_screen: [win, l]
+app_search: [win, s]
