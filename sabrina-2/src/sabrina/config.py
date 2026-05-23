@@ -45,10 +45,53 @@ class OllamaConfig(BaseModel):
     fast_model: str = "qwen2.5:7b"
 
 
+class BrainPersonaConfig(BaseModel):
+    """Per-rule knobs for the Ollama persona-projection layer (P4.C1).
+
+    Each flag gates one of the four active rules in
+    ``brain.persona.project_ollama_text``. Default = all on. Disable
+    individually if a rule misfires on Eric's actual usage; full
+    bypass is via ``OllamaBrain(project=False)``.
+    """
+
+    ollama_strip_closing_offer: bool = True
+    ollama_dehydrate_lists: bool = True
+    ollama_dedup_apologies: bool = True
+    ollama_truncate_long_replies: bool = True
+
+
+class BrainRouterConfig(BaseModel):
+    """Routing policy for the P4.C2 brain router.
+
+    The router (``sabrina.brain.router.Router``) implements the ``Brain``
+    protocol and dispatches to ``ClaudeBrain`` or ``OllamaBrain`` per
+    ``policy``. ``policy`` defaults to ``claude_default`` so adding the
+    block (or upgrading config schema) doesn't change today's behavior.
+
+    - ``policy`` — ``force_local`` always Ollama; ``claude_default``
+      always Claude (today's behavior); ``cost_aware`` swaps to Ollama
+      once rolling MTD crosses ``[budget].warn_usd_monthly``.
+    - ``enable_claude`` / ``enable_ollama`` — kill one backend without
+      uninstalling it (e.g. Ollama not running on a fresh box). Both
+      default True.
+
+    Per Eric's 2026-05-15 dashboard answer at NEEDS-INPUT.md:143 (spec
+    Q1 (b)), the router reads ``[budget].warn_usd_monthly`` directly —
+    no per-router threshold override. Single source of truth; routing
+    flip and budget warn are always pinned together.
+    """
+
+    policy: Literal["force_local", "claude_default", "cost_aware"] = "claude_default"
+    enable_claude: bool = True
+    enable_ollama: bool = True
+
+
 class BrainConfig(BaseModel):
     default: Literal["claude", "ollama"] = "claude"
     claude: ClaudeConfig = ClaudeConfig()
     ollama: OllamaConfig = OllamaConfig()
+    persona: BrainPersonaConfig = BrainPersonaConfig()
+    router: BrainRouterConfig = BrainRouterConfig()
 
 
 class PiperConfig(BaseModel):
@@ -210,6 +253,48 @@ class SupervisorConfig(BaseModel):
     nssm_binary: str = ""
 
 
+class BudgetConfig(BaseModel):
+    # Daily-driver budget thresholds (decision 001: target $0,
+    # warn $10/mo, ceiling $100/mo). Values are USD month-to-date.
+    # The (a)-half writes the per-turn JSONL log under ``log_dir`` and
+    # exposes ``sabrina budget today/month/show`` for read-side queries;
+    # the (b)-half wires the warn-threshold structlog line through the
+    # voice loop. Enforcement at the ceiling is P4.C2 router work.
+    target_usd_monthly: float = 0.0
+    warn_usd_monthly: float = 10.0
+    ceiling_usd_monthly: float = 100.0
+    # Where the per-month JSONL files land. Empty = use the platform
+    # default (~/.sabrina/budget). The CLI honors the
+    # ``SABRINA_BUDGET_LOG_DIR`` env var directly so tests can pin this
+    # without a config edit.
+    log_dir: str = ""
+
+
+class AutomationConfig(BaseModel):
+    # Phase-4 automation safety primitives (P4.B1). Three guard rails
+    # the most-dangerous-component-last framing per ROADMAP §"Phase 4"
+    # requires before any real-action ToolSpec ships:
+    #
+    # - ``dry_run`` (default True forever per spec Q2 (a)) — every
+    #   automation handler the brain dispatches gets wrapped in
+    #   ``dry_run_wrap`` before invocation; the wrapper logs the would-be
+    #   call and returns a synthetic dry-run shape. Eric flips this
+    #   to False in TOML once Windows e2e validation (P4.B4) is in
+    #   the bag.
+    # - ``kill_switch_enabled`` — registers a global hotkey (default
+    #   ``<ctrl>+<alt>+k``) that aborts a running automation handler.
+    #   Linux/sandbox installs use a no-op stub via the
+    #   ``_LISTENER_FACTORY`` injection seam; pynput.GlobalHotKeys
+    #   only fires on Windows.
+    # - ``destructive_actions`` — forward-compat hook for the P4.B3
+    #   allow-list. Default empty so the schema bump is paid here once,
+    #   not again when P4.B3 ships its runtime guard.
+    dry_run: bool = True
+    kill_switch_enabled: bool = True
+    kill_switch_hotkey: str = "<ctrl>+<alt>+k"
+    destructive_actions: list[str] = Field(default_factory=list)
+
+
 class WriteClipboardToolConfig(BaseModel):
     enabled: bool = True
     # Hard cap; handler also clamps internally. Keep in sync with the
@@ -227,6 +312,12 @@ class ToolsConfig(BaseModel):
     # Allow-list of tool names. Empty list = all registered tools allowed.
     allowed: list[str] = Field(default_factory=lambda: ["write_clipboard"])
     write_clipboard: WriteClipboardToolConfig = WriteClipboardToolConfig()
+    # P4.B2 send_hotkey ToolSpec — registers the keyboard-shortcut
+    # action handler into ``BUILTIN_TOOLS`` when True. Flat-flag shape
+    # per spec Q3 (a); flip to True only after P4.B4's Windows e2e
+    # validation lands. Default False keeps the dangerous-tool surface
+    # gated on a config edit Eric can audit.
+    send_hotkey_enabled: bool = False
 
 
 class LoggingConfig(BaseModel):
@@ -262,6 +353,8 @@ class Settings(BaseSettings):
     wake_word: WakeWordConfig = WakeWordConfig()
     barge_in: BargeInConfig = BargeInConfig()
     supervisor: SupervisorConfig = SupervisorConfig()
+    budget: BudgetConfig = BudgetConfig()
+    automation: AutomationConfig = AutomationConfig()
     tools: ToolsConfig = ToolsConfig()
     logging: LoggingConfig = LoggingConfig()
     anthropic_api_key: SecretStr | None = Field(
@@ -288,6 +381,7 @@ class Settings(BaseSettings):
 
 
 _cached: Settings | None = None
+
 
 
 def apply_migrations(toml_path: Path | None = None) -> int:
@@ -338,5 +432,5 @@ def project_root() -> Path:
     cwd = Path.cwd()
     for candidate in [cwd, *cwd.parents]:
         if (candidate / "sabrina.toml").is_file():
-            return candidate
+                return candidate
     return cwd

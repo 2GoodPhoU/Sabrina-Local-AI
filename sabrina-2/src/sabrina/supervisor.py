@@ -181,6 +181,10 @@ _TASK_XML_TEMPLATE = """<?xml version="1.0" encoding="UTF-16"?>
     <Hidden>false</Hidden>
     <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
     <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT5M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
   </Settings>
   <Actions>
     <Exec>

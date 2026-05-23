@@ -1542,6 +1542,29 @@ def test_task_scheduler_xml_renders_with_paths_and_user():
     assert "DESKTOP-ABC\\eric" in xml
 
 
+def test_task_scheduler_xml_carries_restart_on_failure_block():
+    """RestartOnFailure block (P2.6 spec Q1 (a)): defense-in-depth recovery.
+
+    Per `rebuild/drafts/research/2026-05-07-p26-supervisor-validation-spec.md`
+    Q1 (a), answered A 2026-05-15 via dashboard at NEEDS-INPUT.md:75. Without
+    this block, a supervisor-itself-crash (rc 2 budget-exceeded, or an
+    unhandled exception in `run_supervised`) leaves Sabrina silent until Eric
+    manually re-runs `sabrina run`. With it, Task Scheduler re-launches the
+    supervisor up to three times at 5-minute intervals.
+    """
+    from sabrina.supervisor import render_task_scheduler_xml
+
+    xml = render_task_scheduler_xml(
+        python_executable="x",
+        project_root="y",
+        user_id="z",
+    )
+    assert "<RestartOnFailure>" in xml
+    assert "<Interval>PT5M</Interval>" in xml
+    assert "<Count>3</Count>" in xml
+    assert "</RestartOnFailure>" in xml
+
+
 def test_task_scheduler_xml_writes_with_utf16_le_bom(tmp_path):
     """schtasks /xml requires UTF-16 LE with a BOM. We assert both bytes."""
     from sabrina.supervisor import render_task_scheduler_xml, write_task_scheduler_xml

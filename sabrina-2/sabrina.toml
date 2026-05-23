@@ -22,6 +22,34 @@ host = "http://localhost:11434"
 model = "qwen2.5:14b"
 fast_model = "qwen2.5:7b"
 
+[brain.persona]
+# Per-rule knobs for the Ollama persona-projection layer (P4.C1, decision
+# 010 + 2026-04-26-ollama-parity.md). Each flag gates one rule in
+# `brain.persona.project_ollama_text`. Defaults = all on. Disable a single
+# rule if it misfires on real usage; full bypass via `OllamaBrain(project=
+# False)`. Claude turns are unaffected.
+ollama_strip_closing_offer = true
+ollama_dehydrate_lists = true
+ollama_dedup_apologies = true
+ollama_truncate_long_replies = true
+
+[brain.router]
+# P4.C2 brain router. Dispatches each turn to Claude or Ollama per
+# `policy`. Default `claude_default` keeps today's behavior on a fresh
+# upgrade; `force_local` always picks Ollama; `cost_aware` swaps to
+# Ollama once rolling MTD crosses `[budget].warn_usd_monthly` (the
+# active enforcement decision 001 currently calls observed-not-enforced).
+#
+# The router reads `[budget].warn_usd_monthly` directly per Eric's
+# 2026-05-15 dashboard answer at NEEDS-INPUT.md:143 (spec Q1 (b)) —
+# single source of truth; routing flip + budget warn pinned together.
+#
+# `enable_claude` / `enable_ollama` let Eric kill one backend without
+# uninstalling it (Ollama not running on a fresh box, etc.).
+policy = "claude_default"
+enable_claude = true
+enable_ollama = true
+
 [tts]
 # Default speaker engine. "piper" | "sapi"
 default = "piper"
@@ -144,14 +172,18 @@ level = "INFO"
 [wake_word]
 # Hands-free trigger via openWakeWord. Off by default until you've
 # tuned threshold on your mic + room. See decision (pending) and
-# `rebuild/drafts/wake-word-plan.md`. The default model `hey_jarvis`
-# is openWakeWord's bundled placeholder; custom "Hey Sabrina" is a
-# follow-up (see `tools/wake-training/`, not yet shipped).
+# `rebuild/drafts/wake-word-plan.md`. `model` below points at the
+# custom "Hey Sabrina" artifact; the openWakeWord-bundled `hey_jarvis`
+# placeholder is still loadable by setting `model = "hey_jarvis"`.
+# `enabled = true` is the P2.3 Windows validation gate.
 enabled = false
 # Bundled openWakeWord id OR path to a custom .onnx file. Bundled set:
 # "alexa", "hey_jarvis", "hey_mycroft", "hey_rhasspy". Path is
-# resolved relative to the project root.
-model = "hey_jarvis"
+# resolved relative to the project root. The hey_sabrina.onnx artifact
+# is produced by `tools/wake-training/` (see its README) and committed
+# under `models/openwakeword/`. Until that artifact lands, the runtime
+# will fail to load — keep `enabled = false` until P2.2 + P2.3 close.
+model = "models/openwakeword/hey_sabrina.onnx"
 # Inference threshold (0.0-1.0). Lower = more sensitive.
 threshold = 0.5
 # Cooldown after a fire (ms). Stops a single phrase from triggering
@@ -176,6 +208,43 @@ restart_window_s = 300
 # Path to nssm.exe (used only when mode = "service"). Empty = PATH lookup.
 nssm_binary = ""
 
+[budget]
+# Per-decision-001 thresholds: target $0/mo, warn at $10/mo, ceiling at
+# $100/mo. The (a)-half logs every Claude turn's cost to a JSONL under
+# `log_dir`; the (b)-half (queue P2.8) wires the warn line through
+# structlog when the rolling MTD crosses the warn threshold. The
+# ceiling is observed-not-enforced — enforcement waits for the router
+# budget gate (P4.C2).
+target_usd_monthly = 0.0
+warn_usd_monthly = 10.0
+ceiling_usd_monthly = 100.0
+# Where the per-month JSONL log files live. Empty = ~/.sabrina/budget.
+# Tests pin this via the SABRINA_BUDGET_LOG_DIR env var rather than
+# editing config; the env var wins over this field.
+log_dir = ""
+
+[automation]
+# Phase-4 automation safety primitives (P4.B1). Three guard rails the
+# "most-dangerous-component-last" framing in ROADMAP §"Phase 4"
+# requires before any real-action ToolSpec ships. See
+# `rebuild/drafts/research/2026-05-08-p4b1-automation-safety-primitives-spec.md`.
+#
+# `dry_run` defaults true forever (spec Q2 (a)): every automation
+# handler the brain dispatches gets wrapped — logs the would-be call,
+# returns a synthetic shape. Flip to false only after P4.B4's Windows
+# e2e validation lands and Eric confirms a real action behaves.
+#
+# `kill_switch_enabled` arms the global-hotkey abort path. The hotkey
+# below is a `pynput.keyboard.GlobalHotKeys` syntax string; on Linux
+# / sandbox the listener is a no-op stub.
+#
+# `destructive_actions` is the forward-compat hook for the P4.B3
+# allow-list — leave empty until P4.B3 ships the runtime guard.
+dry_run = true
+kill_switch_enabled = true
+kill_switch_hotkey = "<ctrl>+<alt>+k"
+destructive_actions = []
+
 [tools]
 # Tool-use surface. The brain can call into a registry of pure-function
 # tools (`write_clipboard`, future `get_time`, `read_clipboard`, ...).
@@ -188,6 +257,11 @@ enabled = false  # Off until the brain wire-up lands; registry still works for t
 # registered tools enabled when `enabled = true`. Listing names here
 # narrows the surface without removing handlers from the registry.
 allowed = ["write_clipboard"]
+# P4.B2 send_hotkey action ToolSpec. Off until P4.B4's Windows e2e
+# validation lands and Eric confirms a real Ctrl+C behaves through the
+# voice loop. When false, ``sabrina.tools.hotkey`` is still importable
+# for tests; only ``BUILTIN_TOOLS`` registration is gated.
+send_hotkey_enabled = false
 
 [tools.write_clipboard]
 enabled = true

@@ -27,7 +27,7 @@ Python 3.12, uv-managed. faster-whisper STT, Anthropic Claude + Ollama brain (wi
 - Decision-doc-voice DECISIONS.md entry for any architecturally novel change.
 - No new dependencies without justification recorded in ACTION_ITEMS or a decision doc.
 - Voice loop validated end-to-end (record sample → STT → brain → TTS) before claiming any voice-loop change ships.
-- Edit-tool truncation is a recurring hazard — verify file contents post-edit (AST-parse Python files; spot-check >300 lines for tail integrity).
+- Edit-tool truncation is a recurring hazard — verify file contents post-edit (AST-parse Python files; spot-check >300 lines for tail integrity). Verify via the Read tool, not via bash `wc -l`/`cat` or Python `open().read()` — those go through the FUSE cache which can lag tool-channel writes by hours within a single session. The Read tool reads through the same channel Edit/Write writes through and is the only authoritative post-write verifier in this sandbox.
 
 ## Partial-DoD tiers
 
@@ -87,6 +87,7 @@ Roles available:
 5. **Stay in your lane.** A Researcher does not refactor. A Worker does not start new research. A Night Auditor does not "fix things while I'm in here."
 6. **Time-box yourself.** If your role is taking dramatically longer than expected, stop, write what you have to JOURNAL and NEEDS-INPUT, and exit cleanly.
 7. **No silent failures.** If something didn't work, JOURNAL it. The human reads JOURNAL during evening review.
+8. **Dashboard answer-resolution flow.** When `NEEDS-INPUT.md` items carry inline `**[answered: <letter> YYYY-MM-DD via dashboard]**` markers, Workers pull them as highest priority (per `roles/worker.md` step 2) and append a paired `**[resolved: YYYY-MM-DD by <worker-id>]**` marker on completion; the Night Auditor verifies the resolved markers and emits a JSONL row to `logs/sabrina/<date>.jsonl` so the dashboard producer's `filter_open()` drops the item from the next scan (per `roles/night-auditor.md` step 6). Marker format is byte-exact per those role files.
 
 ## Working style (Eric's, applies everywhere)
 

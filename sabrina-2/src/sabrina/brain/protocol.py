@@ -84,11 +84,19 @@ class TextDelta:
 
 @dataclass(frozen=True, slots=True)
 class Done:
-    """Stream finished. Optional usage + stop-reason info."""
+    """Stream finished. Optional usage + stop-reason info.
+
+    ``cost_usd`` is the dollar cost computed from token counts and the
+    backend's per-token rates (see ``sabrina.budget``). Backends that
+    don't track cost (Ollama, fakes) leave it ``None`` — the (b)-half
+    voice loop skips the threshold check when it's missing rather than
+    treating ``None`` as zero.
+    """
 
     input_tokens: int | None = None
     output_tokens: int | None = None
     stop_reason: str | None = None
+    cost_usd: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -86,4 +86,12 @@ scripts/voice_settings.json
 
 # Sabrina 2.0 - large downloadable assets (fetched by install-piper.ps1)
 sabrina-2/voices/
-sabrina-2/tools/
+sabrina-2/tools/piper/
+
+# Sabrina 2.0 wake-word training pipeline outputs — the tooling itself
+# (`sabrina-2/tools/wake-training/*.py` / `*.md` / `*.txt`) IS tracked;
+# only the heavy synthesised positives, scratch, and pre-promotion
+# artifacts are excluded.
+sabrina-2/tools/wake-training/data/
+sabrina-2/tools/wake-training/scratch/
+sabrina-2/tools/wake-training/output/

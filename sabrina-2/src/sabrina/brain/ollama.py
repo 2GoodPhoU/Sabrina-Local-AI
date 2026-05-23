@@ -2,6 +2,15 @@
 
 Talks to a local Ollama server (`ollama serve`) over its REST API via the
 official Python client. Streaming; returns TextDelta events followed by Done.
+
+As of P4.C1 (2026-05-08) the chat path runs the per-turn output through
+``brain.persona.project_ollama_text`` to strip the customer-service
+patterns the audit (``2026-04-26-ollama-parity.md``) found qwen3:14b
+drifts to. The (a)-half ships full-turn buffered projection — collect
+chunks, project once at end-of-stream, yield a single ``TextDelta``.
+Per-sentence streaming projection is a deferred follow-up; correctness
+ships first, streaming UX in a later iteration. Pass ``project=False``
+to bypass the layer (tests that need raw output, debugging).
 """
 
 from __future__ import annotations
@@ -11,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from ollama import AsyncClient
 
+from sabrina.brain.persona import project_ollama_text
 from sabrina.brain.protocol import CancelToken, Done, Message, StreamEvent, TextDelta
 from sabrina.logging import get_logger
 
@@ -25,10 +35,21 @@ class OllamaBrain:
         self,
         host: str = "http://localhost:11434",
         model: str = "qwen2.5:14b",
+        *,
+        project: bool = True,
+        strip_closing_offer: bool = True,
+        dehydrate_lists: bool = True,
+        dedup_apologies: bool = True,
+        truncate_long_replies: bool = True,
     ) -> None:
         self._client = AsyncClient(host=host)
         self._model = model
         self.name = f"ollama:{model}"
+        self._project = project
+        self._strip_closing_offer = strip_closing_offer
+        self._dehydrate_lists = dehydrate_lists
+        self._dedup_apologies = dedup_apologies
+        self._truncate_long_replies = truncate_long_replies
 
     async def chat(
         self,
@@ -64,12 +85,24 @@ class OllamaBrain:
         stop_reason: str | None = None
         cancelled = False
 
+        # Length of the most recent user turn — proxy for the
+        # truncation rule's "didn't ask for detail" gate.
+        last_user_chars: int | None = None
+        for m in reversed(messages):
+            if m.role == "user":
+                last_user_chars = len(m.content)
+                break
+
         stream = await self._client.chat(
             model=self._model,
             messages=api_messages,
             stream=True,
             options=options or None,
         )
+
+        # Buffer the full reply when projecting; otherwise pass through.
+        buffer: list[str] = []
+
         async for chunk in stream:
             if cancel_token is not None and cancel_token.cancelled:
                 cancelled = True
@@ -80,7 +113,10 @@ class OllamaBrain:
                 else chunk.message.content
             )
             if piece:
-                yield TextDelta(text=piece)
+                if self._project:
+                    buffer.append(piece)
+                else:
+                    yield TextDelta(text=piece)
             done = chunk.get("done") if isinstance(chunk, dict) else chunk.done
             if done:
                 # ollama returns prompt_eval_count / eval_count as token usage.
@@ -92,6 +128,19 @@ class OllamaBrain:
                     in_tokens = getattr(chunk, "prompt_eval_count", None)
                     out_tokens = getattr(chunk, "eval_count", None)
                     stop_reason = getattr(chunk, "done_reason", None)
+
+        if self._project and buffer:
+            full = "".join(buffer)
+            projected = project_ollama_text(
+                full,
+                strip_closing_offer=self._strip_closing_offer,
+                dehydrate_lists=self._dehydrate_lists,
+                dedup_apologies=self._dedup_apologies,
+                truncate_long_replies=self._truncate_long_replies,
+                prior_user_chars=last_user_chars,
+            )
+            if projected:
+                yield TextDelta(text=projected)
 
         yield Done(
             input_tokens=in_tokens,

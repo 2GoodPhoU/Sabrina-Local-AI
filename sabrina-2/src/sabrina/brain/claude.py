@@ -13,6 +13,12 @@ from typing import TYPE_CHECKING, Any
 
 from anthropic import AsyncAnthropic
 
+from sabrina.automation.allow_list import (
+    DestructiveActionBlocked,
+    check_allowed,
+)
+from sabrina.automation.dry_run import dry_run_wrap
+from sabrina.automation.kill_switch import KillSwitch, KillSwitchTripped
 from sabrina.brain.protocol import (
     CancelToken,
     Done,
@@ -22,9 +28,11 @@ from sabrina.brain.protocol import (
     ToolUseDone,
     ToolUseStart,
 )
+from sabrina.budget import compute_cost
 from sabrina.logging import get_logger
 
 if TYPE_CHECKING:
+    from sabrina.config import Settings
     from sabrina.tools import ToolSpec
 
 log = get_logger(__name__)
@@ -62,6 +70,9 @@ class ClaudeBrain:
         model: str | None = None,
         cancel_token: CancelToken | None = None,
         tools: list[ToolSpec] | None = None,
+        kill_switch: KillSwitch | None = None,
+        dry_run: bool = False,
+        settings: Settings | None = None,
     ) -> AsyncIterator[StreamEvent]:
         api_messages = [_render_message(m) for m in messages if m.role != "system"]
         # Pull first system message out of the history if the caller didn't pass one.
@@ -69,8 +80,9 @@ class ClaudeBrain:
             sys_msgs = [m.content for m in messages if m.role == "system"]
             system = sys_msgs[0] if sys_msgs else None
 
+        resolved_model = model or self._model
         kwargs: dict[str, Any] = {
-            "model": model or self._model,
+            "model": resolved_model,
             "max_tokens": max_tokens or self._default_max_tokens,
         }
         if system:
@@ -141,8 +153,84 @@ class ClaudeBrain:
                         "is_error": True,
                     })
                     continue
+                # Allow-list poll (pre-dispatch, P4.B3). If the tool is
+                # destructive AND its name isn't allow-listed in
+                # ``[automation] destructive_actions``, refuse before
+                # the kill-switch + dry-run path even fires. Spec rec:
+                # block precedes dry-run (model learns the action is
+                # forbidden, not that a dry-run-would-have-fired) and
+                # precedes the kill-switch poll (defense-in-depth
+                # ordering — even a tripped kill-switch shouldn't
+                # silently "succeed" by allowing a blocked tool to
+                # never invoke the handler under the wrong reason
+                # label).
                 try:
-                    result = await spec.handler(**tool_input)
+                    check_allowed(spec, settings)
+                except DestructiveActionBlocked as exc:
+                    err_msg = "destructive_action_blocked"
+                    yield ToolUseDone(
+                        tool_id=tu.id,
+                        name=tu.name,
+                        result=None,
+                        error=err_msg,
+                    )
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tu.id,
+                        "content": str(exc),
+                        "is_error": True,
+                    })
+                    continue
+                # Kill-switch poll (pre-dispatch). If the global hotkey
+                # has fired since the last poll point, refuse to invoke
+                # the handler — the existing error branch below catches
+                # the raise and surfaces ``ToolUseDone(error=...)``.
+                # Dry-run does NOT bypass this poll: spec § Q3 / test
+                # ``test_claude_dispatch_dry_run_still_honors_kill_switch``.
+                if kill_switch is not None:
+                    try:
+                        kill_switch.check()
+                    except KillSwitchTripped as exc:
+                        err_msg = "kill_switch_tripped"
+                        yield ToolUseDone(
+                            tool_id=tu.id,
+                            name=tu.name,
+                            result=None,
+                            error=err_msg,
+                        )
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": tu.id,
+                            "content": str(exc),
+                            "is_error": True,
+                        })
+                        continue
+                # Dry-run wrap. When the per-call ``dry_run`` kwarg is
+                # True (the (b)-half voice loop reads
+                # ``is_dry_run(settings)`` and passes the boolean
+                # through), swap the real handler for the wrapper that
+                # logs + returns a synthetic shape.
+                handler = (
+                    dry_run_wrap(spec.handler, name=spec.name)
+                    if dry_run
+                    else spec.handler
+                )
+                try:
+                    result = await handler(**tool_input)
+                except KillSwitchTripped:
+                    err_msg = "kill_switch_tripped"
+                    yield ToolUseDone(
+                        tool_id=tu.id,
+                        name=tu.name,
+                        result=None,
+                        error=err_msg,
+                    )
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tu.id,
+                        "content": err_msg,
+                        "is_error": True,
+                    })
                 except Exception as exc:  # noqa: BLE001 — surface to model
                     err_msg = str(exc) or exc.__class__.__name__
                     yield ToolUseDone(
@@ -167,6 +255,17 @@ class ClaudeBrain:
                         "content": json.dumps(result),
                         "is_error": False,
                     })
+                    # Kill-switch poll (post-dispatch). If a hotkey fire
+                    # raced the handler completing, surface the abort
+                    # before the next tool round trip starts so the
+                    # model isn't asked to think with a now-stale
+                    # success result. The handler's result still rode
+                    # back to the model on this turn — recovery
+                    # (re-prompting) belongs to the voice loop, not
+                    # here.
+                    if kill_switch is not None and kill_switch.tripped:
+                        cancelled = True
+                        break
                 if cancel_token is not None and cancel_token.cancelled:
                     cancelled = True
                     break
@@ -196,10 +295,20 @@ class ClaudeBrain:
                 cancelled = True
                 break
 
+        # Cost is only computed when we have a real usage block. A
+        # mid-stream cancel that fires before ``final.usage`` is extracted
+        # leaves ``in_tokens`` / ``out_tokens`` at None — pass ``cost_usd=None``
+        # in that case rather than reporting a false $0.0 turn.
+        cost_usd: float | None
+        if in_tokens is None and out_tokens is None:
+            cost_usd = None
+        else:
+            cost_usd = compute_cost(in_tokens, out_tokens, resolved_model)
         yield Done(
             input_tokens=in_tokens,
             output_tokens=out_tokens,
             stop_reason="cancelled" if cancelled else stop_reason,
+            cost_usd=cost_usd,
         )
 
 
@@ -241,126 +350,23 @@ def _render_message(m: Message) -> dict[str, Any]:
 # dynamic part; callers append it themselves so prompt caching works when
 # `cache_control` wires up later (see budget-and-caching-plan.md). Block 4
 # (cue vocabulary) is omitted here — it ships with the avatar component.
+#
+# As of P4.C1 (2026-05-08) the blocks live in `brain/persona.py`. This
+# module re-exports the public surface for back-compat with callers that
+# import `SABRINA_SYSTEM_PROMPT` / `build_system_prompt` from
+# `sabrina.brain.claude` (chat.py, voice_loop.py, cli.py, test_smoke.py).
 # ---------------------------------------------------------------------------
 
 
-# Block 1 — Persona (~140 tok, always cached)
-_PERSONA_BLOCK = """\
-You are Sabrina. You work with Eric on his projects through a voice
-interface on his Windows PC. You are not a chatbot, a butler, or a brand
-voice. Think of yourself as the senior engineer who sits at the next
-desk — knows the code, remembers last week's debugging session, and
-tells him when his plan has a smell.
+# ruff: noqa: E402  (intentional late re-import for back-compat re-exports)
+from sabrina.brain.persona import (
+    SABRINA_SYSTEM_PROMPT_CLAUDE as SABRINA_SYSTEM_PROMPT,
+    build_system_prompt,
+)
 
-Operator voice, not customer-service voice. Information before apology.
-If something's broken, say so. If you don't know, say so. If the answer
-is yes, the answer is yes."""
-
-
-# Block 2 — Voice rules (~180 tok, always cached)
-_VOICE_RULES_BLOCK = """\
-Reply rules:
-- Default reply: 1-3 short sentences. Long answers only when asked.
-- One idea per sentence. Verb-first where it reads naturally.
-- No markdown, bullet lists, code blocks, or emoji. Output is spoken
-  aloud.
-- Hedge only when actually uncertain. "Probably / I think / might" are
-  signals, not softeners.
-- "I don't know" is a complete answer. Optionally follow with "want me
-  to check?" — never with "here's what I'd guess" unless asked to guess.
-- Do not open with: "I'd be happy to...", "Great question!", "It seems
-  like...", "Let me...", or any identity disclaimer ("As an AI...", "As
-  a helpful assistant...").
-- Do not close with: "Let me know if...", "Does that help?", "Hope this
-  helps!" — unless the answer was actually a question.
-- One "my mistake" per turn maximum. No re-apology on retry.
-- Pronouns for self: she/her. Do not volunteer a gender statement.
-- Profanity: mirror the user. Never first turn of a session."""
-
-
-# Refusal-as-character framing (folded under voice, not a separate block)
-_REFUSAL_AS_CHARACTER_BLOCK = """\
-Some things you won't do because they're not who you are: cheerlead
-("you've got this!"), be extra (emoji rain, exclamation-point rain,
-"absolutely!"), explain a joke, role-play as a different assistant
-(ChatGPT, Siri), or fake memory. Refuse as character — sound like
-you wouldn't, not like you can't."""
-
-
-# Block 3 — Audience register (~70 tok, cached; invalidates on toggle)
-_AUDIENCE_BLOCK_A = """\
-Current register: A.
-- A — Eric alone. Default. Dry, direct. Profanity mirror active.
-  Shared-history references natural."""
-
-_AUDIENCE_BLOCK_B = """\
-Current register: B.
-- B — someone else in the room. Same spine; no shared-history
-  references unless Eric introduces them first; profanity off; humor
-  dialed down."""
-
-_AUDIENCE_BLOCK_C = """\
-Current register: C.
-- C — professional mode. Full sentences, no humor, no shared history,
-  length budget +1 sentence."""
-
-
-# Block 5 — Tool-use rules. Reserved; contributes zero tokens until
-# tool-use ships per `rebuild/drafts/tool-use-plan.md`.
-_TOOL_USE_BLOCK_DEFAULT = ""
-
-
-# Block 6 — Memory-continuity preamble (~50 tok, always cached)
-_MEMORY_CONTINUITY_BLOCK = """\
-You have access to a semantic-memory retrieval system. When relevant
-earlier turns are appended below, read them as prior context, not
-current dialogue. Reference them only when they clarify something.
-Never list them back. If nothing is appended, do not invent shared
-history. She won't fake memory."""
-
-
-_AUDIENCE_BLOCKS: dict[str, str] = {
-    "A": _AUDIENCE_BLOCK_A,
-    "B": _AUDIENCE_BLOCK_B,
-    "C": _AUDIENCE_BLOCK_C,
-}
-
-
-def build_system_prompt(
-    *,
-    register: str = "A",
-    tool_use_block: str = _TOOL_USE_BLOCK_DEFAULT,
-) -> str:
-    """Assemble the cacheable head of Sabrina's system prompt.
-
-    Returns the joined persona + voice + register + tool-use + memory
-    continuity blocks (no trailing newline). Callers concatenate the
-    dynamic retrieval suffix themselves so the cacheable head stays
-    byte-stable across turns within a session.
-
-    Args:
-        register: "A" (Eric alone, default), "B" (someone else in the
-                  room), or "C" (professional mode).
-        tool_use_block: optional block 5 contents. Default empty until
-                        tool-use ships.
-    """
-    if register not in _AUDIENCE_BLOCKS:
-        raise ValueError(
-            f"Unknown register {register!r}. Expected one of "
-            f"{sorted(_AUDIENCE_BLOCKS)}."
-        )
-    parts = [
-        _PERSONA_BLOCK,
-        _VOICE_RULES_BLOCK,
-        _REFUSAL_AS_CHARACTER_BLOCK,
-        _AUDIENCE_BLOCKS[register],
-    ]
-    if tool_use_block.strip():
-        parts.append(tool_use_block.strip())
-    parts.append(_MEMORY_CONTINUITY_BLOCK)
-    return "\n\n".join(parts)
-
-
-# Convenience: the most common shape (Register A, no tools, no avatar
-# cue track). Voice loop and chat REPL both use this today.
-SABRINA_SYSTEM_PROMPT: str = build_system_prompt(register="A")
+__all__ = [
+    "ClaudeBrain",
+    "SABRINA_SYSTEM_PROMPT",
+    "build_system_prompt",
+    "compute_cost",
+]

@@ -46,4 +46,13 @@ Thumbs.db
 
 # Large downloadable assets (fetched by install-piper.ps1)
 voices/
-tools/
+tools/piper/
+
+# Wake-word training pipeline outputs — the tooling itself
+# (`tools/wake-training/*.py` / `*.md` / `*.txt`) IS tracked; only the
+# heavy synthesised positives, scratch, and pre-promotion artifacts are
+# excluded. The promoted artifact at `models/openwakeword/hey_sabrina.onnx`
+# is committed via a separate atomic commit (see P2.2).
+tools/wake-training/data/
+tools/wake-training/scratch/
+tools/wake-training/output/

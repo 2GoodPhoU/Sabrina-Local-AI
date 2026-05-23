@@ -16,6 +16,9 @@ Flat command surface. Each subsystem gets one primary verb:
   sabrina memory-search "q"     -- semantic search for past turns
   sabrina test-audio            -- list audio devices
   sabrina config-show           -- dump loaded config (secrets redacted)
+  sabrina budget today          -- today's Claude-turn cost
+  sabrina budget month          -- month-to-date Claude-turn cost
+  sabrina budget show <YYYY-MM> -- print rows for a specific month
   sabrina version
 """
 
@@ -1239,6 +1242,86 @@ def autostart(
         raise typer.Exit(code=0)
     typer.echo(f"supervisor.mode={cfg.mode!r} not supported")
     raise typer.Exit(code=2)
+
+
+# ---------------------------------------------------------------------------
+# budget — read-only views over ~/.sabrina/budget/<YYYY-MM>.jsonl
+#
+# A `BudgetLog` row lands per Claude turn in the (b)-half wire-up; the
+# (a)-half ships the read-side surface so the daily-driver readiness gate
+# can be exercised today. Threshold annotations come from `[budget]`
+# (decision 001 defaults: target $0, warn $10/mo, ceiling $100/mo).
+# ---------------------------------------------------------------------------
+
+
+budget_app = typer.Typer(
+    name="budget",
+    help="Show Claude-turn cost from the JSONL log under ~/.sabrina/budget/.",
+    no_args_is_help=True,
+    add_completion=False,
+)
+app.add_typer(budget_app, name="budget")
+
+
+def _open_budget_log() -> "BudgetLog":  # noqa: F821  -- forward type
+    from sabrina.budget import BudgetLog
+
+    settings = load_settings()
+    log_dir = settings.budget.log_dir.strip() or None
+    return BudgetLog(log_dir=log_dir)
+
+
+def _annotate_threshold(month_to_date: float) -> str:
+    """Return ' [under_target]' / ' [over_warn]' / etc. for a MTD total."""
+    from sabrina.budget import check_thresholds
+
+    settings = load_settings()
+    cfg = settings.budget
+    state = check_thresholds(
+        month_to_date,
+        target_usd_monthly=cfg.target_usd_monthly,
+        warn_usd_monthly=cfg.warn_usd_monthly,
+        ceiling_usd_monthly=cfg.ceiling_usd_monthly,
+    )
+    return f" [{state}]"
+
+
+@budget_app.command("today")
+def budget_today() -> None:
+    """Print today's Claude-turn cost in USD."""
+    log = _open_budget_log()
+    today_total = log.sum_today()
+    mtd_total = log.sum_month()
+    typer.echo(f"today: ${today_total:.4f}")
+    typer.echo(f"month-to-date: ${mtd_total:.4f}{_annotate_threshold(mtd_total)}")
+
+
+@budget_app.command("month")
+def budget_month() -> None:
+    """Print month-to-date Claude-turn cost in USD with threshold state."""
+    log = _open_budget_log()
+    mtd_total = log.sum_month()
+    typer.echo(f"month-to-date: ${mtd_total:.4f}{_annotate_threshold(mtd_total)}")
+
+
+@budget_app.command("show")
+def budget_show(
+    year_month: str = typer.Argument(..., help="Month to display, formatted YYYY-MM."),
+) -> None:
+    """Print all per-turn rows for a specific month."""
+    log = _open_budget_log()
+    rows = log.read_month(year_month)
+    if not rows:
+        typer.echo(f"no rows for {year_month}")
+        return
+    total = 0.0
+    for r in rows:
+        typer.echo(
+            f"{r.ts.isoformat()}  {r.model}  "
+            f"in={r.input_tokens} out={r.output_tokens}  ${r.cost_usd:.4f}"
+        )
+        total += r.cost_usd
+    typer.echo(f"total: ${total:.4f}{_annotate_threshold(total)}")
 
 
 if __name__ == "__main__":

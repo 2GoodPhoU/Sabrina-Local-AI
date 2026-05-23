@@ -8,8 +8,22 @@ from sabrina.brain.protocol import (
     Brain,
     Done,
     Message,
-    TextDelta,
     StreamEvent,
+    TextDelta,
+)
+from sabrina.brain.router import (
+    Router,
+    RouterMisconfigured,
+    make_router_from_settings,
 )
 
-__all__ = ["Brain", "Done", "Message", "TextDelta", "StreamEvent"]
+__all__ = [
+    "Brain",
+    "Done",
+    "Message",
+    "Router",
+    "RouterMisconfigured",
+    "StreamEvent",
+    "TextDelta",
+    "make_router_from_settings",
+]

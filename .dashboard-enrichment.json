@@ -1,0 +1,275 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-05-13T00:00:00Z",
+  "items": {
+    "sabrina::night-auditor — GitHub MCP not connected in this Cowork session — remote-PR audit step (role…": {
+      "question": "Should the GitHub MCP be installed/connected for scheduled Cowork sessions, removed from the night-auditor role doc, or left as a best-effort skip?",
+      "options": [
+        { "letter": "A", "label": "Install GitHub MCP", "desc": "Add a GitHub MCP server to the scheduled-task sessions so step 3 actually runs. Cost: one-time install + auth + ongoing PAT rotation." },
+        { "letter": "B", "label": "Remove the step", "desc": "Edit `roles/night-auditor.md` step 3 out. CLAUDE.md already says local commits are DoD and pushes are informational, so the remote-PR gate is decorative." },
+        { "letter": "C", "label": "Leave as best-effort skip", "desc": "Keep the step but treat MCP-absence as a clean skip every run. Status quo; the entry stays open forever as a tracking-only NEEDS-INPUT." }
+      ],
+      "recommendation": { "letter": "B", "rationale": "DoD already lives in local commits per CLAUDE.md — installing an MCP to verify pushes the project explicitly doesn't gate on is ceremony." },
+      "unblocks": "Closes oldest open NEEDS-INPUT (2026-04-30) and stops every nightly audit from re-filing the same skip.",
+      "source": { "project": "sabrina", "file": "NEEDS-INPUT.md", "line": 22 }
+    },
+
+    "sabrina::researcher — What bounded question should the Researcher investigate next": {
+      "question": "Should the stale researcher \"what to investigate next\" entry be marked answered, replaced with a new bounded question, or left to age out?",
+      "options": [
+        { "letter": "A", "label": "Mark answered and retire", "desc": "Planner notes show this entry has been de-facto resolved three times (P2.1 wake-word, P2.4 autostart, etc.). Closing it removes the oldest researcher placeholder." },
+        { "letter": "B", "label": "Assign new bounded question", "desc": "Pick one of the original menu items (Live2D avatar architecture, persona-projection layer, tool-loop hardening) and re-sharpen it so the next Researcher slot has a target." },
+        { "letter": "C", "label": "Leave to age out", "desc": "Status quo. Researcher continues to dedup-skip against this entry each run; eventually a planner clears it without an explicit answer." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "Three planner notes already say it's not load-bearing; A is a single-line edit and frees up dashboard real estate." },
+      "unblocks": "Clears second-oldest open NEEDS-INPUT entry and removes the recurring dedup-skip from morning Researcher runs.",
+      "source": { "project": "sabrina", "file": "NEEDS-INPUT.md", "line": 25 }
+    },
+
+    "sabrina::spec-writer — P2.7 budget tracker — where should the per-token cost-table for Sonnet 4.6 /…": {
+      "question": "Where should the per-million-token cost rates for Sonnet 4.6 / Haiku 4.5 / Opus 4.6 live?",
+      "options": [
+        { "letter": "A", "label": "Inline constants in budget.py", "desc": "Hard-code rates in `sabrina-2/src/sabrina/budget.py`. Zero I/O on the hot path; rate changes need a code edit + commit + decision-doc note." },
+        { "letter": "B", "label": "[budget.cost_table] in sabrina.toml", "desc": "User-tunable TOML block. Survives Anthropic price changes without a code edit; a $0.01 typo costs real money." },
+        { "letter": "C", "label": "data/anthropic-prices.yaml", "desc": "Sibling YAML to `data/shortcuts.yaml` (P5.2 pattern). Consistent with the data-port pattern; adds a YAML load on every cost computation." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "Worker-8am 2026-05-06 already shipped P2.7 (a)-half against (a) per planner note; ratifying keeps the lock-resolved commit on its current path." },
+      "unblocks": "Retires the NEEDS-INPUT entry and lets the lock-resolved P2.7 commit land without rerouting.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-05-p27-budget-tracker-spec.md", "line": null }
+    },
+
+    "sabrina::spec-writer — P4.C1 router persona-projection — `[brain.persona]` config block": {
+      "question": "Should the `[brain.persona]` config block expose per-rule projection knobs, a single master switch, or hard-coded constants for v1?",
+      "options": [
+        { "letter": "A", "label": "Per-rule knobs", "desc": "Four bool fields (`ollama_strip_closing_offer`, `ollama_dehydrate_lists`, `ollama_dedup_apologies`, `ollama_truncate_long_replies`). Granular; matches the per-feature config precedent." },
+        { "letter": "B", "label": "Single master switch", "desc": "One `ollama_projection_enabled = true` flag. Smaller surface; one rule misfiring forces the entire projection layer off as a workaround." },
+        { "letter": "C", "label": "Hard-coded constants", "desc": "No config knob at all; five rules always on. A misfire requires a code edit + commit to disable." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "The truncation rule has the highest false-positive risk per the parity audit; independent disable means one misfire doesn't gut the layer." },
+      "unblocks": "P4.C1 (a)-half ship → `brain/persona.py` projection module and the P4.C2 router can stop importing `SABRINA_SYSTEM_PROMPT` from `brain/claude.py`.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-07-p4c1-persona-projection-layer-spec.md", "line": null }
+    },
+
+    "sabrina::spec-writer — P4.C1 router persona-projection — apology-dedup heuristic": {
+      "question": "When the projection layer detects more than one apology phrase in a turn, which one should it preserve?",
+      "options": [
+        { "letter": "A", "label": "Keep first apology", "desc": "Drop later apologies. Matches the parity audit's example and aligns with TTS-spoken precedence — by the time the second apology renders, the first is already audible." },
+        { "letter": "B", "label": "Keep last apology", "desc": "Drop earlier apologies. Reads more \"current\" but loses turn-opening context the user already heard via TTS." },
+        { "letter": "C", "label": "Drop all on stack", "desc": "If >1 apology detected, drop all. Aggressive — the prompt may have actually warranted one; risks reading as evasive." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "First-apology preservation is the audit-example shape and is a single-branch heuristic in `project_ollama_text`." },
+      "unblocks": "P4.C1 (a)-half projection-rule #3 implementation can land; closes one of two paired C1 NEEDS-INPUT items.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-07-p4c1-persona-projection-layer-spec.md", "line": null }
+    },
+
+    "sabrina::spec-writer — P2.6 supervisor validation — Step 5 XML-template tightening": {
+      "question": "Should the P2.6 decision doc apply only the `RestartOnFailure` follow-up, all six XML-template follow-ups from the autostart research, or skip all six?",
+      "options": [
+        { "letter": "A", "label": "RestartOnFailure only", "desc": "4-line XML addition + one unit test. Only structural follow-up — without it, a `run_supervised` crash has no recovery. Others (Priority, UserId, Hidden, RunOnlyIfIdle, task-name uniqueness) are cosmetic or paranoia." },
+        { "letter": "B", "label": "Apply all six", "desc": "~200 LOC of XML/test/config changes bundled in one decision doc. Closes the entire researcher follow-up list at once but mixes cosmetic with structural." },
+        { "letter": "C", "label": "Skip all six", "desc": "Validation-only decision doc; follow-ups become a P2.6.1 if a defect class surfaces. Smallest diff; leaves the recovery-failure gap open." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "Closes the only defense-in-depth gap (#1) with a 4-line addition; cosmetic items can be a separate cherry-pick later." },
+      "unblocks": "P2.6 supervisor validation decision doc can be filed and the implementation cherry-picked to Windows.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-07-p26-supervisor-validation-spec.md", "line": null }
+    },
+
+    "sabrina::worker-8am — FUSE-induced `.git/index.lock` leak from my own git operations — P0 truncation…": {
+      "question": "How should the FUSE-leaked `.git/index.lock` be cleared so the worker-8am 2026-05-07 P0 cli/config repair (and the nine other lock-blocked diffs) can commit?",
+      "options": [
+        { "letter": "A", "label": "Clear lock from Windows", "desc": "Eric runs `rm -f .git/index.lock` from a native Windows shell; the next 9am Worker picks up the unstaged repair and commits. Minimal Eric-side touch." },
+        { "letter": "B", "label": "Commit yourself on Windows", "desc": "Eric runs `git add … && git commit -m \"fix(cli,config): repair tail-corruption …\"` directly. Faster close; bypasses the automation handoff." },
+        { "letter": "C", "label": "Add forensic carve-out to worker.md", "desc": "Amend `roles/worker.md` step 7 to let Workers `rm -f` their own leaked lock when forensic markers match (0-byte + mtime <5min + sandbox-user owner). Solves the structural recurrence." }
+      ],
+      "recommendation": { "letter": "C", "rationale": "Same as OPEN-DECISIONS S3 — pattern is structural to FUSE+NTFS and will recur every 8am slot until the carve-out lands." },
+      "unblocks": "P0 cli.py + config.py truncation fix commits; per OPEN-DECISIONS S1 this also unblocks P5.4, P5.5, P5.1, P5.3, P2.7, P2.2, P4.B1, P4.C1, P4.C2 (a)-halves.",
+      "source": { "project": "sabrina", "file": "NEEDS-INPUT.md", "line": 80 }
+    },
+
+    "sabrina::worker-9am — DATA LOSS in JOURNAL.md from my Python `read() + os.replace()` append — four…": {
+      "question": "How should the JOURNAL.md data-loss incident be resolved — recover from the canonical Windows NTFS view, reconstruct from STATE/NEEDS-INPUT surrogates, or accept the loss and harden process?",
+      "options": [
+        { "letter": "A", "label": "Verify+recover from NTFS", "desc": "Eric opens JOURNAL.md from a Windows shell and pastes back the spec-writer 06:50 / planner 07:00 / graduation-sweeper 07:30 entries if they're still there. Cheapest recovery if the FUSE view was just stale." },
+        { "letter": "B", "label": "Reconstruct from surrogates", "desc": "A future planner reconstructs the missing entries from NEEDS-INPUT.md (verbatim spec-writer asks), STATE.md (planner structural decisions), and the recovered worker-8am entry. Looser fidelity; legitimate per role-doc." },
+        { "letter": "C", "label": "Accept loss and harden", "desc": "Three entries gone; ship S12 (CLAUDE.md verification rule + deprecate Python `read+os.replace`) and move on. Cheapest engineering touch; permanent legibility hit." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "If NTFS still holds the entries, recovery is a copy-paste; if not, we still need C, but A costs ~5 minutes to find out." },
+      "unblocks": "Closes the LEGIBILITY incident and clears the path for S12 (post-edit verification rule) to ship cleanly.",
+      "source": { "project": "sabrina", "file": "NEEDS-INPUT.md", "line": 85 }
+    },
+
+    "sabrina::spec-writer — P4.B1 automation safety primitives — `noop_action` registry membership": {
+      "question": "Should `NOOP_ACTION_SPEC` live test-only, as a gated `BUILTIN_TOOLS` member, or be env-var-gated at registration time?",
+      "options": [
+        { "letter": "A", "label": "Test-only", "desc": "Tests import `NOOP_ACTION_SPEC` directly; brain at runtime only sees `BUILTIN_TOOLS` without it. Leaks impossible by construction." },
+        { "letter": "B", "label": "Gated BUILTIN_TOOLS member", "desc": "Pre-register in `BUILTIN_TOOLS` behind `[tools.noop_action] enabled = false`. Mirrors `write_clipboard` precedent; a misconfigured master flag could fire the no-op (harmless but wider surface)." },
+        { "letter": "C", "label": "Env-var-gated", "desc": "Pre-register only when `SABRINA_AUTOMATION_NOOP_REGISTERED=1`. Test-fixture-mode flavor of (A); more explicit but slightly more code." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "P4.B4's Windows e2e validation already waits for P4.B2 (`send_hotkey`) — a no-op in the registry buys nothing and widens the leak surface." },
+      "unblocks": "P4.B1 (a)-half ship → `KillSwitch` + `dry_run_wrap` infrastructure lands without leaking a no-op into the brain's tool list.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-08-p4b1-automation-safety-primitives-spec.md", "line": null }
+    },
+
+    "sabrina::spec-writer — P4.C2 router — `cost_aware` hysteresis": {
+      "question": "Should the `cost_aware` route flip immediately when MTD crosses the threshold, once per UTC day, or once per UTC month?",
+      "options": [
+        { "letter": "A", "label": "Instant", "desc": "First turn after MTD crosses → swap to Ollama. `BudgetLog.sum_month()` is monotonic so this is observationally identical to (C); simplest implementation." },
+        { "letter": "B", "label": "Daily-only", "desc": "Recompute route at most once per UTC day. Smoother; a turn at 23:59 stays on Claude even if threshold crosses." },
+        { "letter": "C", "label": "Once-per-month ratchet", "desc": "Stay on Ollama until next UTC month rollover. Identical to (A) under monotonic MTD; needs explicit state to enforce." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "Monotonic BudgetLog collapses (A) and (C) to the same observable behavior; (A) is the simplest implementation and needs no clock-aware test infra." },
+      "unblocks": "P4.C2 `cost_aware` policy (a)-half can ship without `freezegun` or other clock-aware test infra.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-08-p4c2-router-routing-policy-spec.md", "line": null }
+    },
+
+    "sabrina::spec-writer — P4.C2 router — persona-prompt source if P4.C1 hasn't landed": {
+      "question": "If P4.C1 hasn't landed when P4.C2 is pulled, should the router wait for C1, fall back to today's `SABRINA_SYSTEM_PROMPT`, or lazy-import with fallback?",
+      "options": [
+        { "letter": "A", "label": "Wait for C1", "desc": "Block the P4.C2 (a)-half ship until P4.C1 lands. Serial dependency; C1 is small and specced, ~120 LOC." },
+        { "letter": "B", "label": "Fall back to today's prompt", "desc": "Use the existing Claude-flavored `SABRINA_SYSTEM_PROMPT` for both routes. Ships against current code; Ollama drift unaddressed — exactly the problem the router exists to solve." },
+        { "letter": "C", "label": "Lazy-import with fallback", "desc": "Try `from sabrina.brain.persona import SABRINA_SYSTEM_PROMPT_CLAUDE, SABRINA_SYSTEM_PROMPT_OLLAMA`; on ImportError fall back to (B). Hides C1's absence in production." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "Falling back to (B) makes every `cost_aware` swap voice-fork on Ollama — the precise misroute C1 was specced to fix." },
+      "unblocks": "P4.C2 (a)-half router ship → cost-aware routing policy lives in `brain/router.py`.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-08-p4c2-router-routing-policy-spec.md", "line": null }
+    },
+
+    "sabrina::spec-writer — P4.B2 `send_hotkey` ToolSpec — input-schema enum vs. freeform string for the…": {
+      "question": "Should the `send_hotkey` ToolSpec's `name` parameter be an enum populated from `data/shortcuts.yaml`, or a freeform string?",
+      "options": [
+        { "letter": "A", "label": "Enum from _SHORTCUTS", "desc": "Populate the JSON-Schema enum from `_SHORTCUTS` keys at module import. Forces valid names at the API boundary; schema couples to data file (cheap, automatic on YAML edit)." },
+        { "letter": "B", "label": "Freeform string", "desc": "`\"type\": \"string\"` with no enum; `UnknownShortcutError` self-correction is the primary guard. Looser; extra tool-call round-trip on miss." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "Shortcut list is bounded (17 entries today) and well below Anthropic's enum-cardinality comfort zone; tightening the API boundary is free." },
+      "unblocks": "P4.B2 (a)-half ToolSpec → `send_hotkey` is registered with a tight input schema and `data/shortcuts.yaml` becomes the single source of truth.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-09-p4b2-send-hotkey-toolspec-spec.md", "line": null }
+    },
+
+    "sabrina::spec-writer — P4.B2 `send_hotkey` ToolSpec — config-knob shape": {
+      "question": "Should the `send_hotkey` opt-in config knob be flat `[tools] send_hotkey_enabled` or nested `[tools.send_hotkey] enabled`?",
+      "options": [
+        { "letter": "A", "label": "Flat", "desc": "`[tools] send_hotkey_enabled = false` → `ToolsConfig.send_hotkey_enabled: bool`. Minimal schema growth; matches the existing flat `enabled` flag." },
+        { "letter": "B", "label": "Nested", "desc": "`[tools.send_hotkey] enabled = false` → `ToolsConfig.send_hotkey: ToolSendHotkeyConfig`. Extensible for future per-tool knobs; matches the P4.B1 `[automation.kill_switch]` nested-block precedent." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "Shortcut metadata already lives in YAML; the tool itself is unlikely to grow per-tool knobs that would justify a nested block." },
+      "unblocks": "P4.B2 (a)-half ToolSpec → `send_hotkey` registration gates on a single explicit flag; first real-action tool ships behind dry-run.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-09-p4b2-send-hotkey-toolspec-spec.md", "line": null }
+    },
+
+    "sabrina::spec-writer — P4.B3 destructive-action allow-list — default-deny when `destructive_actions`…": {
+      "question": "When `destructive_actions` is absent from `sabrina.toml` entirely (older config), should the allow-list default-deny or default-allow?",
+      "options": [
+        { "letter": "A", "label": "Default-deny on missing", "desc": "Empty list = \"deny all destructive.\" Older configs upgrading inherit the safer posture. Three explicit flips (`[tools.X] enabled`, `[automation] destructive_actions`, `[tools] enabled`) needed to enable." },
+        { "letter": "B", "label": "Default-allow on missing", "desc": "Distinguishes \"user hasn't decided\" from \"user denied.\" Silently allows destructive tools on configs that haven't been re-audited — opposite of safety-primitive posture." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "Safety primitive default-deny matches CLAUDE.md \"no silent failures\" — a missing field that leaks open on upgrade is exactly the case to avoid." },
+      "unblocks": "P4.B3 (a)-half ship → `Dispatcher.dispatch_tool_call` gates destructive tools on explicit allow-list membership.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-09-p4b3-destructive-action-allowlist-spec.md", "line": null }
+    },
+
+    "sabrina::spec-writer — P4.B3 destructive-action allow-list — match by exact name, glob (fnmatch), or…": {
+      "question": "Should `destructive_actions` entries match tool names by exact match, glob (fnmatch), or regex?",
+      "options": [
+        { "letter": "A", "label": "Exact match", "desc": "`name == entry`. Each new destructive tool requires an explicit allow-list entry. Tightest posture; re-audit is the design intent." },
+        { "letter": "B", "label": "Glob (fnmatch)", "desc": "`fnmatch.fnmatchcase`. `send_*` auto-allows a future `send_text` that didn't exist when the user wrote the toml — leaks forward in time." },
+        { "letter": "C", "label": "Regex (re.fullmatch)", "desc": "Most expressive. Cost: users learn regex; leak-forward-in-time risk compounds; complexity that no current tool needs." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "Forcing a per-tool re-audit on every new destructive verb is precisely what the safety primitive should buy." },
+      "unblocks": "P4.B3 (a)-half allow-list matcher → bounded blast radius for future destructive tools beyond `send_hotkey`.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-09-p4b3-destructive-action-allowlist-spec.md", "line": null }
+    },
+
+    "sabrina::spec-writer — P4.B3 destructive-action allow-list — explicit `destructive=False` on existing…": {
+      "question": "Should the existing `write_clipboard` ToolSpec constructor explicitly pass `destructive=False`, or omit and rely on the Pydantic default?",
+      "options": [
+        { "letter": "A", "label": "Explicit destructive=False", "desc": "Update `_builtin_tools()` to pass `destructive=False` on `write_clipboard`. Self-documenting; future readers see the field and know the author considered the question." },
+        { "letter": "B", "label": "Rely on Pydantic default", "desc": "Don't touch `write_clipboard`; new field defaults to False. Shorter; convention-over-configuration; less explicit." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "Existing `_builtin_tools()` factory names all four fields explicitly; a fifth named field is consistent with the established style." },
+      "unblocks": "P4.B3 (a)-half ship → `ToolSpec.destructive` field lands with documentation-by-example on the only existing tool.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-09-p4b3-destructive-action-allowlist-spec.md", "line": null }
+    },
+
+    "sabrina::spec-writer — P4.A1 avatar architecture research — Live2D SDK pick": {
+      "question": "Which Live2D SDK should the Avatar component adopt — `live2d-py` community wrapper, official Cubism SDK Python wrapper, or roll-our-own with OpenGL?",
+      "options": [
+        { "letter": "A", "label": "live2d-py", "desc": "Community wrapper around the Cubism Native SDK. pip-installable; smaller scope; license inheritance from upstream Cubism." },
+        { "letter": "B", "label": "Official Cubism SDK wrapper", "desc": "Higher fidelity; download-gated from Live2D Inc; license tiers irrelevant for personal-use; install path is heavier." },
+        { "letter": "C", "label": "Roll-our-own with OpenGL", "desc": "Texture-atlas + raw Moc3 parser by hand. Do-not-recommend baseline included for delta-naming only." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "The daily-driver bar is \"reacts to state, doesn't look broken\" — pip-installable beats download-gated for that bar." },
+      "unblocks": "P4.A1 research doc lands → P4.A3 rig-bind spec retargets against the chosen SDK; A2 PyQt6 skeleton stays independent.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-12-p4a1-avatar-architecture-research-spec.md", "line": null }
+    },
+
+    "sabrina::spec-writer — P4.A1 avatar architecture research — click-through policy": {
+      "question": "Should the avatar window use full Qt click-through, or per-pixel opaque-regions-accept-clicks via Windows native flags?",
+      "options": [
+        { "letter": "A", "label": "Full window click-through", "desc": "`WA_TransparentForMouseEvents` always on. Simplest; smallest Windows-native surface; no per-pixel transparency code. Kill targets live elsewhere (tray, supervisor CLI, P4.B1 hotkey)." },
+        { "letter": "B", "label": "Per-pixel opaque-clicks", "desc": "`SetWindowLong` + `WS_EX_LAYERED` + `WS_EX_TRANSPARENT` to let opaque regions accept clicks (e.g. a kill-button on the avatar itself). More fragile; needs ctypes/pywin32." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "Kill targets already exist outside the avatar window; per-pixel transparency buys nothing v1 needs and adds a Windows-only fragile surface." },
+      "unblocks": "P4.A1 research doc → P4.A2 PyQt6 skeleton can hard-code `WA_TransparentForMouseEvents` without a Windows-native branch.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-12-p4a1-avatar-architecture-research-spec.md", "line": null }
+    },
+
+    "sabrina::spec-writer — P4.A1 avatar architecture research — IPC architecture": {
+      "question": "Should the avatar subscribe to the event bus in-process via `qasync`, or run as a side-process subscriber via local IPC?",
+      "options": [
+        { "letter": "A", "label": "In-process via qasync", "desc": "Avatar runs alongside the voice loop in one process; direct `bus.subscribe`. Zero IPC overhead; Qt event loop co-exists with asyncio via qasync (well-maintained, Windows wheels)." },
+        { "letter": "B", "label": "Side-process via local IPC", "desc": "Separate Python process; IPC via local TCP / named pipe / stdin-stdout JSONL. Crash isolation; ~1ms-class latency; doubles process-management overhead." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "Supervisor primitive (acd6725) already provides process-level crash isolation cheaper than IPC; in-process keeps the bus contract single-shape." },
+      "unblocks": "P4.A1 research doc → P4.A2 PyQt6 skeleton can use the in-process bus contract directly; avoids re-spec on partition change.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-12-p4a1-avatar-architecture-research-spec.md", "line": null }
+    },
+
+    "sabrina::spec-writer — P4.A2 avatar PyQt6 skeleton — dependency tier for PyQt6 + qasync": {
+      "question": "Should PyQt6 (~50 MB wheel) + `qasync` ship as core deps, an optional extra, or a vendored lazy-import?",
+      "options": [
+        { "letter": "A", "label": "Core dep", "desc": "Every `sabrina voice` install gets the avatar binary regardless. Simplest; ~50 MB extra wheel on every box including the test sandbox." },
+        { "letter": "B", "label": "Optional extra", "desc": "Install via `uv pip install -e .[avatar]`. Pure voice-loop users skip the wheel. Matches ROADMAP \"nice-to-have\" framing." },
+        { "letter": "C", "label": "Vendored lazy-import", "desc": "Runtime check inside `avatar/__init__.py` with a helpful \"install sabrina[avatar]\" error. More code; weirder failure surface." }
+      ],
+      "recommendation": { "letter": "B", "rationale": "Avatar is explicitly nice-to-have in ROADMAP §6; gating the 50 MB wheel behind an extra keeps the voice-loop minimal install honest." },
+      "unblocks": "P4.A2 (a)-half ship → first PyQt6 file partition lands; `pyproject.toml`'s `[project.optional-dependencies]` precedent established.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-12-p4a2-avatar-pyqt-skeleton-spec.md", "line": null }
+    },
+
+    "sabrina::spec-writer — P4.A2 avatar PyQt6 skeleton — headless test platform": {
+      "question": "How should the PyQt6 12-test suite run in the Cowork Linux sandbox (no X11/Wayland) — offscreen platform, xvfb virtual display, or skip via marker?",
+      "options": [
+        { "letter": "A", "label": "QT_QPA_PLATFORM=offscreen", "desc": "PyQt6's built-in offscreen platform plugin. No X11 server needed; sandbox-friendly; no extra wheels." },
+        { "letter": "B", "label": "xvfb virtual display", "desc": "`xvfb-run pytest`. Heavier; depends on `xvfb-run` being on the host (not guaranteed in Cowork sandbox); brings X11 surface back for no real benefit." },
+        { "letter": "C", "label": "Skip via requires_display", "desc": "Add a `requires_display` marker matching the P5.5 `requires_windows` precedent. Defers 9 of 12 tests to Windows; loses sandbox coverage." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "Offscreen plugin ships with PyQt6; full test coverage in the sandbox with zero infra setup is the cheapest path." },
+      "unblocks": "P4.A2 (a)-half ship → 12-test suite runs green in the Cowork sandbox; promotion to Windows is a marker-free `pytest` invocation.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-12-p4a2-avatar-pyqt-skeleton-spec.md", "line": null }
+    },
+
+    "sabrina::spec-writer — P4.A3 avatar Live2D rig bind — per-state expression-slot binding": {
+      "question": "Where should the per-state → expression-name map (and per-state PARAM_MAP) live — hard-coded in `dispatcher.py`, `[avatar.expressions]` toml block, or JSON sidecar?",
+      "options": [
+        { "letter": "A", "label": "Hard-coded in dispatcher.py", "desc": "Single-source-of-truth constant; Eric edits code to retune. Matches `BUILTIN_TOOLS` simplicity; no Pydantic plumbing." },
+        { "letter": "B", "label": "[avatar.expressions] toml", "desc": "Two Pydantic models + toml blocks (`[avatar.expressions]` + `[avatar.params]`). Eric retunes without code changes; ~30 LOC of plumbing." },
+        { "letter": "C", "label": "JSON sidecar file", "desc": "`sabrina-2/configs/avatar_expressions.json`. Worst of both worlds — adds a file format without buying first-class config validation." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "Retunability without a code edit isn't a v1 need yet; `BUILTIN_TOOLS`-style constant matches the existing Eric-edits-code precedent." },
+      "unblocks": "P4.A3 (a)-half ship → `StateDispatcher` triggers Live2D expression slots from a hard-coded per-state map.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-13-p4a3-avatar-live2d-rig-bind-spec.md", "line": null }
+    },
+
+    "sabrina::spec-writer — P4.A3 avatar Live2D rig bind — placeholder Hiyori_pro rig commit policy": {
+      "question": "Should the placeholder Hiyori_pro Live2D rig (~3 MB binary assets) be runtime-only (Eric manually drops in), committed via git-LFS, or runtime-downloaded on first run?",
+      "options": [
+        { "letter": "A", "label": "Runtime-only manual drop", "desc": "`[avatar] model_path` is informational; Eric downloads from `live2d-py` sample-asset URL and drops files into `sabrina-2/models/live2d/`. Matches `hey_jarvis` precedent; `.gitignore` already excludes." },
+        { "letter": "B", "label": "Direct git-LFS commit", "desc": "Set up git-LFS, commit ~3 MB rig binaries. Benefit: clone+run without Eric-side step. Cost: LFS setup; P5.3 daily-driver script grows an `lfs install` probe." },
+        { "letter": "C", "label": "Runtime download", "desc": "First `sabrina avatar run` fetches from `live2d-py` sample-asset URL. Cost: network dependency at first run; URL bit-rot risk. Spec rules out." }
+      ],
+      "recommendation": { "letter": "A", "rationale": "Wake-word `hey_jarvis` precedent already establishes the manual-drop pattern; `.gitignore` exclusion needs no edit." },
+      "unblocks": "P4.A3 (a)-half ship → rig binding works in dev environments with a documented manual-asset step, no LFS infra churn.",
+      "source": { "project": "sabrina", "file": "rebuild/drafts/research/2026-05-13-p4a3-avatar-live2d-rig-bind-spec.md", "line": null }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+# Wake-word training dependencies. Not in the runtime wheel — `tools/`
+# is excluded from the hatch build target. Install in WSL2 / Linux only:
+#   uv pip install -r sabrina-2/tools/wake-training/requirements-training.txt
+#
+# See research/2026-05-05-wake-word-training-pipeline.md for the version
+# rationale. `openwakeword[training]` pulls torch + the training extras.
+openwakeword[training]>=0.6
+piper-sample-generator
+audiomentations>=0.36
+soundfile>=0.12
